@@ -1,0 +1,164 @@
+package icu.wuhui.voxlink.room;
+
+import net.minecraft.network.chat.Component;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class RoomInfo {
+    private final String code;
+    private volatile String name;
+    private volatile boolean hasPassword;
+    private volatile int maxPlayers;
+    private final String token;
+    private final boolean isHost;
+    private final int hostPort;
+    private volatile String natType;
+    private volatile String hostIp;
+    private volatile String hostIpv6;
+    private volatile String hostMappedIp;
+    private volatile int hostMappedPort;
+    private volatile boolean hostSymmetric;
+    private volatile boolean hostEasySym;
+    private volatile int hostMappedPortDelta = 0;
+    private final AtomicInteger currentPlayers;
+    private volatile String clientId;
+    private volatile int bedrockPort;
+    private volatile int serverProtocolVersion;
+    private volatile String category;
+    private volatile String authType;
+    private volatile int peerPort;
+    private volatile Component connectionMode = Component.empty();
+    private volatile boolean connectionFailed = false;
+    private volatile int localBridgePort = 0;
+    private volatile int hostConnectPort = 0;
+    private volatile PortStatus ipv4Status = PortStatus.UNKNOWN;
+    private volatile PortStatus ipv6Status = PortStatus.UNKNOWN;
+    private volatile boolean nameApproved = true;
+    private volatile boolean visible = true;
+    private volatile boolean sameCgnat = false;
+    private volatile boolean guestOp = false;
+    private volatile String gameType = "survival";
+    private volatile boolean allowCheats = false;
+    private volatile String hostLocalIp = null;
+    private volatile String joinerLocalIp = null;
+    private volatile String myMappedIp = null;
+    private volatile int myMappedPort = 0;
+
+    public enum PortStatus {
+        UNKNOWN(Component.translatable("voxlink.port_status.unknown")),
+        REACHABLE(Component.translatable("voxlink.port_status.reachable")),
+        UNREACHABLE(Component.translatable("voxlink.port_status.unreachable")),
+        NO_ADDRESS(Component.translatable("voxlink.port_status.no_address"));
+
+        public final Component label;
+        PortStatus(Component label) { this.label = label; }
+    }
+
+    public RoomInfo(String code, String name, boolean hasPassword, int maxPlayers,
+                    String token, boolean isHost, int hostPort, String natType) {
+        this.code = code;
+        this.name = name;
+        this.hasPassword = hasPassword;
+        this.maxPlayers = maxPlayers;
+        this.token = token;
+        this.isHost = isHost;
+        this.hostPort = hostPort;
+        this.natType = natType;
+        this.currentPlayers = new AtomicInteger(isHost ? 1 : 0);
+        this.bedrockPort = -1;
+        this.serverProtocolVersion = 0;
+        this.category = "other";
+    }
+
+    public String getCode() { return code; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public boolean hasPassword() { return hasPassword; }
+    public void setPassword(String password) { this.hasPassword = password != null && !password.isEmpty(); }
+    public int getMaxPlayers() { return maxPlayers; }
+    public void setMaxPlayers(int maxPlayers) { this.maxPlayers = maxPlayers; }
+    public String getToken() { return token; }
+    public boolean isHost() { return isHost; }
+    public int getHostPort() { return hostPort; }
+    public String getNatType() { return natType; }
+    public void setNatType(String natType) { this.natType = natType; }
+    public String getHostIp() { return hostIp; }
+    public void setHostIp(String hostIp) { this.hostIp = hostIp; }
+    public String getHostIpv6() { return hostIpv6; }
+    public void setHostIpv6(String hostIpv6) { this.hostIpv6 = hostIpv6; }
+    public String getHostMappedIp() { synchronized (this) { return hostMappedIp; } }
+    public int getHostMappedPort() { synchronized (this) { return hostMappedPort; } }
+    public void setHostMappedAddress(String hostMappedIp, int hostMappedPort) {
+        synchronized (this) {
+            this.hostMappedIp = hostMappedIp;
+            this.hostMappedPort = hostMappedPort;
+        }
+    }
+    public boolean isHostSymmetric() { return hostSymmetric; }
+    public void setHostSymmetric(boolean hostSymmetric) { this.hostSymmetric = hostSymmetric; }
+    public boolean isHostEasySym() { return hostEasySym; }
+    public void setHostEasySym(boolean hostEasySym) { this.hostEasySym = hostEasySym; }
+    public int getHostMappedPortDelta() { return hostMappedPortDelta; }
+    public void setHostMappedPortDelta(int delta) { this.hostMappedPortDelta = delta; }
+    public int getCurrentPlayers() { return currentPlayers.get(); }
+    public void setCurrentPlayers(int currentPlayers) { this.currentPlayers.set(currentPlayers); }
+    public void incrementCurrentPlayers() { this.currentPlayers.incrementAndGet(); }
+    public void decrementCurrentPlayers() { this.currentPlayers.getAndUpdate(v -> Math.max(0, v - 1)); }
+    public String getClientId() { return clientId; }
+    public void setClientId(String clientId) { this.clientId = clientId; }
+    public int getBedrockPort() { return bedrockPort; }
+    public void setBedrockPort(int bedrockPort) { this.bedrockPort = bedrockPort; }
+    public int getServerProtocolVersion() { return serverProtocolVersion; }
+    public void setServerProtocolVersion(int serverProtocolVersion) { this.serverProtocolVersion = serverProtocolVersion; }
+    public String getCategory() { return category; }
+    public void setCategory(String category) { this.category = category; }
+    public String getAuthType() { return authType; }
+    public void setAuthType(String authType) { this.authType = authType; }
+    public int getPeerPort() { return peerPort; }
+    public void setPeerPort(int peerPort) { this.peerPort = peerPort; }
+    public Component getConnectionMode() { return connectionMode; }
+    public void setConnectionMode(Component connectionMode) {
+        this.connectionMode = connectionMode;
+    }
+    public void setConnectionMode(Component connectionMode, boolean failed) {
+        this.connectionMode = connectionMode;
+        this.connectionFailed = failed;
+    }
+    public int getLocalBridgePort() { return localBridgePort; }
+    public void setLocalBridgePort(int localBridgePort) { this.localBridgePort = localBridgePort; }
+    public int getHostConnectPort() { return hostConnectPort; }
+    public void setHostConnectPort(int hostConnectPort) { this.hostConnectPort = hostConnectPort; }
+    public PortStatus getIpv4Status() { return ipv4Status; }
+    public void setIpv4Status(PortStatus ipv4Status) { this.ipv4Status = ipv4Status; }
+    public PortStatus getIpv6Status() { return ipv6Status; }
+    public void setIpv6Status(PortStatus ipv6Status) { this.ipv6Status = ipv6Status; }
+
+    public boolean isConnectionFailed() {
+        return connectionFailed;
+    }
+
+    public void setConnectionFailed(boolean failed) {
+        this.connectionFailed = failed;
+    }
+
+    public boolean isNameApproved() { return nameApproved; }
+    public void setNameApproved(boolean nameApproved) { this.nameApproved = nameApproved; }
+    public boolean isVisible() { return visible; }
+    public void setVisible(boolean visible) { this.visible = visible; }
+    public boolean isSameCgnat() { return sameCgnat; }
+    public void setSameCgnat(boolean sameCgnat) { this.sameCgnat = sameCgnat; }
+    public boolean isGuestOp() { return guestOp; }
+    public void setGuestOp(boolean guestOp) { this.guestOp = guestOp; }
+    public String getGameType() { return gameType; }
+    public void setGameType(String gameType) { this.gameType = gameType; }
+    public boolean isAllowCheats() { return allowCheats; }
+    public void setAllowCheats(boolean allowCheats) { this.allowCheats = allowCheats; }
+    public String getHostLocalIp() { return hostLocalIp; }
+    public void setHostLocalIp(String hostLocalIp) { this.hostLocalIp = hostLocalIp; }
+    public String getJoinerLocalIp() { return joinerLocalIp; }
+    public void setJoinerLocalIp(String joinerLocalIp) { this.joinerLocalIp = joinerLocalIp; }
+    public String getMyMappedIp() { return myMappedIp; }
+    public void setMyMappedIp(String myMappedIp) { this.myMappedIp = myMappedIp; }
+    public int getMyMappedPort() { return myMappedPort; }
+    public void setMyMappedPort(int myMappedPort) { this.myMappedPort = myMappedPort; }
+}
