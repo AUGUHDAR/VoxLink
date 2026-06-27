@@ -882,4 +882,62 @@ public class StunProbe {
         }
         return new ParsedStunUrl(stripped, STUN_DEFAULT_PORT);
     }
+
+    /**
+     * P-PRE连续采样: 固定同一个STUN服务器, 连发N次请求, 记录映射端口序列。
+     * 对称NAT每次向同一目的地发包分配新端口, 通过序列计算增量用于端口预测。
+     * 
+     * @param socket 已绑定的UDP socket(保持存活, 不可更换)
+     * @param stunHost STUN服务器域名
+     * @param stunPort STUN端口
+     * @param count 采样次数(建议10, 最少5)
+     * @param intervalMs 间隔毫秒(建议100)
+     * @return 按时间顺序的映射端口列表, 每次请求独立transaction-id
+     */
+    public static List<Integer> samplePortsSequential(
+            DatagramSocket socket, String stunHost, int stunPort, 
+            int count, int intervalMs) {
+        List<Integer> ports = new ArrayList<>();
+        int originalTimeout = -1;
+        try {
+            originalTimeout = socket.getSoTimeout();
+            socket.setSoTimeout(DISCOVER_TIMEOUT_MS);
+        } catch (Exception ignored) {}
+
+        for (int i = 0; i < count; i++) {
+            try {
+                byte[] req = createBindingRequest();
+                InetAddress addr = InetAddress.getByName(stunHost);
+                socket.send(new DatagramPacket(req, req.length, addr, stunPort));
+
+                byte[] buf = new byte[576];
+                DatagramPacket recv = new DatagramPacket(buf, buf.length);
+                long deadline = System.currentTimeMillis() + DISCOVER_TIMEOUT_MS;
+                while (System.currentTimeMillis() < deadline) {
+                    try {
+                        socket.receive(recv);
+                    } catch (SocketTimeoutException e) {
+                        break;
+                    }
+                    byte[] respData = new byte[recv.getLength()];
+                    System.arraycopy(recv.getData(), 0, respData, 0, recv.getLength());
+                    if (respData.length < 20) continue;
+                    MappedAddress ma = parseBindingResponse(respData, req);
+                    if (ma != null) {
+                        ports.add(ma.port);
+                        break;
+                    }
+                }
+                if (i < count - 1) {
+                    try { Thread.sleep(intervalMs); } 
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                }
+            } catch (Exception e) {
+                VoxLinkMod.LOGGER.debug("[StunProbe] samplePortsSequential #{}/{} 失败: {}", i + 1, count, e.getMessage());
+            }
+        }
+
+        try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
+        return ports;
+    }
 }
