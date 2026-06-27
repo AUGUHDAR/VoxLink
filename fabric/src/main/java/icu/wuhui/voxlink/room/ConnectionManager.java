@@ -432,11 +432,10 @@ public class ConnectionManager {
             java.util.List<StunProbe.PublicMappedAddress> birthdayAddrs = null;
             if (fHostPuncher != null) {
                 try {
-                    java.util.List<String> stun1 = java.util.List.of("stun:stun.miwifi.com");
-                    java.util.List<String> stun2 = java.util.List.of("stun:stun.hitv.com");
-                    VoxLinkMod.LOGGER.info("[RoomManager] 主机NAT: {} — 在打洞socket上STUN(2服务器顺序查)", fNatType != null ? fNatType : "null");
-                    m1 = fHostPuncher.discoverMappedAddress(stun1);
-                    m2 = fHostPuncher.discoverMappedAddress(stun2);
+                    java.util.List<String> allStun = StunDetector.getAllStunUrls();
+                    VoxLinkMod.LOGGER.info("[RoomManager] 主机NAT: {} — 在打洞socket上STUN({}服务器)", fNatType != null ? fNatType : "null", allStun.size());
+                    m1 = fHostPuncher.discoverMappedAddress(java.util.List.of(allStun.get(0)));
+                    m2 = fHostPuncher.discoverMappedAddress(java.util.List.of(allStun.get(1)));
                 } catch (Exception e) {
                     VoxLinkMod.LOGGER.warn("[RoomManager] 打洞socket STUN失败: {}", e.getMessage());
                 }
@@ -454,7 +453,7 @@ public class ConnectionManager {
                             UdpHolePuncher bp = new UdpHolePuncher();
                             try { bp.createSocket(); }
                             catch (Exception e) { return null; }
-                            StunProbe.PublicMappedAddress addr = bp.discoverMappedAddress(java.util.List.of("stun:stun.miwifi.com"));
+                            StunProbe.PublicMappedAddress addr = bp.discoverMappedAddress(StunDetector.getAllStunUrls());
                             if (addr != null) {
                                 String key = "host_birthday_" + idx;
                                 activeHolePunchers.put(key, bp);
@@ -1050,8 +1049,8 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                 final UdpHolePuncher fp = p;
                 final int idx = i;
                 stunFutures.add(CompletableFuture.supplyAsync(() -> {
-                    StunProbe.PublicMappedAddress a1 = fp.discoverMappedAddress(java.util.List.of("stun:stun.miwifi.com"));
-                    StunProbe.PublicMappedAddress a2 = fp.discoverMappedAddress(java.util.List.of("stun:stun.hitv.com"));
+                    StunProbe.PublicMappedAddress a1 = fp.discoverMappedAddress(java.util.List.of(StunDetector.getAllStunUrls().get(0)));
+                    StunProbe.PublicMappedAddress a2 = fp.discoverMappedAddress(java.util.List.of(StunDetector.getAllStunUrls().get(1)));
                     VoxLinkMod.LOGGER.info("[HostPunchInfo] Socket#{} STUN: {} vs {} (localPort={})", idx,
                             a1 != null ? a1.port() : -1, a2 != null ? a2.port() : -1, fp.getSocket().getLocalPort());
                     return new StunProbe.PublicMappedAddress[]{a1, a2};
@@ -1306,10 +1305,10 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
             VoxLinkMod.LOGGER.info("[ReversePunch] dual STUN on reverse socket...");
             StunProbe.PublicMappedAddress m1 = null, m2 = null;
             try {
-                m1 = fPuncher.discoverMappedAddress(java.util.List.of("stun:stun.miwifi.com"));
+                m1 = fPuncher.discoverMappedAddress(java.util.List.of(StunDetector.getAllStunUrls().get(0)));
                 VoxLinkMod.LOGGER.info("[ReversePunch] Host reverse STUN #1: ip={}, port={} (localPort={})",
                         m1 != null ? m1.ip() : "null", m1 != null ? m1.port() : -1, fPuncher.getSocket().getLocalPort());
-                m2 = fPuncher.discoverMappedAddress(java.util.List.of("stun:stun.hitv.com"));
+                m2 = fPuncher.discoverMappedAddress(java.util.List.of(StunDetector.getAllStunUrls().get(1)));
                 VoxLinkMod.LOGGER.info("[ReversePunch] Host reverse STUN #2: ip={}, port={} (localPort={})",
                         m2 != null ? m2.ip() : "null", m2 != null ? m2.port() : -1, fPuncher.getSocket().getLocalPort());
             } catch (Exception e) {
@@ -1948,8 +1947,9 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         //并行双STUN: 省一半时间
         // 修复2: 4个STUN并发, 取前2个成功响应比对, 提高对称NAT检测冗余
         // 旧逻辑仅2个STUN, 任一不可达即降级单测无法判定对称; 新逻辑4个并发容错更强
+        java.util.List<String> quadStun = StunDetector.getAllStunUrls();
         StunProbe.PublicMappedAddress[] quadResult = StunProbe.discoverMappedAddressQuad(
-                puncher.getSocket(), "stun:stun.miwifi.com", "stun:stun.hitv.com", "stun:stun.qq.com", "stun:stun.syncthing.net");
+                puncher.getSocket(), quadStun.get(0), quadStun.get(1), quadStun.get(2), quadStun.get(3));
         StunProbe.PublicMappedAddress myMapped1 = quadResult[0] != null ? quadResult[0] : (quadResult[2] != null ? quadResult[2] : quadResult[3]);
         StunProbe.PublicMappedAddress myMapped2 = quadResult[1] != null ? quadResult[1] : (quadResult[3] != null ? quadResult[3] : quadResult[2]);
         if (myMapped1 != null && myMapped2 != null) {
@@ -1964,8 +1964,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         }
 
         if (myMappedAddr == null) {
-            myMappedAddr = puncher.discoverMappedAddress(
-                    java.util.List.of("stun:stun.qq.com", "stun:stun.syncthing.net", "stun:stun.sipnet.com", "stun:stun.ekiga.net"));
+            myMappedAddr = puncher.discoverMappedAddress(StunDetector.getAllStunUrls());
         }
 
         if (myMappedAddr == null) {
@@ -1974,7 +1973,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
             try {
                 tmp = new DatagramSocket();
                 tmp.setSoTimeout(1000);
-                myMappedAddr = StunProbe.discoverMappedAddress(tmp, java.util.List.of("stun:stun.miwifi.com", "stun:stun.hitv.com"));
+                myMappedAddr = StunProbe.discoverMappedAddress(tmp, StunDetector.getAllStunUrls());
             } catch (Exception e) {
                 VoxLinkMod.LOGGER.warn("[Connection] 临时socket STUN也挂了: {}", e.getMessage());
             } finally {
@@ -2396,7 +2395,7 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
         // 修复6: 使用socket数组复用, 避免每次新建84 socket + 84次STUN
         // 30秒窗口内复用cached数组, STUN只对前4个socket做(取基线), 其余复用结果
         CompletableFuture.supplyAsync(() ->
-                getOrCreateUdpArray(socketCount, isEasySym, "stun:stun.miwifi.com")
+                getOrCreateUdpArray(socketCount, isEasySym, StunDetector.getAllStunUrls().get(0))
         ).thenAccept(udpArray -> {
             if (roomManager.currentRoom.get() != state) return;
 
@@ -2492,8 +2491,9 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
         //并行双STUN
         // 修复2: 4个STUN并发, 取前2个成功响应比对, 提高对称NAT检测冗余
         // 旧逻辑仅2个STUN, 任一不可达即降级单测无法判定对称; 新逻辑4个并发容错更强
+        java.util.List<String> quadStun = StunDetector.getAllStunUrls();
         StunProbe.PublicMappedAddress[] quadResult = StunProbe.discoverMappedAddressQuad(
-                puncher.getSocket(), "stun:stun.miwifi.com", "stun:stun.hitv.com", "stun:stun.qq.com", "stun:stun.syncthing.net");
+                puncher.getSocket(), quadStun.get(0), quadStun.get(1), quadStun.get(2), quadStun.get(3));
         StunProbe.PublicMappedAddress myMapped1 = quadResult[0] != null ? quadResult[0] : (quadResult[2] != null ? quadResult[2] : quadResult[3]);
         StunProbe.PublicMappedAddress myMapped2 = quadResult[1] != null ? quadResult[1] : (quadResult[3] != null ? quadResult[3] : quadResult[2]);
         boolean joinerSymmetric = false;
@@ -2511,7 +2511,7 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
         }
         if (myMappedAddr == null) {
             myMappedAddr = puncher.discoverMappedAddress(
-                    java.util.List.of("stun:stun.qq.com", "stun:stun.syncthing.net"));
+                    StunDetector.getAllStunUrls());
         }
 
         if (myMappedAddr == null) {
