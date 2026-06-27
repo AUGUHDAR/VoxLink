@@ -884,56 +884,89 @@ public class StunProbe {
     }
 
     /**
-     * P-PRE连续采样: 固定同一个STUN服务器, 连发N次请求, 记录映射端口序列。
-     * 对称NAT每次向同一目的地发包分配新端口, 通过序列计算增量用于端口预测。
+     * P-PRE连续采样: 从STUN服务器列表自动选第一个响应的, 固定该服务器连发N次,
+     * 记录映射端口序列。对称NAT每次向同一目的地发包分配新端口, 通过序列计算增量用于端口预测。
+     * 首请求1s内无响应自动切换下一个服务器; 一旦选定, 后续所有采样都用同一个服务器。
      * 
      * @param socket 已绑定的UDP socket(保持存活, 不可更换)
-     * @param stunHost STUN服务器域名
-     * @param stunPort STUN端口
+     * @param stunUrls STUN服务器URL列表 (如 StunDetector.getAllStunUrls())
      * @param count 采样次数(建议10, 最少5)
      * @param intervalMs 间隔毫秒(建议100)
-     * @return 按时间顺序的映射端口列表, 每次请求独立transaction-id
+     * @return 按时间顺序的映射端口列表, 采样不足返回空列表
      */
     public static List<Integer> samplePortsSequential(
-            DatagramSocket socket, String stunHost, int stunPort, 
+            DatagramSocket socket, java.util.List<String> stunUrls,
             int count, int intervalMs) {
+        if (stunUrls == null || stunUrls.isEmpty()) return java.util.Collections.emptyList();
         List<Integer> ports = new ArrayList<>();
         int originalTimeout = -1;
         try {
             originalTimeout = socket.getSoTimeout();
-            socket.setSoTimeout(DISCOVER_TIMEOUT_MS);
+            socket.setSoTimeout(1000); // 首请求快速超时, 便于切换服务器
         } catch (Exception ignored) {}
 
-        for (int i = 0; i < count; i++) {
+        // 自动选择第一个响应的STUN服务器
+        String selectedHost = null;
+        int selectedPort = STUN_DEFAULT_PORT;
+        for (String url : stunUrls) {
+            ParsedStunUrl parsed = parseStunUrl(url);
+            if (parsed == null) continue;
             try {
                 byte[] req = createBindingRequest();
-                InetAddress addr = InetAddress.getByName(stunHost);
-                socket.send(new DatagramPacket(req, req.length, addr, stunPort));
-
+                InetAddress addr = InetAddress.getByName(parsed.host);
+                socket.send(new DatagramPacket(req, req.length, addr, parsed.port));
                 byte[] buf = new byte[576];
                 DatagramPacket recv = new DatagramPacket(buf, buf.length);
-                long deadline = System.currentTimeMillis() + DISCOVER_TIMEOUT_MS;
+                long deadline = System.currentTimeMillis() + 1000;
                 while (System.currentTimeMillis() < deadline) {
-                    try {
-                        socket.receive(recv);
-                    } catch (SocketTimeoutException e) {
-                        break;
-                    }
+                    try { socket.receive(recv); } catch (SocketTimeoutException e) { break; }
                     byte[] respData = new byte[recv.getLength()];
                     System.arraycopy(recv.getData(), 0, respData, 0, recv.getLength());
                     if (respData.length < 20) continue;
                     MappedAddress ma = parseBindingResponse(respData, req);
                     if (ma != null) {
                         ports.add(ma.port);
+                        selectedHost = parsed.host;
+                        selectedPort = parsed.port;
+                        VoxLinkMod.LOGGER.info("[StunProbe] P-PRE选定STUN: {}:{}, 首端口={}", selectedHost, selectedPort, ma.port);
                         break;
                     }
                 }
+                if (selectedHost != null) break;
+            } catch (Exception e) {
+                VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE {}不可用, 切换: {}", url, e.getMessage());
+            }
+        }
+        if (selectedHost == null) {
+            VoxLinkMod.LOGGER.warn("[StunProbe] P-PRE所有STUN服务器无响应, 采样失败");
+            try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
+            return ports; // 可能只有首请求的1个端口
+        }
+
+        // 恢复探测超时, 用选定的服务器完成剩余采样
+        try { socket.setSoTimeout(DISCOVER_TIMEOUT_MS); } catch (Exception ignored) {}
+        for (int i = 1; i < count; i++) {
+            try {
+                byte[] req = createBindingRequest();
+                InetAddress addr = InetAddress.getByName(selectedHost);
+                socket.send(new DatagramPacket(req, req.length, addr, selectedPort));
+                byte[] buf = new byte[576];
+                DatagramPacket recv = new DatagramPacket(buf, buf.length);
+                long deadline = System.currentTimeMillis() + DISCOVER_TIMEOUT_MS;
+                while (System.currentTimeMillis() < deadline) {
+                    try { socket.receive(recv); } catch (SocketTimeoutException e) { break; }
+                    byte[] respData = new byte[recv.getLength()];
+                    System.arraycopy(recv.getData(), 0, respData, 0, recv.getLength());
+                    if (respData.length < 20) continue;
+                    MappedAddress ma = parseBindingResponse(respData, req);
+                    if (ma != null) { ports.add(ma.port); break; }
+                }
                 if (i < count - 1) {
-                    try { Thread.sleep(intervalMs); } 
+                    try { Thread.sleep(intervalMs); }
                     catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                 }
             } catch (Exception e) {
-                VoxLinkMod.LOGGER.debug("[StunProbe] samplePortsSequential #{}/{} 失败: {}", i + 1, count, e.getMessage());
+                VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE采样#{}/{} 失败: {}", i + 1, count, e.getMessage());
             }
         }
 

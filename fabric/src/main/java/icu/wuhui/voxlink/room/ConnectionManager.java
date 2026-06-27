@@ -524,7 +524,7 @@ public class ConnectionManager {
                     // 同socket同服务器连续采样10次(100ms间隔), 获取端口序列用于精确预测
                     if (fHostPuncher != null && fHostPuncher.getSocket() != null) {
                         java.util.List<Integer> samples = StunProbe.samplePortsSequential(
-                                fHostPuncher.getSocket(), "stun.qq.com", 3478, 10, 100);
+                                fHostPuncher.getSocket(), StunDetector.getAllStunUrls(), 10, 100);
                         if (samples.size() >= 5) {
                             int reliableDelta = calculatePortDelta(samples);
                             VoxLinkMod.LOGGER.info("[RoomManager] P-PRE采样: {}次→序列={}, 可靠delta={} (原2采样delta={})",
