@@ -20,6 +20,7 @@ public class RoomInfo {
     private volatile boolean hostSymmetric;
     private volatile boolean hostEasySym;
     private volatile int hostMappedPortDelta = 0;
+    private volatile java.util.List<Integer> hostBirthdayPorts = null;
     private final AtomicInteger currentPlayers;
     private volatile String clientId;
     private volatile int bedrockPort;
@@ -100,6 +101,8 @@ public class RoomInfo {
     public void setHostEasySym(boolean hostEasySym) { this.hostEasySym = hostEasySym; }
     public int getHostMappedPortDelta() { return hostMappedPortDelta; }
     public void setHostMappedPortDelta(int delta) { this.hostMappedPortDelta = delta; }
+    public java.util.List<Integer> getHostBirthdayPorts() { return hostBirthdayPorts; }
+    public void setHostBirthdayPorts(java.util.List<Integer> ports) { this.hostBirthdayPorts = ports; }
     public int getCurrentPlayers() { return currentPlayers.get(); }
     public void setCurrentPlayers(int currentPlayers) { this.currentPlayers.set(currentPlayers); }
     public void incrementCurrentPlayers() { this.currentPlayers.incrementAndGet(); }

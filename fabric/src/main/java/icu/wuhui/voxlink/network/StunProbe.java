@@ -327,6 +327,73 @@ public class StunProbe {
         return results;
     }
 
+    // 修复2: 4个STUN并发, 取前2个成功响应比对, 提高对称NAT检测冗余
+    // 旧逻辑仅2个STUN, 任一不可达即降级单测无法判定对称; 新逻辑4个并发容错更强
+    public static PublicMappedAddress[] discoverMappedAddressQuad(
+            DatagramSocket socket, String stunUrl1, String stunUrl2, String stunUrl3, String stunUrl4) {
+        int originalTimeout = -1;
+        try {
+            originalTimeout = socket.getSoTimeout();
+            socket.setSoTimeout(DUAL_STUN_TIMEOUT_MS);
+        } catch (Exception ignored) {}
+        String[] urls = {stunUrl1, stunUrl2, stunUrl3, stunUrl4};
+        PublicMappedAddress[] results = new PublicMappedAddress[4];
+        VoxLinkMod.LOGGER.info("[StunProbe] 并行4STUN: {}+{}+{}+{}, socket port={}", stunUrl1, stunUrl2, stunUrl3, stunUrl4, socket.getLocalPort());
+        try {
+            ParsedStunUrl[] parsed = new ParsedStunUrl[4];
+            byte[][] reqs = new byte[4][];
+            InetAddress[] addrs = new InetAddress[4];
+            int validCount = 0;
+            for (int i = 0; i < 4; i++) {
+                parsed[i] = parseStunUrl(urls[i]);
+                if (parsed[i] == null) continue;
+                reqs[i] = createBindingRequest();
+                addrs[i] = InetAddress.getByName(parsed[i].host);
+                socket.send(new DatagramPacket(reqs[i], reqs[i].length, addrs[i], parsed[i].port));
+                validCount++;
+            }
+            if (validCount == 0) return results;
+
+            byte[] buf = new byte[576];
+            DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+            long deadline = System.currentTimeMillis() + DUAL_STUN_TIMEOUT_MS;
+            int got = 0;
+            while (got < validCount && System.currentTimeMillis() < deadline) {
+                try {
+                    socket.receive(pkt);
+                } catch (SocketTimeoutException e) {
+                    break;
+                }
+                byte[] data = new byte[pkt.getLength()];
+                System.arraycopy(pkt.getData(), 0, data, 0, pkt.getLength());
+                if (data.length < 20) continue;
+                for (int i = 0; i < 4; i++) {
+                    if (results[i] != null || reqs[i] == null) continue;
+                    if (matchTransaction(data, reqs[i])) {
+                        MappedAddress m = parseBindingResponse(data, reqs[i]);
+                        if (m != null) {
+                            results[i] = new PublicMappedAddress(m.ip, m.port);
+                            got++;
+                        }
+                        break;
+                    }
+                }
+            }
+            // 没拿到的降级单查(仅前2个, 减少时间)
+            for (int i = 0; i < 2; i++) {
+                if (results[i] == null && parsed[i] != null) {
+                    results[i] = discoverMappedAddress(socket, java.util.List.of(urls[i]));
+                }
+            }
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[StunProbe] 并行4STUN异常: {}", e.getMessage());
+        } finally {
+            try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
+        }
+        VoxLinkMod.LOGGER.info("[StunProbe] 4STUN结果: [0]={}, [1]={}, [2]={}, [3]={}", results[0], results[1], results[2], results[3]);
+        return results;
+    }
+
     private static boolean matchTransaction(byte[] data, byte[] request) {
         if (data.length < 20) return false;
         for (int i = 8; i < 20; i++) {
@@ -339,7 +406,7 @@ public class StunProbe {
     }
 
     private static final int PROBE_TIMEOUT_MS = 8000;  // 国内网络需8s
-    private static final int DISCOVER_TIMEOUT_MS = 1000;
+    private static final int DISCOVER_TIMEOUT_MS = 2000;  // 修复10: 1000→2000, 国内网络1s偏短易返回unknown
     private static final int DUAL_STUN_TIMEOUT_MS = 1500;
     private static final int STUN_DEFAULT_PORT = 3478;
     private static final long CACHE_TTL_MS = 300000;
@@ -581,21 +648,29 @@ public class StunProbe {
 
             if (!mapped1.ip.equals(mapped2.ip) || mapped1.port != mapped2.port) {
                 VoxLinkMod.LOGGER.info("[StunProbe] 对称NAT，映射地址不同 ({}:{} vs {}:{})", mapped1.ip, mapped1.port, mapped2.ip, mapped2.port);
-                NatType easyType = detectEasySymmetric(mapped1.port, first, second);
+                // 修复1: 用同一socket发第3个STUN, 避免新建socket致basePort基准失真
+                NatType easyType = detectEasySymmetric(socket, mapped1.port, reachable);
                 if (easyType != null) {
                     return easyType;
                 }
-                // 第三次STUN采样失败时的fallback: 直接用前两次端口差判定EasySym
-                // 同IP、端口差小且规律(±100内)即可判EasySym，避免单次采样超时误判HardSym
+                // 回归修复: 两个STUN服务器返回不同端口=对称NAT(RFC 5780), 无论diff多小
+                // diff阈值只区分EasySym(可预测)和HardSym(不可预测), 不区分Cone和Symmetric
+                //   diff < 100 且方向一致: EasySym(Inc/Dec)
+                //   diff >= 100: HardSym
+                //   公网IP不同: HardSym
                 int twoDiff = mapped2.port - mapped1.port;
-                if (twoDiff > 0 && twoDiff < 100) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback(三次采样失败): {}→{} diff={}, 判定递增", mapped1.port, mapped2.port, twoDiff);
-                    return NatType.SYMMETRIC_EASY_INC;
-                } else if (twoDiff < 0 && twoDiff > -100) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback(三次采样失败): {}→{} diff={}, 判定递减", mapped1.port, mapped2.port, twoDiff);
-                    return NatType.SYMMETRIC_EASY_DEC;
+                int absDiff = Math.abs(twoDiff);
+                if (!mapped1.ip.equals(mapped2.ip)) {
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback: 公网IP不同({} vs {}), 判定HardSym", mapped1.ip, mapped2.ip);
+                    return NatType.SYMMETRIC;
                 }
-                return NatType.SYMMETRIC;
+                if (absDiff > 0 && absDiff < 100) {
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback(三次采样失败): {}→{} diff={}, 判定递增/递减", mapped1.port, mapped2.port, twoDiff);
+                    return twoDiff > 0 ? NatType.SYMMETRIC_EASY_INC : NatType.SYMMETRIC_EASY_DEC;
+                } else {
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback: {}→{} diff={}>=100, 判定HardSym", mapped1.port, mapped2.port, absDiff);
+                    return NatType.SYMMETRIC;
+                }
             }
 
             VoxLinkMod.LOGGER.info("[StunProbe] 非对称NAT，映射地址相同 ({}:{})", mapped1.ip, mapped1.port);
@@ -608,39 +683,54 @@ public class StunProbe {
         }
     }
 
-    private static NatType detectEasySymmetric(int basePort, StunServerResult first, StunServerResult second) {
-        //单次采样: 多采样会因每次新建socket消耗NAT端口分配, diff必然递增, 中位数失真
-        //用短超时(1500ms)避免拖太久
-        DatagramSocket extraSocket = null;
+    private static NatType detectEasySymmetric(DatagramSocket socket, int basePort, List<StunServerResult> reachable) {
+        // 修复1: 用同一socket发第3个STUN服务器, 避免新建socket致basePort基准失真
+        // 旧逻辑新建extraSocket采样, 新socket本身触发NAT分配新端口, basePort来自旧socket, diff失真
+        // 新逻辑: 同一socket(已发过first/second)再发third, 对称NAT会分配第3个端口, 比对差值判定方向
+        if (reachable.size() < 3) {
+            VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: 可达STUN不足3个({}), 跳过第三次采样", reachable.size());
+            return null;
+        }
+        StunServerResult third = reachable.get(2);
         try {
-            extraSocket = new DatagramSocket();
-            extraSocket.setSoTimeout(1500);
-            InetAddress firstAddr = InetAddress.getByName(first.host);
+            socket.setSoTimeout(1500);  // 短超时避免拖太久
+            InetAddress thirdAddr = InetAddress.getByName(third.host);
             byte[] req = createBindingRequest();
-            extraSocket.send(new DatagramPacket(req, req.length, firstAddr, first.port));
+            socket.send(new DatagramPacket(req, req.length, thirdAddr, third.port));
 
             byte[] buf = new byte[576];
             DatagramPacket recv = new DatagramPacket(buf, buf.length);
-            extraSocket.receive(recv);
+            socket.receive(recv);
             byte[] respData = new byte[recv.getLength()];
             System.arraycopy(recv.getData(), 0, respData, 0, recv.getLength());
 
             MappedAddress extraMapped = parseBindingResponse(respData, req);
             if (extraMapped != null) {
                 int diff = extraMapped.port - basePort;
-                VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: basePort={}, extraPort={}, diff={}", basePort, extraMapped.port, diff);
+                int absDiff = Math.abs(diff);
+                VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测(同socket第3服务器): basePort={}, extraPort={}, diff={}", basePort, extraMapped.port, diff);
+                // 回归修复: 已确认是对称NAT(前两个STUN端口不同), 第3个采样只判定方向
+                //   diff > 0 且 < 100: EasySym递增
+                //   diff < 0 且 > -100: EasySym递减
+                //   absDiff >= 100: HardSym
+                //   diff == 0: 罕见, NAT偶尔复用端口, 仍按EasySym处理(方向取前两次)
                 if (diff > 0 && diff < 100) {
                     VoxLinkMod.LOGGER.info("[StunProbe] EasySym递增(端口+{})", diff);
                     return NatType.SYMMETRIC_EASY_INC;
                 } else if (diff < 0 && diff > -100) {
                     VoxLinkMod.LOGGER.info("[StunProbe] EasySym递减(端口{})", diff);
                     return NatType.SYMMETRIC_EASY_DEC;
+                } else if (absDiff >= 100) {
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: diff={}>=100, 判定HardSym", absDiff);
+                    return NatType.SYMMETRIC;
+                } else {
+                    // diff == 0, NAT复用了端口, 但前两次已确认是对称NAT, 按EasySym处理
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: diff=0(NAT复用端口), 仍判定EasySym");
+                    return NatType.SYMMETRIC_EASY_INC;
                 }
             }
         } catch (Exception e) {
             VoxLinkMod.LOGGER.debug("[StunProbe] EasySym检测失败: {}", e.getMessage());
-        } finally {
-            if (extraSocket != null) extraSocket.close();
         }
         return null;
     }
