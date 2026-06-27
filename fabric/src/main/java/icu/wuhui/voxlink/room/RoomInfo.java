@@ -21,6 +21,7 @@ public class RoomInfo {
     private volatile boolean hostEasySym;
     private volatile int hostMappedPortDelta = 0;
     private volatile java.util.List<Integer> hostBirthdayPorts = null;
+    private volatile long punchSyncTimeMs = 0; // RTT同步: 双方预定的同时发包时刻
     private final AtomicInteger currentPlayers;
     private volatile String clientId;
     private volatile int bedrockPort;
@@ -103,6 +104,8 @@ public class RoomInfo {
     public void setHostMappedPortDelta(int delta) { this.hostMappedPortDelta = delta; }
     public java.util.List<Integer> getHostBirthdayPorts() { return hostBirthdayPorts; }
     public void setHostBirthdayPorts(java.util.List<Integer> ports) { this.hostBirthdayPorts = ports; }
+    public long getPunchSyncTimeMs() { return punchSyncTimeMs; }
+    public void setPunchSyncTimeMs(long ms) { this.punchSyncTimeMs = ms; }
     public int getCurrentPlayers() { return currentPlayers.get(); }
     public void setCurrentPlayers(int currentPlayers) { this.currentPlayers.set(currentPlayers); }
     public void incrementCurrentPlayers() { this.currentPlayers.incrementAndGet(); }
