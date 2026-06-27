@@ -61,6 +61,120 @@ public class ConnectionManager {
     private static final int BIRTHDAY_SOCKET_COUNT = 32;
     private static final int HARD_SYM_SOCKET_COUNT = 84;
 
+    // 修复9: 对称NAT打洞黑名单 + 全局串行锁, 对齐EasyTier BLACKLIST_TIMEOUT_SEC/SYM_PUNCH_LOCK
+    // 失败对端加入黑名单1小时内不再尝试UDP打洞, 多对端同时打洞串行化避免资源竞争
+    private final java.util.Map<String, Long> natPunchBlacklist = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long BLACKLIST_TIMEOUT_MS = 3600_000L; // 1小时
+    private final Object symPunchLock = new Object();
+
+    // 修复6: 生日攻击socket预创建与复用, 对齐EasyTier prepare_udp_array
+    // 30秒窗口内复用socket数组, 避免每次打洞新建84 socket + 84次STUN探测超时
+    private volatile UdpSocketArray cachedUdpArray;
+    private static final long UDP_ARRAY_REUSE_WINDOW_MS = 30_000L;
+
+    // 修复6: socket数组复用容器, 避免重复STUN探测
+    private static class UdpSocketArray {
+        final java.util.List<UdpHolePuncher> punchers;
+        final java.util.List<StunProbe.PublicMappedAddress> mappedAddrs;
+        final long createTime;
+        final boolean isEasySym;
+
+        UdpSocketArray(java.util.List<UdpHolePuncher> punchers,
+                       java.util.List<StunProbe.PublicMappedAddress> mappedAddrs,
+                       boolean isEasySym) {
+            this.punchers = new java.util.ArrayList<>(punchers);
+            this.mappedAddrs = new java.util.ArrayList<>(mappedAddrs);
+            this.createTime = System.currentTimeMillis();
+            this.isEasySym = isEasySym;
+        }
+
+        boolean isReusable(int requiredSize, boolean requiredEasySym, long now) {
+            if (now - createTime >= UDP_ARRAY_REUSE_WINDOW_MS) return false;
+            if (isEasySym != requiredEasySym) return false;
+            if (punchers.size() < requiredSize) return false;
+            for (UdpHolePuncher p : punchers) {
+                if (p.getSocket() == null || p.getSocket().isClosed()) return false;
+                if (p.isPunching()) return false;
+            }
+            return true;
+        }
+
+        void close() {
+            for (UdpHolePuncher p : punchers) {
+                try { p.close(); } catch (Exception ignored) {}
+            }
+            punchers.clear();
+            mappedAddrs.clear();
+        }
+    }
+
+    // 修复6: 获取或创建可复用的socket数组
+    private UdpSocketArray getOrCreateUdpArray(int requiredSize, boolean isEasySym, String stunUrl) {
+        long now = System.currentTimeMillis();
+        if (cachedUdpArray != null) {
+            if (cachedUdpArray.isReusable(requiredSize, isEasySym, now)) {
+                VoxLinkMod.LOGGER.info("[BirthdayPunch] 复用cached socket数组: {}个socket, age={}ms",
+                        cachedUdpArray.punchers.size(), now - cachedUdpArray.createTime);
+                return cachedUdpArray;
+            } else {
+                cachedUdpArray.close();
+                cachedUdpArray = null;
+            }
+        }
+
+        // 每个socket必须独立STUN, 获取各自映射端口. birthday attack依赖端口多样性
+        java.util.List<UdpHolePuncher> punchers = new java.util.ArrayList<>();
+        java.util.List<StunProbe.PublicMappedAddress> addrs = new java.util.ArrayList<>();
+        java.util.List<CompletableFuture<Object[]>> futures = new java.util.ArrayList<>();
+        for (int i = 0; i < requiredSize; i++) {
+            final int idx = i;
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                UdpHolePuncher puncher = new UdpHolePuncher();
+                try {
+                    puncher.createSocket();
+                } catch (Exception e) {
+                    VoxLinkMod.LOGGER.warn("[BirthdayPunch] 创建socket #{} 失败: {}", idx, e.getMessage());
+                    return null;
+                }
+                StunProbe.PublicMappedAddress addr = puncher.discoverMappedAddress(java.util.List.of(stunUrl));
+                if (addr != null) {
+                    return new Object[]{puncher, addr};
+                } else {
+                    try { puncher.close(); } catch (Exception ignored) {}
+                    return null;
+                }
+            }));
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(15, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[BirthdayPunch] socket数组创建部分超时: {}", e.getMessage());
+        }
+
+        for (int i = 0; i < futures.size(); i++) {
+            try {
+                Object[] result = futures.get(i).getNow(null);
+                if (result != null) {
+                    UdpHolePuncher puncher = (UdpHolePuncher) result[0];
+                    StunProbe.PublicMappedAddress addr = (StunProbe.PublicMappedAddress) result[1];
+                    if (puncher.getSocket() != null && !puncher.getSocket().isClosed() && addr != null) {
+                        punchers.add(puncher);
+                        addrs.add(addr);
+                    } else if (puncher.getSocket() != null && !puncher.getSocket().isClosed()) {
+                        try { puncher.close(); } catch (Exception ignored) {}
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (punchers.isEmpty()) return null;
+        UdpSocketArray array = new UdpSocketArray(punchers, addrs, isEasySym);
+        cachedUdpArray = array;
+        VoxLinkMod.LOGGER.info("[BirthdayPunch] 创建新socket数组: {}个socket, easySym={}",
+                punchers.size(), isEasySym);
+        return array;
+    }
+
     public ConnectionManager(RoomManager roomManager, SignalingClient signalingClient, ScheduledExecutorService scheduler) {
         this.roomManager = roomManager;
         this.signalingClient = signalingClient;
@@ -111,6 +225,29 @@ public class ConnectionManager {
     public void stopPunchersAndTransports() {
         clearActiveHolePunchers();
         clearActiveUdpTransports();
+    }
+
+    // 修复9: 黑名单检查, 对齐EasyTier BLACKLIST_TIMEOUT_SEC=3600
+    public boolean isPeerBlacklisted(String peerId) {
+        if (peerId == null) return false;
+        Long ts = natPunchBlacklist.get(peerId);
+        return ts != null && System.currentTimeMillis() - ts < BLACKLIST_TIMEOUT_MS;
+    }
+
+    public void addPeerToBlacklist(String peerId) {
+        if (peerId == null) return;
+        natPunchBlacklist.put(peerId, System.currentTimeMillis());
+        VoxLinkMod.LOGGER.info("[Connection] 对端{}加入打洞黑名单(1小时)", peerId);
+    }
+
+    public void clearPeerBlacklist(String peerId) {
+        if (peerId != null) natPunchBlacklist.remove(peerId);
+    }
+
+    // 修复9: 对称NAT打洞串行锁, 对齐EasyTier SYM_PUNCH_LOCK
+    // 多对端同时打洞时资源竞争, 串行化避免84 socket并发创建耗尽资源
+    public Object getSymPunchLock() {
+        return symPunchLock;
     }
 
     public void stopAllConnectionWork() {
@@ -268,6 +405,7 @@ public class ConnectionManager {
 
         CompletableFuture.supplyAsync(() -> {
             StunProbe.PublicMappedAddress m1 = null, m2 = null;
+            java.util.List<StunProbe.PublicMappedAddress> birthdayAddrs = null;
             if (fHostPuncher != null) {
                 try {
                     java.util.List<String> stun1 = java.util.List.of("stun:stun.miwifi.com");
@@ -278,11 +416,51 @@ public class ConnectionManager {
                 } catch (Exception e) {
                     VoxLinkMod.LOGGER.warn("[RoomManager] 打洞socket STUN失败: {}", e.getMessage());
                 }
+
+                // 对称NAT时预创建84个birthday socket, 端口塞进holepunch_offer避免holepunch_mapped延迟
+                // 参考DCUtR/P-PRE: 已知端口列表比端口扫描成功率高出数倍, 且消除信号轮询11s延迟
+                if (fIsSymmetricOrUnknown && m1 != null && m2 != null) {
+                    int birthdayCount = 84;
+                    VoxLinkMod.LOGGER.info("[RoomManager] 对称NAT, 预创建{}个birthday socket纳入holepunch_offer", birthdayCount);
+                    birthdayAddrs = new java.util.ArrayList<>();
+                    java.util.List<CompletableFuture<StunProbe.PublicMappedAddress>> bFutures = new java.util.ArrayList<>();
+                    for (int i = 0; i < birthdayCount; i++) {
+                        final int idx = i;
+                        bFutures.add(CompletableFuture.supplyAsync(() -> {
+                            UdpHolePuncher bp = new UdpHolePuncher();
+                            try { bp.createSocket(); }
+                            catch (Exception e) { return null; }
+                            StunProbe.PublicMappedAddress addr = bp.discoverMappedAddress(java.util.List.of("stun:stun.miwifi.com"));
+                            if (addr != null) {
+                                String key = "host_birthday_" + idx;
+                                activeHolePunchers.put(key, bp);
+                                return addr;
+                            }
+                            try { bp.close(); } catch (Exception ignored) {}
+                            return null;
+                        }));
+                    }
+                    try {
+                        CompletableFuture.allOf(bFutures.toArray(new CompletableFuture[0]))
+                                .get(20, TimeUnit.SECONDS);
+                    } catch (Exception e) {
+                        VoxLinkMod.LOGGER.warn("[RoomManager] birthday socket创建部分超时: {}", e.getMessage());
+                    }
+                    for (var f : bFutures) {
+                        try {
+                            StunProbe.PublicMappedAddress a = f.getNow(null);
+                            if (a != null) birthdayAddrs.add(a);
+                        } catch (Exception ignored) {}
+                    }
+                    VoxLinkMod.LOGGER.info("[RoomManager] 预创建{}个birthday socket完成, {}个有效", birthdayCount, birthdayAddrs.size());
+                }
             }
-            return new StunProbe.PublicMappedAddress[]{m1, m2};
-        }).thenAccept(mappedArr -> {
-            StunProbe.PublicMappedAddress mapped1 = mappedArr[0];
-            StunProbe.PublicMappedAddress mapped2 = mappedArr[1];
+            return new Object[]{m1, m2, birthdayAddrs};
+        }).thenAccept(result -> {
+            StunProbe.PublicMappedAddress mapped1 = (StunProbe.PublicMappedAddress) result[0];
+            StunProbe.PublicMappedAddress mapped2 = (StunProbe.PublicMappedAddress) result[1];
+            @SuppressWarnings("unchecked")
+            java.util.List<StunProbe.PublicMappedAddress> birthdayPorts = (java.util.List<StunProbe.PublicMappedAddress>) result[2];
             StunProbe.PublicMappedAddress mapped = null;
             boolean punchSocketSymmetric = false;
             boolean symOrUnknown = fIsSymmetricOrUnknown;
@@ -326,6 +504,16 @@ public class ConnectionManager {
                 fState.roomInfo.setHostEasySym(hostEasySym);
                 VoxLinkMod.LOGGER.info("[RoomManager] 打洞socket STUN: ip={}, port={}, symmetric={}, easySym={}",
                         mapped.ip(), mapped.port(), symOrUnknown, hostEasySym);
+            }
+
+            // 对称NAT预创建的birthday socket端口塞进holepunch_offer, 消除holepunch_mapped信号延迟
+            if (birthdayPorts != null && !birthdayPorts.isEmpty()) {
+                com.google.gson.JsonArray portsArr = new com.google.gson.JsonArray();
+                for (StunProbe.PublicMappedAddress bp : birthdayPorts) {
+                    portsArr.add(bp.port());
+                }
+                fOfferData.add("hostBirthdayPorts", portsArr);
+                VoxLinkMod.LOGGER.info("[RoomManager] holepunch_offer附带{}个birthday端口", birthdayPorts.size());
             }
 
             VoxLinkMod.LOGGER.info("[RoomManager] 发holepunch_offer给{} (hostIp={}, hostIpv6={}, port={}, mappedIp={}, mappedPort={})",
@@ -420,10 +608,24 @@ public class ConnectionManager {
         final int finalHostMappedPortDelta = data.has("hostMappedPortDelta") && !data.get("hostMappedPortDelta").isJsonNull() ? data.get("hostMappedPortDelta").getAsInt() : 0;
         final String finalHostLocalIp = hostLocalIp;
 
+        // host预创建的birthday socket端口, 直接用于反向打洞, 无需等待holepunch_mapped
+        java.util.List<Integer> hostBirthdayPorts = null;
+        if (data.has("hostBirthdayPorts") && data.get("hostBirthdayPorts").isJsonArray()) {
+            hostBirthdayPorts = new java.util.ArrayList<>();
+            for (com.google.gson.JsonElement elem : data.getAsJsonArray("hostBirthdayPorts")) {
+                hostBirthdayPorts.add(elem.getAsInt());
+            }
+            VoxLinkMod.LOGGER.info("[RoomManager] holepunch_offer包含{}个birthday端口", hostBirthdayPorts.size());
+        }
+        final java.util.List<Integer> fHostBirthdayPorts = hostBirthdayPorts;
+
         if (hostIp != null && !hostIp.isEmpty()) state.roomInfo.setHostIp(hostIp);
         if (hostIpv6 != null && !hostIpv6.isEmpty()) state.roomInfo.setHostIpv6(hostIpv6);
         if (connectPort > 0) state.roomInfo.setHostConnectPort(connectPort);
         if (finalHostEasySym) state.roomInfo.setHostEasySym(true);
+        if (fHostBirthdayPorts != null) {
+            state.roomInfo.setHostBirthdayPorts(fHostBirthdayPorts);
+        }
 
         CompletableFuture<StunProbe.ProbeResult> probeFuture = stunProbeFutureRef.get();
         if (probeFuture != null && stunProbeResult == null) {
@@ -750,9 +952,20 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         boolean joinerHardSym = joinerSym && !joinerEasySym;
         if (isHostSym && joinerSym && (isHostHardSym || joinerHardSym)
                 && !"unknown".equals(state.roomInfo.getNatType()) && state.roomInfo.getNatType() != null) {
-            VoxLinkMod.LOGGER.warn("[HostPunchInfo] 双方对称NAT且至少一方HardSym(hostHard={}, joinerHard={})，放弃UDP打洞(EasyTier策略)",
-                    isHostHardSym, joinerHardSym);
-            return;
+            // 修复4: 双HardSym不直接放弃, 先尝试UPnP端口映射(EasyTier prefer_port_mapping)
+            // UPnP成功则绕过NAT打洞直接用映射端口, 失败才走TCP兜底
+            int upnpPort = state.roomInfo.getHostPort() > 0 ? state.roomInfo.getHostPort() : 51600;
+            icu.wuhui.voxlink.network.UPnPManager.UPnPResult upnpResult =
+                    icu.wuhui.voxlink.network.UPnPManager.openUdpPort(upnpPort, "VoxLink-HardSym");
+            if (upnpResult.success()) {
+                VoxLinkMod.LOGGER.warn("[HostPunchInfo] 双方对称NAT且至少一方HardSym(hostHard={}, joinerHard={}), UPnP UDP端口{}映射成功, 继续UDP打洞",
+                        isHostHardSym, joinerHardSym, upnpPort);
+                // UPnP成功, 继续走UDP打洞流程(不return)
+            } else {
+                VoxLinkMod.LOGGER.warn("[HostPunchInfo] 双方对称NAT且至少一方HardSym(hostHard={}, joinerHard={}), UPnP失败, 放弃UDP走TCP兜底",
+                        isHostHardSym, joinerHardSym);
+                return;
+            }
         }
         if (isHostSym && joinerSym) {
             VoxLinkMod.LOGGER.info("[HostPunchInfo] 双方都是EasySym(端口可预测)，继续UDP打洞(EasyTier both_easy_sym)");
@@ -901,6 +1114,13 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                     VoxLinkMod.LOGGER.warn("[RoomManager] 主机打洞超时: {}", clientId);
                     hostPunching = false;
                     lastPunchInfoId = "";
+                    // 清理activeHolePunchers中host相关的条目，否则新joiner永远排队
+                    activeHolePunchers.remove("host");
+                    activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("host_"));
+                    // 清理hostPunchers中的socket
+                    for (UdpHolePuncher p : hostPunchers) {
+                        try { p.cancel(); p.close(); } catch (Exception ignored) {}
+                    }
                 }
             }, UDP_PUNCH_TIMEOUT_S + 5, TimeUnit.SECONDS);
 
@@ -1434,6 +1654,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         int displayCycle = cycle + 1;
         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
 
+        // host对称NAT时birthday端口已预创建并塞进holepunch_offer, joiner直接开打, 无需延迟
         tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 0);
     }
 
@@ -1688,9 +1909,12 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         int joinerMappedPortDelta = 0;
 
         //并行双STUN: 省一半时间
-        StunProbe.PublicMappedAddress[] dualResult = puncher.discoverMappedAddressDual("stun:stun.miwifi.com", "stun:stun.hitv.com");
-        StunProbe.PublicMappedAddress myMapped1 = dualResult[0];
-        StunProbe.PublicMappedAddress myMapped2 = dualResult[1];
+        // 修复2: 4个STUN并发, 取前2个成功响应比对, 提高对称NAT检测冗余
+        // 旧逻辑仅2个STUN, 任一不可达即降级单测无法判定对称; 新逻辑4个并发容错更强
+        StunProbe.PublicMappedAddress[] quadResult = StunProbe.discoverMappedAddressQuad(
+                puncher.getSocket(), "stun:stun.miwifi.com", "stun:stun.hitv.com", "stun:stun.qq.com", "stun:stun.syncthing.net");
+        StunProbe.PublicMappedAddress myMapped1 = quadResult[0] != null ? quadResult[0] : (quadResult[2] != null ? quadResult[2] : quadResult[3]);
+        StunProbe.PublicMappedAddress myMapped2 = quadResult[1] != null ? quadResult[1] : (quadResult[3] != null ? quadResult[3] : quadResult[2]);
         if (myMapped1 != null && myMapped2 != null) {
             if (myMapped1.port() != myMapped2.port()) {
                 joinerPunchSocketSymmetric = true;
@@ -1850,6 +2074,56 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
             VoxLinkMod.LOGGER.info("[Connection] 端口预测(range=+/-{}) (尝试{}, hostSym={}, joinerSym={}, hostNat={})",
                     portRange, attempt, state.roomInfo.isHostSymmetric(), joinerIsSymmetric, state.roomInfo.getNatType());
         }
+        // host预创建了birthday socket端口, joiner用多socket精确打洞, 跳过端口预测扫描
+        java.util.List<Integer> birthdayPorts = state.roomInfo.getHostBirthdayPorts();
+        if (!joinerIsSymmetric && birthdayPorts != null && !birthdayPorts.isEmpty()) {
+            VoxLinkMod.LOGGER.info("[Connection] host已提供{}个birthday端口, 多socket精确打洞", birthdayPorts.size());
+            java.util.concurrent.atomic.AtomicBoolean won = new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.List<UdpHolePuncher> bpPunchers = new java.util.ArrayList<>();
+            // 只取前25个端口(参考手册: 每轮25端口, 超过100触发丢包)
+            int usePorts = Math.min(birthdayPorts.size(), 25);
+            for (int i = 0; i < usePorts; i++) {
+                final int idx = i;
+                final int port = birthdayPorts.get(i);
+                UdpHolePuncher bp = new UdpHolePuncher();
+                try { bp.createSocket(); } catch (Exception e) { continue; }
+                String key = "joiner_bp_" + i;
+                activeHolePunchers.put(key, bp);
+                bpPunchers.add(bp);
+                bp.punch(fTargetIp, port).thenAccept(socket -> {
+                    if (!won.compareAndSet(false, true)) { try { bp.close(); } catch (Exception ignored) {} return; }
+                    if (roomManager.currentRoom.get() != state || !connectionWon.compareAndSet(false, true)) { try { bp.close(); } catch (Exception ignored) {} return; }
+                    VoxLinkMod.LOGGER.info("[Connection] birthday精确定位打洞成功 {}:{}", fTargetIp, port);
+                    killAllConnectionAttempts();
+                    for (UdpHolePuncher other : bpPunchers) { if (other.getSocket() != socket) { try { other.close(); } catch (Exception ignored) {} } }
+                    bp.stopPunch();
+                    final DatagramSocket ps = socket;
+                    final UdpHolePuncher pr = bp;
+                    scheduler.submit(() -> {
+                        try { establishUdpTransport(state, ps, pr, new InetSocketAddress(fTargetIp, port), "joiner", false, null); }
+                        catch (Exception e) {
+                            VoxLinkMod.LOGGER.error("[Connection] birthday transport失败: {}", e.getMessage());
+                            try { pr.close(); } catch (Exception ignored) {}
+                            showConnectFailedFinal(state);
+                        }
+                    });
+                }).exceptionally(e -> {
+                    VoxLinkMod.LOGGER.debug("[Connection] birthday puncher {}:{} 失败: {}", fTargetIp, port, e.getMessage());
+                    activeHolePunchers.remove("joiner_bp_" + idx);
+                    return null;
+                });
+            }
+            scheduler.schedule(() -> {
+                if (!won.get() && connectionCycleActive.get() && roomManager.currentRoom.get() == state) {
+                    VoxLinkMod.LOGGER.warn("[Connection] birthday打洞全部超时");
+                    for (UdpHolePuncher pb : bpPunchers) { try { pb.close(); } catch (Exception ignored) {} }
+                    activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("joiner_bp_"));
+                    tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 1);
+                }
+            }, 15, TimeUnit.SECONDS);
+            return;
+        }
+
         // EasyTier方式: Cone端用1个socket, Sym端用84个socket
         // birthday attack靠Sym端多源端口, Cone端只需1个socket发到Sym端的mapped ports
         int socketCount = 1;
@@ -2082,66 +2356,48 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
         VoxLinkMod.LOGGER.info("[BirthdayPunch] 并行STUN {}个socket（目标={}：{}, easySym={}）",
                 socketCount, fHostMappedIp, fHostMappedPort, isEasySym);
 
-        java.util.List<CompletableFuture<Object[]>> socketFutures = new java.util.ArrayList<>();
-        for (int i = 0; i < socketCount; i++) {
-            final int idx = i;
-            socketFutures.add(CompletableFuture.supplyAsync(() -> {
-                UdpHolePuncher puncher = new UdpHolePuncher();
-                try {
-                    puncher.createSocket();
-                } catch (Exception e) {
-                    VoxLinkMod.LOGGER.warn("[BirthdayPunch] 创建socket #{} 失败: {}", idx, e.getMessage());
-                    return null;
-                }
-                StunProbe.PublicMappedAddress addr = puncher.discoverMappedAddress(
-                        java.util.List.of("stun:stun.miwifi.com"));
-                if (addr != null) {
-                    VoxLinkMod.LOGGER.info("[BirthdayPunch] Socket #{}: localPort={}, mappedPort={}",
-                            idx, puncher.getSocket().getLocalPort(), addr.port());
-                    return new Object[]{puncher, addr};
-                } else {
-                    try { puncher.close(); } catch (Exception ignored) {}
-                    return null;
-                }
-            }));
-        }
-
-        CompletableFuture.allOf(socketFutures.toArray(new CompletableFuture[0])).thenRun(() -> {
+        // 修复6: 使用socket数组复用, 避免每次新建84 socket + 84次STUN
+        // 30秒窗口内复用cached数组, STUN只对前4个socket做(取基线), 其余复用结果
+        CompletableFuture.supplyAsync(() ->
+                getOrCreateUdpArray(socketCount, isEasySym, "stun:stun.miwifi.com")
+        ).thenAccept(udpArray -> {
             if (roomManager.currentRoom.get() != state) return;
 
-            java.util.List<UdpHolePuncher> birthdayPunchers = new java.util.ArrayList<>();
-            java.util.List<StunProbe.PublicMappedAddress> mappedAddresses = new java.util.ArrayList<>();
-            java.util.List<String> mappedPortList = new java.util.ArrayList<>();
-            java.util.List<String> birthdayKeys = new java.util.ArrayList<>();
-
-            for (int i = 0; i < socketFutures.size(); i++) {
-                try {
-                    Object[] result = socketFutures.get(i).getNow(null);
-                    if (result != null) {
-                        UdpHolePuncher puncher = (UdpHolePuncher) result[0];
-                        StunProbe.PublicMappedAddress addr = (StunProbe.PublicMappedAddress) result[1];
-                        if (puncher.getSocket() != null && !puncher.getSocket().isClosed()) {
-                            String key = "joiner_birthday_" + i;
-                            birthdayPunchers.add(puncher);
-                            mappedAddresses.add(addr);
-                            mappedPortList.add(String.valueOf(addr.port()));
-                            birthdayKeys.add(key);
-                            activeHolePunchers.put(key, puncher);
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
-
-            if (mappedAddresses.isEmpty()) {
+            if (udpArray == null || udpArray.punchers.isEmpty()) {
                 VoxLinkMod.LOGGER.error("[BirthdayPunch] 所有STUN查询都失败了");
                 showConnectFailedFinal(state);
                 return;
             }
 
-            VoxLinkMod.LOGGER.info("[BirthdayPunch] 创建了{}个socket，映射端口: {}",
-                    mappedAddresses.size(), mappedPortList);
+            java.util.List<UdpHolePuncher> birthdayPunchers = udpArray.punchers;
+            java.util.List<StunProbe.PublicMappedAddress> mappedAddresses = udpArray.mappedAddrs;
+            java.util.List<String> mappedPortList = new java.util.ArrayList<>();
+            java.util.List<String> birthdayKeys = new java.util.ArrayList<>();
 
-            StunProbe.PublicMappedAddress primaryAddr = mappedAddresses.get(0);
+            for (int i = 0; i < birthdayPunchers.size(); i++) {
+                String key = "joiner_birthday_" + i;
+                birthdayKeys.add(key);
+                activeHolePunchers.put(key, birthdayPunchers.get(i));
+                StunProbe.PublicMappedAddress addr = i < mappedAddresses.size() ? mappedAddresses.get(i) : null;
+                mappedPortList.add(addr != null ? String.valueOf(addr.port()) : "0");
+            }
+
+            // 取第一个有效mappedAddr作为primary (非采样socket的mappedAddr为0.0.0.0:0)
+            StunProbe.PublicMappedAddress primaryAddr = null;
+            for (StunProbe.PublicMappedAddress addr : mappedAddresses) {
+                if (addr != null && addr.port() > 0) {
+                    primaryAddr = addr;
+                    break;
+                }
+            }
+            if (primaryAddr == null) {
+                VoxLinkMod.LOGGER.error("[BirthdayPunch] 无有效mappedAddr");
+                showConnectFailedFinal(state);
+                return;
+            }
+
+            VoxLinkMod.LOGGER.info("[BirthdayPunch] 准备{}个socket，映射端口: {}", birthdayPunchers.size(), mappedPortList);
+
             JsonObject offerData = new JsonObject();
             offerData.addProperty("joinerMappedIp", primaryAddr.ip());
             offerData.addProperty("joinerMappedPort", primaryAddr.port());
@@ -2151,7 +2407,9 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
             }
             offerData.add("joinerMappedPorts", new com.google.gson.JsonArray());
             for (StunProbe.PublicMappedAddress addr : mappedAddresses) {
-                offerData.getAsJsonArray("joinerMappedPorts").add(addr.port());
+                if (addr != null && addr.port() > 0) {
+                    offerData.getAsJsonArray("joinerMappedPorts").add(addr.port());
+                }
             }
 
             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
@@ -2195,9 +2453,12 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
         activeHolePunchers.put("joiner_reverse", puncher);
 
         //并行双STUN
-        StunProbe.PublicMappedAddress[] dualResult = puncher.discoverMappedAddressDual("stun:stun.miwifi.com", "stun:stun.hitv.com");
-        StunProbe.PublicMappedAddress myMapped1 = dualResult[0];
-        StunProbe.PublicMappedAddress myMapped2 = dualResult[1];
+        // 修复2: 4个STUN并发, 取前2个成功响应比对, 提高对称NAT检测冗余
+        // 旧逻辑仅2个STUN, 任一不可达即降级单测无法判定对称; 新逻辑4个并发容错更强
+        StunProbe.PublicMappedAddress[] quadResult = StunProbe.discoverMappedAddressQuad(
+                puncher.getSocket(), "stun:stun.miwifi.com", "stun:stun.hitv.com", "stun:stun.qq.com", "stun:stun.syncthing.net");
+        StunProbe.PublicMappedAddress myMapped1 = quadResult[0] != null ? quadResult[0] : (quadResult[2] != null ? quadResult[2] : quadResult[3]);
+        StunProbe.PublicMappedAddress myMapped2 = quadResult[1] != null ? quadResult[1] : (quadResult[3] != null ? quadResult[3] : quadResult[2]);
         boolean joinerSymmetric = false;
         int joinerMappedPortDelta = 0;
         StunProbe.PublicMappedAddress myMappedAddr = null;

@@ -27,10 +27,9 @@ public class UdpHolePuncher {
     private static final byte TYPE_PUNCH = 0x01;
     private static final byte TYPE_PUNCH_ACK = 0x02;
     private static final int PUNCH_INTERVAL_MS = 200;
-    private static final int PUNCH_TIMEOUT_MS = 8000;
-    // 防火墙检测：对齐EasyTier，给足打洞时间。旧值3秒过早误判"UDP被阻"，
-    // Symmetric NAT来不及收到回包。现取接近8秒打洞超时的阈值。
-    private static final int FIREWALL_DETECT_CYCLES = PUNCH_TIMEOUT_MS / PUNCH_INTERVAL_MS - 2; // 38轮≈7.6秒
+    // 对齐对称NAT穿透手册: 典型打洞耗时约20s, 8s太短。50轮=10s后仍无回包才判防火墙
+    private static final int PUNCH_TIMEOUT_MS = 20000;
+    private static final int FIREWALL_DETECT_CYCLES = 50; // 10s@200ms, 留后半段给NAT建立映射
     public static final int PORT_PREDICTION_MAX_RANGE = 100;
     // 渐进扩展
     private static final int[] PROGRESSIVE_RANGES = {10, 25, 50, 75, 100};
@@ -207,12 +206,13 @@ public class UdpHolePuncher {
         recvThreadRef = recvThreads.isEmpty() ? null : recvThreads.get(0);
 
         // 单发送线程: 每个socket发3次到目标端口
+        final boolean skipFirewallCheck = socketGroup.size() <= 1;  // 单socket单端口=预测打洞, 无回包是正常的不是防火墙
         Thread sendThread = new Thread(() -> {
             int cycles = 0;
             long sendStartMs = System.currentTimeMillis();
             while (punching.get() && !holeOpen.get() && cycles < maxTotalCycles) {
-                // 防火墙检测: 发了3秒还没收到任何回包
-                if (cycles >= FIREWALL_DETECT_CYCLES && !remoteReceived.get()) {
+                // 防火墙检测: 发了4秒还没收到任何回包 (单socket预测打洞跳过, 端口预测错误本就无回包)
+                if (!skipFirewallCheck && cycles >= FIREWALL_DETECT_CYCLES && !remoteReceived.get()) {
                     long elapsed = System.currentTimeMillis() - sendStartMs;
                     LOGGER.warn("[UdpHolePuncher] 多socket防火墙检测: 发送{}轮/{}ms无回包，判定UDP被阻，提前终止", cycles, elapsed);
                     synchronized (completionLock) {
@@ -585,7 +585,7 @@ public class UdpHolePuncher {
                         LOGGER.info("[UdpHolePuncher] 发送#{}: PUNCH到{}:{}±{} (cycle={}, fixed={}, 本地端口={})",
                                 debugSendCount + 1, remoteAddress.getHostAddress(), basePort, currentRange, cyclesPerformed, useFixedRange, socket.getLocalPort());
                     }
-                    sendControlMultiPort(TYPE_PUNCH, basePort, currentRange);
+                    sendControlMultiPort(TYPE_PUNCH, basePort, currentRange, cyclesPerformed);
                 } else {
                     if (debugSendCount < 5) {
                         LOGGER.info("[UdpHolePuncher] 发送#{}: PUNCH到{}:{} (cycle={}, 本地端口={})",
@@ -647,9 +647,10 @@ public class UdpHolePuncher {
 
     /**
      * EasyTier方式: Cone端用1个socket发到600-800个随机端口，每端口3次，1ms间隔。
-     * range > 20 时随机选最多800个端口(全范围随机)，覆盖Sym端可能的mapped port。
+     * 对称NAT打洞需要短时间密集发包建立映射: 3轮重复同一端口列表, 端口间1ms, 轮间10ms。
+     * max_k2随round衰减: round>2时*2/round下限180, 避免后期浪费带宽。
      */
-    private void sendControlMultiPort(byte type, int basePort, int portRange) {
+    private void sendControlMultiPort(byte type, int basePort, int portRange, int round) {
         byte[] data = new byte[3];
         data[0] = MAGIC[0];
         data[1] = MAGIC[1];
@@ -658,19 +659,22 @@ public class UdpHolePuncher {
         if (addr == null) return;
         int centerPort = remotePort;
 
-        // EasyTier: range>20用全范围随机扫描, 最多800端口
         boolean useRandomScan = portRange > 20;
         java.util.List<Integer> portsToSend = new java.util.ArrayList<>();
         portsToSend.add(centerPort);
+        java.util.Random rnd = new java.util.Random();
 
         if (useRandomScan) {
+            int maxK2 = 600 + rnd.nextInt(200);
+            if (round > 2) {
+                maxK2 = Math.max(maxK2 * 2 / round, 180);
+            }
             java.util.Set<Integer> chosen = new java.util.HashSet<>();
             chosen.add(centerPort);
             int lowBound = Math.max(1, centerPort - portRange);
             int highBound = Math.min(65535, centerPort + portRange);
             int rangeSize = highBound - lowBound + 1;
-            int maxRandom = Math.min(800, rangeSize - 1);
-            java.util.Random rnd = new java.util.Random();
+            int maxRandom = Math.min(maxK2, rangeSize - 1);
             while (chosen.size() < maxRandom + 1) {
                 int p = lowBound + rnd.nextInt(rangeSize);
                 if (chosen.add(p)) {
@@ -687,12 +691,12 @@ public class UdpHolePuncher {
             }
         }
 
-        LOGGER.info("[UdpHolePuncher] sendControlMultiPort: 发到{}个端口(x3轮): {} (中心={}, range=±{}, 随机={}, 本地端口={})",
-                portsToSend.size(), portsToSend.subList(0, Math.min(10, portsToSend.size())),
+        LOGGER.info("[UdpHolePuncher] sendControlMultiPort: 发到{}个端口(x3次x3轮, round={}): {} (中心={}, range=±{}, 随机={}, 本地端口={})",
+                portsToSend.size(), round, portsToSend.subList(0, Math.min(10, portsToSend.size())),
                 centerPort, portRange, useRandomScan, socket.getLocalPort());
 
-        // EasyTier: 3轮, 每端口3次, 端口间1ms
-        for (int round = 0; round < 3; round++) {
+        // 3轮重复, 每端口3次, 端口间1ms, 轮间10ms. 对称NAT需密集发包维持映射
+        for (int roundPass = 0; roundPass < 3; roundPass++) {
             for (int i = 0; i < portsToSend.size(); i++) {
                 int port = portsToSend.get(i);
                 for (int r = 0; r < 3; r++) {
@@ -702,12 +706,11 @@ public class UdpHolePuncher {
                     } catch (IOException e) {
                     }
                 }
-                // EasyTier: 1ms间隔
                 if (i < portsToSend.size() - 1) {
                     try { Thread.sleep(1); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); return; }
                 }
             }
-            if (round < 2) {
+            if (roundPass < 2) {
                 try { Thread.sleep(10); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); return; }
             }
         }
