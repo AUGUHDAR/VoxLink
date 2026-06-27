@@ -175,6 +175,30 @@ public class ConnectionManager {
         return array;
     }
 
+    /**
+     * P-PRE delta计算: 中位数滤波(去离群值) + EMA平滑(减抖动)
+     * 根据端口序列计算可靠的相邻增量, 用于对称NAT端口预测
+     */
+    static int calculatePortDelta(java.util.List<Integer> samples) {
+        if (samples == null || samples.size() < 2) return 1;
+        java.util.List<Integer> deltas = new java.util.ArrayList<>();
+        for (int i = 1; i < samples.size(); i++) {
+            deltas.add(samples.get(i) - samples.get(i - 1));
+        }
+        // 中位数滤波: 排序后去掉前后25%的离群值
+        java.util.Collections.sort(deltas);
+        int trim = deltas.size() / 4;
+        java.util.List<Integer> trimmed = deltas.subList(trim, deltas.size() - trim);
+        // EMA平滑: 越近的样本权重越高(alpha=0.3), 递推式避免浮点累积
+        double ema = trimmed.get(0);
+        double alpha = 0.4;
+        for (int i = 1; i < trimmed.size(); i++) {
+            ema = ema + alpha * (trimmed.get(i) - ema);
+        }
+        int result = (int) Math.round(ema);
+        return result > 0 ? result : 1;
+    }
+
     public ConnectionManager(RoomManager roomManager, SignalingClient signalingClient, ScheduledExecutorService scheduler) {
         this.roomManager = roomManager;
         this.signalingClient = signalingClient;
@@ -494,11 +518,24 @@ public class ConnectionManager {
                 if (hostEasySym) {
                     fOfferData.addProperty("hostEasySym", true);
                 }
-                // EasyTier DST_PORT_OFFSET方案：告诉Joiner端口偏移方向
+                // P-PRE端口预测: 10次连续采样替代2次, EMA+中位数滤波计算可靠增量
                 if (mapped1 != null && mapped2 != null && mapped1.port() != mapped2.port()) {
                     int delta = mapped2.port() - mapped1.port();
+                    // 同socket同服务器连续采样10次(100ms间隔), 获取端口序列用于精确预测
+                    if (fHostPuncher != null && fHostPuncher.getSocket() != null) {
+                        java.util.List<Integer> samples = StunProbe.samplePortsSequential(
+                                fHostPuncher.getSocket(), "stun.qq.com", 3478, 10, 100);
+                        if (samples.size() >= 5) {
+                            int reliableDelta = calculatePortDelta(samples);
+                            VoxLinkMod.LOGGER.info("[RoomManager] P-PRE采样: {}次→序列={}, 可靠delta={} (原2采样delta={})",
+                                    samples.size(), samples, reliableDelta, delta);
+                            delta = reliableDelta;
+                        } else {
+                            VoxLinkMod.LOGGER.warn("[RoomManager] P-PRE采样不足({}次), 回退2采样delta={}", samples.size(), delta);
+                        }
+                    }
                     fOfferData.addProperty("hostMappedPortDelta", delta);
-                    VoxLinkMod.LOGGER.info("[RoomManager] 对称NAT端口偏移: delta={} ({}→{})", delta, mapped1.port(), mapped2.port());
+                    VoxLinkMod.LOGGER.info("[RoomManager] 对称NAT端口偏移: delta={}", delta);
                 }
                 fState.roomInfo.setHostMappedAddress(mapped.ip(), mapped.port());
                 fState.roomInfo.setHostEasySym(hostEasySym);
