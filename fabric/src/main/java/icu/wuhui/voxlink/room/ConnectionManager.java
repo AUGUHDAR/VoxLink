@@ -552,6 +552,12 @@ public class ConnectionManager {
                 VoxLinkMod.LOGGER.info("[RoomManager] holepunch_offer附带{}个birthday端口", birthdayPorts.size());
             }
 
+            // RTT同步: 双方等到同一时刻发第一包, 提高对称NAT打洞命中率
+            long syncTime = System.currentTimeMillis() + 3000;
+            fOfferData.addProperty("punchSyncTimeMs", syncTime);
+            fState.roomInfo.setPunchSyncTimeMs(syncTime);
+            VoxLinkMod.LOGGER.info("[RoomManager] RTT同步: punchSyncTimeMs={}", syncTime);
+
             VoxLinkMod.LOGGER.info("[RoomManager] 发holepunch_offer给{} (hostIp={}, hostIpv6={}, port={}, mappedIp={}, mappedPort={})",
                     fFrom,
                     fState.roomInfo.getHostIp() != null ? fState.roomInfo.getHostIp() : "none",
@@ -643,6 +649,11 @@ public class ConnectionManager {
         final boolean finalHostEasySym = data.has("hostEasySym") && !data.get("hostEasySym").isJsonNull() && data.get("hostEasySym").getAsBoolean();
         final int finalHostMappedPortDelta = data.has("hostMappedPortDelta") && !data.get("hostMappedPortDelta").isJsonNull() ? data.get("hostMappedPortDelta").getAsInt() : 0;
         final String finalHostLocalIp = hostLocalIp;
+        final long punchSyncTime = data.has("punchSyncTimeMs") ? data.get("punchSyncTimeMs").getAsLong() : 0;
+        if (punchSyncTime > 0) {
+            state.roomInfo.setPunchSyncTimeMs(punchSyncTime);
+            VoxLinkMod.LOGGER.info("[RoomManager] RTT同步: punchSyncTimeMs={} (距今{}ms)", punchSyncTime, punchSyncTime - System.currentTimeMillis());
+        }
 
         // host预创建的birthday socket端口, 直接用于反向打洞, 无需等待holepunch_mapped
         java.util.List<Integer> hostBirthdayPorts = null;
@@ -1249,6 +1260,27 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         RoomManager.RoomState state = roomManager.currentRoom.get();
         if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost()) return;
 
+        // RTT同步: 等到约定的发包时刻再开始启动打洞
+        long syncTime = state.roomInfo.getPunchSyncTimeMs();
+        if (syncTime > 0) {
+            long delay = syncTime - System.currentTimeMillis();
+            if (delay > 0 && delay < 15000) {
+                VoxLinkMod.LOGGER.info("[ReversePunch] RTT同步等待: {}ms后启动主机打洞", delay);
+                scheduler.schedule(() -> {
+                    if (roomManager.currentRoom.get() == state && !connectionWon.get()) {
+                        handleReverseHolepunchOfferDelayed(from, data);
+                    }
+                }, delay, TimeUnit.MILLISECONDS);
+                return;
+            }
+        }
+        handleReverseHolepunchOfferDelayed(from, data);
+    }
+
+    private void handleReverseHolepunchOfferDelayed(String from, JsonObject data) {
+        RoomManager.RoomState state = roomManager.currentRoom.get();
+        if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost()) return;
+
         if (activeUdpTransports.containsKey(from)) {
             VoxLinkMod.LOGGER.info("[ReversePunch] 已有活跃transport给 {}，忽略reverse_holepunch_offer", from);
             return;
@@ -1690,7 +1722,20 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         int displayCycle = cycle + 1;
         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
 
-        // host对称NAT时birthday端口已预创建并塞进holepunch_offer, joiner直接开打, 无需延迟
+        // RTT同步: 双方等到约定的同步时刻再发包, 确保NAT映射在两侧同时建立
+        long syncTime = state.roomInfo.getPunchSyncTimeMs();
+        if (cycle == 0 && syncTime > 0) {
+            long delay = syncTime - System.currentTimeMillis();
+            if (delay > 0 && delay < 10000) {
+                VoxLinkMod.LOGGER.info("[Connection] RTT同步等待: {}ms后同时发包", delay);
+                scheduler.schedule(() -> {
+                    if (connectionCycleActive.get() && roomManager.currentRoom.get() == state) {
+                        tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 0);
+                    }
+                }, delay, TimeUnit.MILLISECONDS);
+                return;
+            }
+        }
         tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 0);
     }
 
