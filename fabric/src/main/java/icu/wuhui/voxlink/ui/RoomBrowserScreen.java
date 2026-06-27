@@ -163,7 +163,14 @@ public class RoomBrowserScreen extends Screen {
         int defStartX = (w - totalDef * (defW + 2)) / 2;
         for (int i = 0; i < totalDef; i++) {
             final String cat = defaultKeys.get(i);
-            String label = cat.equals("all") ? Component.translatable("voxlink.category.all").getString() : categoryMap.getOrDefault(cat, cat);
+            String label;
+            if ("all".equals(cat)) {
+                label = Component.translatable("voxlink.category.all").getString();
+            } else if (DEFAULT_CATEGORY_KEYS.contains(cat)) {
+                label = Component.translatable("voxlink.category." + cat).getString();
+            } else {
+                label = categoryMap.getOrDefault(cat, cat);
+            }
             Button btn = Button.builder(Component.literal(label), b -> {
                 selectedCategory = cat;
                 applyFilter();
@@ -444,12 +451,16 @@ public class RoomBrowserScreen extends Screen {
             int bg = sel ? 0xDD122E8A : (hover ? 0xDD555555 : 0xDD333333);
             graphics.fill(x, y, x + cardW, y + cardH, bg);
 
+            String roomName = r.name;
+            if ("name_not_approved".equals(roomName)) {
+                roomName = Component.translatable("voxlink.room.name_not_approved").getString();
+            }
             String lock = r.hasPassword ? "\u00a7c\u2612" : "\u00a7a\u2610";
 
             int textX = x + 6;
             int textY = y + 5;
 
-            graphics.drawString(Minecraft.getInstance().font, lock + " " + truncate(r.name, cardW / 6 - 2), textX, textY, 0xFFFFFFFF);
+            graphics.drawString(Minecraft.getInstance().font, lock + " " + truncate(roomName, cardW / 6 - 2), textX, textY, 0xFFFFFFFF);
             graphics.drawString(Minecraft.getInstance().font, "\u00a77" + r.code, textX, textY + 11, 0xFFAAAAAA);
             graphics.drawString(Minecraft.getInstance().font, "\u00a7f" + r.players + "/" + r.maxPlayers, textX, textY + 22, 0xFFCCCCCC);
 
@@ -478,6 +489,9 @@ public class RoomBrowserScreen extends Screen {
     }
 
     private String getCategoryLabel(String category) {
+        if (DEFAULT_CATEGORY_KEYS.contains(category)) {
+            return Component.translatable("voxlink.category." + category).getString();
+        }
         return categoryMap.getOrDefault(category, category);
     }
 
