@@ -1,30 +1,47 @@
-VoxLink —— 和你的好友快速进行联机，或寻找志同道合的好友 :D
+# VoxLink
 
-你开存档，点创建房间，拿到一个6位房间码。把码发给朋友，朋友输进来，等着，连上了就进服。不用配端口映射，不用改路由器，不用开服务器，甚至不用知道什么叫公网IP。装模组，建房，发码，完事。
+Play with your friends, or find new ones in the lobby :D
 
-目前是Beta版本，联机很不稳定 T_T。有时候几秒就进去，有时候怎么都连不上。这个跟双方的网络环境强相关——同运营商、家用宽带的成功率很高，校园网、企业网、手机热点就差一些。对方也是对称NAT的话就基本没戏了。如果一次没连上，双方都重启游戏试试，NAT端口刷新后可能会好。Beta就是这样，我们每次更新都在改进打洞策略，覆盖的NAT组合会越来越多 >_<
+和好友联机，或在大厅找到新朋友 :D
 
-感谢XIOPNM在300多次测试中，参与异地测试200多次
+---
 
-关于房间
+## How to play / 使用方法
 
-房间本身没有人数限制，支持非正版玩家(离线玩家)，但在大厅开放时，房间名会经AI审核后才展示，延迟经测试，广东到江西约是15～20ms左右，主要看双方的网络情况
+Open your world, create a room, get a **6-digit code**, share with your friend, they enter it, done. No port forwarding, no router config, no public IP needed.
 
-房间大厅
+房主创建存档后点击"创建房间"，系统生成**6位房间码**。将房间码分享给好友，好友输入后等待连接即可。无需端口映射、路由器配置或公网IP知识。
 
-建房的时候可以选公开，你的房间就会出现在大厅里。别人看到感兴趣就能点进来。大厅不暴露你的IP，一切连接还是走P2P打洞。系统按标签分类，帮你更快找到玩伴。
+> Beta — success depends heavily on your network. Same ISP home broadband works well. Campus WiFi, office network, mobile hotspot less reliable. If one side is **symmetric NAT**, it's tough. Both restart the game if it fails, fresh NAT ports sometimes help.
+>
+> 当前为Beta版本，连接稳定性受网络环境影响。同运营商家用宽带成功率较高；校园网、企业网、手机热点成功率较低。双方对称NAT时连接困难。首次失败建议双方重启刷新NAT端口。
 
-关于兼容
+Huge thanks to **XIOPNM**, 200+ remote tests out of 300+, absolute legend / 特别感谢XIOPNM在300多次测试中参与异地测试200多次。
 
-目前对部分语音模组（如Simple Voice Chat），还有ViaVersion ，ViaFabric等进行了兼容，语言支持了English，简体中文，繁體中文，日本語，한국어，Français，Deutsch，Español，Русский，Português (Brasil)，العربية，还有...文言文
+## Rooms / 房间
 
-遇到BUG怎么办
+No player limit, offline players supported. Room names get AI checked before going public. Latency ~15-20ms Guangdong to Jiangxi (depends on your network). Public rooms show in the lobby without exposing IPs — all traffic stays P2P. Tags help find the right room.
 
-提Issues，一定要带日志。建房方和加入方的都带上，日志路径：.minecraft/versions/你的版本/logs/latest.log。顺便描述一下双方是什么网络环境——家里宽带？校园网？手机热点？没有日志我真的猜不到你那边发生了什么 orz
+无人数限制，支持离线玩家。房间名需AI审核后展示。经测试广东至江西约15-20ms延迟。大厅不暴露IP，所有连接P2P直连。按标签分类便于查找。
 
-技术原理
+## Compatibility / 兼容性
 
-UDP打洞 + STUN协议探测NAT类型，打洞策略参考了EasyTier。连接建立后用自研的可靠UDP传输承载MC流量。信令服务器只在连接阶段交换双方地址，游戏数据全程P2P直连不过服务器。纯Java实现，没有native依赖，Windows/Linux/macOS/Android都能跑。
-部分代码由AI辅助生成
+Works with **Simple Voice Chat**, **ViaVersion**, **ViaFabric**, **Floodgate** (Bedrock). 12 languages: English, 简体中文, 繁體中文, 日本語, 한국어, Français, Deutsch, Español, Русский, Português (Brasil), العربية, 文言文.
 
-目前只支持Fabric 1.21.11，后续会兼容更多版本^^
+## Bugs? / 问题反馈
+
+[GitHub Issues](https://github.com/AUGUHDAR/VoxLink/issues) — bring both sides' logs:
+```
+.minecraft/versions/<version>/logs/latest.log
+```
+Describe your network setup (home broadband / campus / hotspot). Both logs or I'm guessing.
+
+提交Issue请附带双方日志，描述双方网络环境（家庭宽带/校园网/手机热点）。
+
+## How it works / 技术实现
+
+**UDP hole punching + STUN** NAT detection. Punch strategy references EasyTier, Tailscale, libp2p DCUtR, P-PRE. Custom **reliable UDP transport** for MC traffic. Signaling server only swaps addresses at handshake — game data is 100% P2P, never touches the server. Pure Java, no native deps. Runs on **Windows / Linux / macOS / Android**.
+
+采用UDP打洞结合STUN协议探测NAT类型，打洞策略参考EasyTier/Tailscale/libp2p DCUtR/P-PRE。连接建立后使用自研可靠UDP传输承载Minecraft流量。信令服务器仅在握手阶段交换地址，游戏数据全程P2P直连。纯Java实现，无native依赖，支持全平台。
+
+**Fabric 1.21.11** only for now. Some code generated with AI assistance / 部分代码由AI辅助生成。
