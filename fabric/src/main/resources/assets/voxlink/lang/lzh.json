@@ -40,6 +40,7 @@
     "voxlink.chat.joined_waiting_host": "§7[VoxLink] 已入室！妙哉，待室主應答...",
     "voxlink.chat.creating_room": "§e[VoxLink] 正在建室...",
     "voxlink.chat.saving_settings": "§e[VoxLink] 正在存設，請稍候...",
+    "voxlink.room.name_not_approved": "未審房",
     "voxlink.chat.name_not_approved": "§e[VoxLink] 室名未獲准，已換為預設之名，惜哉",
     "voxlink.chat.room_created": "§a§l VoxLink 室已建成！善哉善哉",
     "voxlink.chat.room_code_label": "§e> 室碼: ",

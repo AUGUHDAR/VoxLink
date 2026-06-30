@@ -40,6 +40,7 @@
     "voxlink.chat.joined_waiting_host": "§7[VoxLink] Entrou! Esperando o host...",
     "voxlink.chat.creating_room": "§e[VoxLink] Criando sala...",
     "voxlink.chat.saving_settings": "§e[VoxLink] Salvando configurações, um momentinho...",
+    "voxlink.room.name_not_approved": "Sala não aprovada",
     "voxlink.chat.name_not_approved": "§e[VoxLink] Nome não aprovado, usando o padrão",
     "voxlink.chat.room_created": "§a§l Sala VoxLink criada! :D",
     "voxlink.chat.room_code_label": "§e> Código da sala: ",

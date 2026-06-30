@@ -83,6 +83,7 @@ public class ReliableUdpTransport implements AutoCloseable {
     private final ConcurrentHashMap<Integer, ConcurrentHashMap<Integer, byte[]>> fecRecvGroup = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, byte[]> fecRecvXor = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, int[]> fecRecvLengths = new ConcurrentHashMap<>();
+    private volatile int minActiveGroupId = Integer.MAX_VALUE;
 
     public ReliableUdpTransport(DatagramSocket socket, InetSocketAddress remoteAddress) {
         this.socket = socket;
@@ -168,6 +169,17 @@ public class ReliableUdpTransport implements AutoCloseable {
 
         int groupId = seq / FEC_GROUP_SIZE;
         fecRecvGroup.computeIfAbsent(groupId, k -> new ConcurrentHashMap<>()).put(seq, payload);
+        // FEC内存泄漏防护: 淘汰过期的group(比当前最小活跃group小10个以上的)
+        if (groupId < minActiveGroupId) minActiveGroupId = groupId;
+        if (fecRecvGroup.size() > 20) {
+            int cutoff = minActiveGroupId + 10;
+            fecRecvGroup.keySet().removeIf(g -> g < cutoff);
+            fecRecvXor.keySet().removeIf(g -> g < cutoff);
+            fecRecvLengths.keySet().removeIf(g -> g < cutoff);
+            if (!fecRecvGroup.isEmpty()) {
+                minActiveGroupId = fecRecvGroup.keySet().stream().mapToInt(Integer::intValue).min().orElse(minActiveGroupId);
+            }
+        }
 
         synchronized (recvLock) {
             if (seq == nextExpectedSeq.get()) {
