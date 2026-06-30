@@ -40,6 +40,7 @@
     "voxlink.chat.joined_waiting_host": "§7[VoxLink] Вошли! Ожидание хоста...",
     "voxlink.chat.creating_room": "§e[VoxLink] Создание комнаты...",
     "voxlink.chat.saving_settings": "§e[VoxLink] Сохранение настроек, подождите...",
+    "voxlink.room.name_not_approved": "Непроверенная комната",
     "voxlink.chat.name_not_approved": "§e[VoxLink] Название не прошло модерацию, используется стандартное",
     "voxlink.chat.room_created": "§a§l Комната VoxLink создана! :D",
     "voxlink.chat.room_code_label": "§e> Код комнаты: ",

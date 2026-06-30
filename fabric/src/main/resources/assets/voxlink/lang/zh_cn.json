@@ -41,6 +41,7 @@
     "voxlink.chat.creating_room": "§e[VoxLink] 正在创建房间...",
     "voxlink.chat.saving_settings": "§e[VoxLink] 正在保存设置，稍等...",
     "voxlink.chat.name_not_approved": "§e[VoxLink] 房间名没通过审核，已换成默认名称啦",
+    "voxlink.room.name_not_approved": "未过审的房间",
     "voxlink.chat.room_created": "§a§l VoxLink 房间创建成功！ :D",
     "voxlink.chat.room_code_label": "§e> 房间代码: ",
     "voxlink.chat.click_to_copy": "点击复制",

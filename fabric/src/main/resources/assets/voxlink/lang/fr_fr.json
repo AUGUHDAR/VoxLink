@@ -40,6 +40,7 @@
     "voxlink.chat.joined_waiting_host": "§7[VoxLink] Rejoint ! En attente de l'hôte...",
     "voxlink.chat.creating_room": "§e[VoxLink] Création du salon...",
     "voxlink.chat.saving_settings": "§e[VoxLink] Sauvegarde des paramètres, un instant...",
+    "voxlink.room.name_not_approved": "Chambre non approuvée",
     "voxlink.chat.name_not_approved": "§e[VoxLink] Nom non approuvé, nom par défaut utilisé",
     "voxlink.chat.room_created": "§a§l VoxLink salon créé ! :D",
     "voxlink.chat.room_code_label": "§e> Code du salon : ",

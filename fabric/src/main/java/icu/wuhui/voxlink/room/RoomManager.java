@@ -710,6 +710,8 @@ if (wasPending) {
         ConnectionHelper.resetConnecting();
         roomLostReason = reason;
         stopScheduledTasks();
+        // 重置状态机到IDLE，避免卡在CONNECTED导致下次加入时非法转换
+        ConnectionState.reset();
         final RoomState captured = currentRoom.get();
         try {
         scheduler.execute(() -> {
@@ -1146,19 +1148,25 @@ if (wasPending) {
                 try {
                     Minecraft mc = Minecraft.getInstance();
                     if (mc == null) return;
-                    var server = mc.getSingleplayerServer();
-                    if (server == null) return;
-                    // 只OP远程玩家
-                    String hostName = mc.getUser().getName();
-                    for (var player : server.getPlayerList().getPlayers()) {
-                        String name = player.getName().getString();
-                        if (name.equals(hostName)) continue;
-                        server.getCommands().performPrefixedCommand(
-                            server.createCommandSourceStack(), "op " + name);
-                        VoxLinkMod.LOGGER.info("[RoomManager] 自动OP访客: {}", name);
-                    }
+                    // 服务端操作必须在主线程执行
+                    mc.execute(() -> {
+                        try {
+                            var server = mc.getSingleplayerServer();
+                            if (server == null) return;
+                            String hostName = mc.getUser().getName();
+                            for (var player : server.getPlayerList().getPlayers()) {
+                                String name = player.getName().getString();
+                                if (name.equals(hostName)) continue;
+                                server.getCommands().performPrefixedCommand(
+                                    server.createCommandSourceStack(), "op " + name);
+                                VoxLinkMod.LOGGER.info("[RoomManager] 自动OP访客: {}", name);
+                            }
+                        } catch (Exception e) {
+                            VoxLinkMod.LOGGER.warn("[RoomManager] 自动OP访客失败: {}", e.getMessage());
+                        }
+                    });
                 } catch (Exception e) {
-                    VoxLinkMod.LOGGER.warn("[RoomManager] 自动OP访客失败: {}", e.getMessage());
+                    VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected异常: {}", e.getMessage());
                 }
             }, 2, TimeUnit.SECONDS);
         }

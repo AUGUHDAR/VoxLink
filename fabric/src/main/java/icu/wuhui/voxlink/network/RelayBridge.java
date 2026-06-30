@@ -52,13 +52,11 @@ public class RelayBridge {
     public void startRelay(String peerAId, String peerBId,
                            ReliableUdpTransport transportA, ReliableUdpTransport transportB) {
         String relayKey = peerAId + "<->" + peerBId;
-        if (activeRelays.containsKey(relayKey)) {
+        RelaySession session = new RelaySession(peerAId, peerBId, transportA, transportB);
+        if (activeRelays.putIfAbsent(relayKey, session) != null) {
             LOGGER.info("[Relay] 中继会话已存在: {}", relayKey);
             return;
         }
-
-        RelaySession session = new RelaySession(peerAId, peerBId, transportA, transportB);
-        activeRelays.put(relayKey, session);
         session.startForwarding();
         LOGGER.info("[Relay] 中继启动: {} (A={}, B={})", relayKey, peerAId, peerBId);
 

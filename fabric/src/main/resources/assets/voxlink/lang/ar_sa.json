@@ -40,6 +40,7 @@
     "voxlink.chat.joined_waiting_host": "§7[VoxLink] تم الانضمام! بانتظار المضيف...",
     "voxlink.chat.creating_room": "§e[VoxLink] إنشاء الغرفة...",
     "voxlink.chat.saving_settings": "§e[VoxLink] حفظ الإعدادات، انتظر قليلاً...",
+    "voxlink.room.name_not_approved": "غرفة غير معتمدة",
     "voxlink.chat.name_not_approved": "§e[VoxLink] اسم الغرفة لم يُعتمد، تم استخدام الاسم الافتراضي",
     "voxlink.chat.room_created": "§a§l تم إنشاء غرفة VoxLink! :D",
     "voxlink.chat.room_code_label": "§e> رمز الغرفة: ",

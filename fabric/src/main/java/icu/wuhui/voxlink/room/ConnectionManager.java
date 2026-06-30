@@ -3038,7 +3038,13 @@ return null;
         conePuncher.punch(fRelayIp, fRelayPort)
                 .orTimeout(15, TimeUnit.SECONDS)
                 .thenAccept(socket -> {
-                    connectionWon.set(true);
+                    if (!connectionWon.compareAndSet(false, true)) {
+                        try { conePuncher.close(); } catch (Exception ignored) {}
+                        return;
+                    }
+                    conePuncher.markSocketTransferred();
+                    killAllConnectionAttempts();
+                    conePuncher.stopPunch();
                     ReliableUdpTransport transport = new ReliableUdpTransport(socket, new java.net.InetSocketAddress(fRelayIp, fRelayPort));
                     activeUdpTransports.put("relay_cone", transport);
                     transport.start();
@@ -3054,6 +3060,8 @@ return null;
                     }, 2, TimeUnit.SECONDS);
                 })
                 .exceptionally(e -> {
+                    try { conePuncher.close(); } catch (Exception ignored) {}
+                    activeHolePunchers.remove("relay_to_cone");
                     showConnectFailedFinal(state);
                     return null;
                 });
@@ -3088,13 +3096,13 @@ return null;
         UdpHolePuncher peerPuncher = new UdpHolePuncher();
         try { peerPuncher.createSocket(); } catch (Exception e) { return; }
         activeHolePunchers.put("relay_to_sym", peerPuncher);
-        peerPuncher.markSocketTransferred();
         String fTargetIp = targetIp;
         int fTargetPort = targetPort;
         final ReliableUdpTransport fHostTransport = hostTransport;
         peerPuncher.punch(fTargetIp, fTargetPort)
                 .orTimeout(15, TimeUnit.SECONDS)
                 .thenAccept(socket -> {
+                    peerPuncher.markSocketTransferred();
                     ReliableUdpTransport peerTransport = new ReliableUdpTransport(socket, new java.net.InetSocketAddress(fTargetIp, fTargetPort));
                     peerTransport.start();
                     activeUdpTransports.put(targetClientId != null ? targetClientId : "sym_relayed", peerTransport);
@@ -3104,6 +3112,8 @@ return null;
                     signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_accept", reply, "host");
                 })
                 .exceptionally(e -> {
+                    try { peerPuncher.close(); } catch (Exception ignored) {}
+                    activeHolePunchers.remove("relay_to_sym");
                     signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), "host");
                     return null;
                 });

@@ -40,6 +40,7 @@
     "voxlink.chat.joined_waiting_host": "§7[VoxLink] 참가 성공! 호스트 응답 대기 중...",
     "voxlink.chat.creating_room": "§e[VoxLink] 방 만들기 중...",
     "voxlink.chat.saving_settings": "§e[VoxLink] 설정 저장 중, 잠깐만요...",
+    "voxlink.room.name_not_approved": "미승인 방",
     "voxlink.chat.name_not_approved": "§e[VoxLink] 방 이름이 승인되지 않아 기본 이름으로 변경했어요",
     "voxlink.chat.room_created": "§a§l VoxLink 방 생성 성공! :D",
     "voxlink.chat.room_code_label": "§e> 방 코드: ",

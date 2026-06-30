@@ -40,6 +40,7 @@
     "voxlink.chat.joined_waiting_host": "§7[VoxLink] Beigetreten! Warte auf Host...",
     "voxlink.chat.creating_room": "§e[VoxLink] Erstelle Raum...",
     "voxlink.chat.saving_settings": "§e[VoxLink] Speichere Einstellungen, einen Moment...",
+    "voxlink.room.name_not_approved": "Nicht genehmigter Raum",
     "voxlink.chat.name_not_approved": "§e[VoxLink] Name nicht genehmigt, Standardname verwendet",
     "voxlink.chat.room_created": "§a§l VoxLink-Raum erstellt! :D",
     "voxlink.chat.room_code_label": "§e> Raumcode: ",
