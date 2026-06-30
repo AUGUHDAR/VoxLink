@@ -80,6 +80,20 @@ public class VoxLinkScreen extends Screen {
                 button -> onClose()
         ).bounds(centerX - 100, this.height - 28, 200, 20).build());
 
+        // P2P中继开关: 人人为我，我为人人
+        boolean relayOn = VoxLinkMod.getConfig().isRelayEnabled();
+        addRenderableWidget(Button.builder(
+                Component.translatable("voxlink.relay.toggle",
+                        Component.translatable(relayOn ? "voxlink.relay.on" : "voxlink.relay.off")),
+                button -> {
+                    boolean newVal = !VoxLinkMod.getConfig().isRelayEnabled();
+                    VoxLinkMod.getConfig().setRelayEnabled(newVal);
+                    VoxLinkMod.getConfig().save();
+                    button.setMessage(Component.translatable("voxlink.relay.toggle",
+                            Component.translatable(newVal ? "voxlink.relay.on" : "voxlink.relay.off")));
+                }
+        ).bounds(centerX - 100, this.height - 52, 200, 20).build());
+
         needsRebuild = false;
     }
 
@@ -101,6 +115,7 @@ public class VoxLinkScreen extends Screen {
                 clippedCode = clippedCode + "...";
             }
             graphics.drawCenteredString(this.font, clippedCode, centerX, 36, 0xFFFFFF55);
+
             if (!currentRoom.isHost()) {
                 Component connMode = currentRoom.getConnectionMode();
                 if (connMode != null && !connMode.getString().isEmpty()) {
@@ -116,6 +131,14 @@ public class VoxLinkScreen extends Screen {
                 }
             }
         }
+
+        // 中继开关说明（始终显示）
+        graphics.drawCenteredString(this.font,
+                Component.translatable("voxlink.relay.slogan").getString(),
+                centerX, this.height - 64, 0xFFAAAAAA);
+        graphics.drawCenteredString(this.font,
+                Component.translatable("voxlink.relay.hint").getString(),
+                centerX, this.height - 74, 0xFF888888);
 
     }
 

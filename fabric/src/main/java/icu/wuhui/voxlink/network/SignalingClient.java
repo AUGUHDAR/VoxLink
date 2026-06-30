@@ -37,7 +37,9 @@ public class SignalingClient {
             java.util.Map.entry("get_categories", "/categories"),
             java.util.Map.entry("report_ready", "/topology/report_ready"),
             java.util.Map.entry("poll_topology", "/topology/poll"),
-            java.util.Map.entry("get_bedrock", "/room/bedrock")
+            java.util.Map.entry("get_bedrock", "/room/bedrock"),
+            java.util.Map.entry("relay_register", "/relay/register"),
+            java.util.Map.entry("relay_candidates", "/relay/candidates")
     );
 
     private final VoxLinkConfig config;
@@ -271,6 +273,23 @@ public class SignalingClient {
         body.addProperty("port", port);
         body.addProperty("action", "check_port");
         return post(buildPath("check_port"), body);
+    }
+
+    public CompletableFuture<ApiResponse> registerRelayPeer(String clientId, String roomCode, String natType,
+                                                              String mappedIp, int mappedPort, boolean relayEnabled) {
+        JsonObject body = new JsonObject();
+        body.addProperty("clientId", clientId);
+        body.addProperty("roomCode", roomCode);
+        body.addProperty("natType", natType);
+        body.addProperty("mappedIp", mappedIp);
+        body.addProperty("mappedPort", mappedPort);
+        body.addProperty("relayEnabled", relayEnabled);
+        body.addProperty("action", "relay_register");
+        return post(buildPath("relay_register"), body);
+    }
+
+    public CompletableFuture<ApiResponse> fetchRelayCandidates() {
+        return getOnce(buildGetPath("relay_candidates", null), 5000);
     }
 
     public CompletableFuture<ApiResponse> getBedrockInfo(String code) {

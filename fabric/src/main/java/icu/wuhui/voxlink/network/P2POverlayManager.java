@@ -325,7 +325,7 @@ public class P2POverlayManager {
         JsonObject pong = new JsonObject();
         pong.addProperty("type", "pong");
         pong.addProperty("from", nodeId);
-        pong.addProperty("seq", packet.has("seq") ? packet.get("seq").getAsLong() : 0);
+        pong.addProperty("seq", packet.has("seq") ? packet.get("seq").getAsInt() : 0);
         if (packet.has("dir")) {
             pong.addProperty("dir", packet.get("dir").getAsString());
         }

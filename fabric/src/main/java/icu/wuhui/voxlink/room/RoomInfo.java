@@ -46,6 +46,32 @@ public class RoomInfo {
     private volatile String myMappedIp = null;
     private volatile int myMappedPort = 0;
 
+    // P2P中继: 跟踪房间内各peer的NAT类型(用于寻找Cone中继节点)
+    private final java.util.concurrent.ConcurrentHashMap<String, PeerInfo> peerMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile boolean connectionAttemptFailed = false;
+
+    public static class PeerInfo {
+        public final String clientId;
+        public volatile String natType = "unknown";
+        public volatile boolean relayEnabled = true;
+        public volatile String mappedIp;
+        public volatile int mappedPort;
+        public PeerInfo(String clientId) { this.clientId = clientId; }
+    }
+
+    public void addOrUpdatePeer(String clientId, String natType, String mappedIp, int mappedPort) {
+        PeerInfo info = peerMap.computeIfAbsent(clientId, id -> new PeerInfo(id));
+        if (natType != null) info.natType = natType;
+        if (mappedIp != null) info.mappedIp = mappedIp;
+        if (mappedPort > 0) info.mappedPort = mappedPort;
+    }
+    public PeerInfo getPeer(String clientId) { return peerMap.get(clientId); }
+    public void removePeer(String clientId) { peerMap.remove(clientId); }
+    public java.util.Collection<PeerInfo> getPeers() { return peerMap.values(); }
+    public int getPeerCount() { return peerMap.size(); }
+    public boolean isConnectionAttemptFailed() { return connectionAttemptFailed; }
+    public void setConnectionAttemptFailed(boolean v) { this.connectionAttemptFailed = v; }
+
     public enum PortStatus {
         UNKNOWN(Component.translatable("voxlink.port_status.unknown")),
         REACHABLE(Component.translatable("voxlink.port_status.reachable")),

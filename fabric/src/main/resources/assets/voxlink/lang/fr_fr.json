@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "Triches : ON",
     "voxlink.cheats.off": "Triches : OFF",
     "voxlink.p2p.on": "P2P : ACTIVÉ",
-    "voxlink.p2p.off": "P2P : DÉSACTIVÉ"
+    "voxlink.p2p.off": "P2P : DÉSACTIVÉ",
+    "voxlink.relay.toggle": "Relais P2P: %s",
+    "voxlink.relay.on": "OUI",
+    "voxlink.relay.off": "NON",
+    "voxlink.relay.slogan": "Un pour tous, tous pour un...",
+    "voxlink.relay.hint": "Autorisez votre appareil à relayer pour les autres (vous permet aussi d'utiliser le relais)",
+    "voxlink.relay.started": "Votre appareil relaye les données entre les joueurs",
+    "voxlink.relay.trying": "Connexion directe échouée, essai de relais via d'autres joueurs...",
+    "voxlink.relay.host_notice": "Un joueur ne peut pas se connecter directement, essai de relais...",
+    "voxlink.relay.connected_via": "Connecté via relais"
 }

@@ -764,6 +764,8 @@ public class StunProbe {
         }
 
         int msgLen = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
+        int maxMsgLen = data.length - 20;
+        if (msgLen > maxMsgLen) msgLen = maxMsgLen;
         VoxLinkMod.LOGGER.info("[StunProbe] 绑定响应: dataLen={}, msgLen={}", data.length, msgLen);
         int offset = 20;
 

@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "Trapaças: LIGADO",
     "voxlink.cheats.off": "Trapaças: DESLIGADO",
     "voxlink.p2p.on": "P2P: LIGADO",
-    "voxlink.p2p.off": "P2P: DESLIGADO"
+    "voxlink.p2p.off": "P2P: DESLIGADO",
+    "voxlink.relay.toggle": "Retransmissão P2P: %s",
+    "voxlink.relay.on": "ON",
+    "voxlink.relay.off": "OFF",
+    "voxlink.relay.slogan": "Um por todos, todos por um...",
+    "voxlink.relay.hint": "Permite que seu dispositivo retransmita para outros (também permite que você use relay)",
+    "voxlink.relay.started": "Seu dispositivo está retransmitindo dados entre jogadores",
+    "voxlink.relay.trying": "Conexão direta falhou, tentando retransmissão através de outros jogadores...",
+    "voxlink.relay.host_notice": "Um jogador não pode conectar diretamente, tentando retransmissão...",
+    "voxlink.relay.connected_via": "Conectado via retransmissão"
 }

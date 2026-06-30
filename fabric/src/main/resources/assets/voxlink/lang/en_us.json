@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "Cheats: ON",
     "voxlink.cheats.off": "Cheats: OFF",
     "voxlink.p2p.on": "P2P: ON",
-    "voxlink.p2p.off": "P2P: OFF"
+    "voxlink.p2p.off": "P2P: OFF",
+    "voxlink.relay.toggle": "P2P Relay: %s",
+    "voxlink.relay.on": "ON",
+    "voxlink.relay.off": "OFF",
+    "voxlink.relay.slogan": "One for all, all for one...",
+    "voxlink.relay.hint": "Allow your device to relay data for others (also enables relay for you)",
+    "voxlink.relay.started": "Your device is now relaying data between players",
+    "voxlink.relay.trying": "Direct connection failed, trying relay through other players...",
+    "voxlink.relay.host_notice": "A joining player cannot connect directly, trying relay...",
+    "voxlink.relay.connected_via": "Connected via relay"
 }

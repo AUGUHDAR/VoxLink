@@ -66,7 +66,7 @@ public class P2PBridge {
                 running.set(false);
                 return -1;
             }
-        });
+        }, getOrCreateExecutor());
     }
 
     private static void acceptHostConnections(ServerSocket ss, int minecraftPort) {
@@ -169,7 +169,7 @@ public class P2PBridge {
                 running.set(false);
                 return -1;
             }
-        }).thenCompose(result -> {
+        }, getOrCreateExecutor()).thenCompose(result -> {
             if (result > 0 || attempt >= MAX_RETRY || cancelled.get()) return CompletableFuture.completedFuture(result);
             CompletableFuture<Integer> retry = new CompletableFuture<>();
             Thread t = new Thread(() -> {
@@ -248,7 +248,7 @@ public class P2PBridge {
                 running.set(false);
                 return -1;
             }
-        }).thenCompose(result -> {
+        }, getOrCreateExecutor()).thenCompose(result -> {
             if (result > 0 || attempt >= MAX_RETRY || cancelled.get()) return CompletableFuture.completedFuture(result);
             CompletableFuture<Integer> retry = new CompletableFuture<>();
             Thread t = new Thread(() -> {
@@ -512,7 +512,6 @@ public class P2PBridge {
         joinerBridgeConnected.set(false);
         tcpJoinerBridgeConnectedV4.set(false);
         tcpJoinerBridgeConnectedV6.set(false);
-        cancelled.set(false);
 
         ExecutorService oldExecutor = bridgeExecutor;
         bridgeExecutor = null;

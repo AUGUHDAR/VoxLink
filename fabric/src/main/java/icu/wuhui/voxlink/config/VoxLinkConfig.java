@@ -26,6 +26,7 @@ public class VoxLinkConfig {
     private volatile int signalPollInterval;
     private volatile int connectionTimeout;
     private volatile int maxReconnectAttempts;
+    private volatile boolean relayEnabled = true;
 
     public VoxLinkConfig() {
         this.serverUrl = DEFAULT_SERVER_URL;
@@ -36,6 +37,7 @@ public class VoxLinkConfig {
         this.signalPollInterval = 3000;
         this.connectionTimeout = 20000;
         this.maxReconnectAttempts = 3;
+        this.relayEnabled = true;
     }
 
     public static VoxLinkConfig load() {
@@ -108,4 +110,6 @@ public class VoxLinkConfig {
     public int getSignalPollInterval() { return signalPollInterval; }
     public int getConnectionTimeout() { return connectionTimeout; }
     public int getMaxReconnectAttempts() { return maxReconnectAttempts; }
+    public boolean isRelayEnabled() { return relayEnabled; }
+    public void setRelayEnabled(boolean relayEnabled) { this.relayEnabled = relayEnabled; }
 }

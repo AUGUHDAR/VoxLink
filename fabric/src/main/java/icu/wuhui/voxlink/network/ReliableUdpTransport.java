@@ -624,7 +624,7 @@ public class ReliableUdpTransport implements AutoCloseable {
             synchronized (recvLock) {
                 int total = 0;
                 if (currentChunk != null) total += currentChunk.length - currentPos;
-                for (byte[] chunk : chunks) total += chunk.length;
+                for (byte[] chunk : chunks.toArray(new byte[0][])) total += chunk.length;
                 return total;
             }
         }

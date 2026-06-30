@@ -80,6 +80,7 @@ public class RoomManager {
     public void shutdown() {
         connectionManager.setConnectionCycleActive(false);
         ConnectionHelper.resetConnecting();
+        connectionManager.shutdown();
         stopScheduledTasks();
         scheduler.shutdownNow();
     }
@@ -1110,6 +1111,12 @@ if (wasPending) {
             case "reverse_holepunch_offer" -> connectionManager.handleReverseHolepunchOffer(from, data);
             case "reverse_punch_info" -> connectionManager.handleReversePunchInfo(from, data);
             case "tcp_simopen_request" -> connectionManager.handleTcpSimopenRequest(from, data);
+
+            case "relay_request" -> connectionManager.handleRelayRequest(from, data);
+            case "relay_accept" -> connectionManager.handleRelayAccept(from, data);
+            case "relay_declined" -> connectionManager.handleRelayDeclined(from, data);
+            case "relay_setup" -> connectionManager.handleRelaySetup(from, data);
+            case "relay_notify" -> connectionManager.handleRelayNotify(from, data);
 
             case "topology_optimization_done" -> topologyClient.handleTopologySignal(type, data);
             case "topology_change" -> topologyClient.handleTopologySignal(type, data);

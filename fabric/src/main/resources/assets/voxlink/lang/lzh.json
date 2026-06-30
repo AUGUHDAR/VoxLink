@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "弊: 開",
     "voxlink.cheats.off": "弊: 關",
     "voxlink.p2p.on": "P2P: 開",
-    "voxlink.p2p.off": "P2P: 關"
+    "voxlink.p2p.off": "P2P: 關",
+    "voxlink.relay.toggle": "P2P中繼: %s",
+    "voxlink.relay.on": "啟",
+    "voxlink.relay.off": "關",
+    "voxlink.relay.slogan": "人人為我，我為人人嘛..",
+    "voxlink.relay.hint": "許汝機為他人中繼（汝亦可用他人中繼）",
+    "voxlink.relay.started": "汝機正為玩家中繼資料",
+    "voxlink.relay.trying": "直連不通，試經他人中繼...",
+    "voxlink.relay.host_notice": "有客不能直連，試中繼...",
+    "voxlink.relay.connected_via": "已藉中繼相連"
 }

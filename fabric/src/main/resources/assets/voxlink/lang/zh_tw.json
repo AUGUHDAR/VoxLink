@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "作弊: 開",
     "voxlink.cheats.off": "作弊: 關",
     "voxlink.p2p.on": "P2P: 開",
-    "voxlink.p2p.off": "P2P: 關"
+    "voxlink.p2p.off": "P2P: 關",
+    "voxlink.relay.toggle": "P2P中繼: %s",
+    "voxlink.relay.on": "開啟",
+    "voxlink.relay.off": "關閉",
+    "voxlink.relay.slogan": "人人為我，我為人人嘛..",
+    "voxlink.relay.hint": "允許你的裝置為他人中繼資料（同時你也能使用他人中繼）",
+    "voxlink.relay.started": "你的裝置正在為其他玩家中繼資料",
+    "voxlink.relay.trying": "直連失敗，正在嘗試透過其他玩家中繼...",
+    "voxlink.relay.host_notice": "一個加入的玩家無法直連，正在嘗試中繼...",
+    "voxlink.relay.connected_via": "已透過中繼連接"
 }

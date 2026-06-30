@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "غش: مفعّل",
     "voxlink.cheats.off": "غش: معطّل",
     "voxlink.p2p.on": "P2P: مفعّل",
-    "voxlink.p2p.off": "P2P: معطّل"
+    "voxlink.p2p.off": "P2P: معطّل",
+    "voxlink.relay.toggle": "تتابع P2P: %s",
+    "voxlink.relay.on": "تشغيل",
+    "voxlink.relay.off": "إيقاف",
+    "voxlink.relay.slogan": "واحد للجميع، والجميع لواحد...",
+    "voxlink.relay.hint": "السماح لجهازك بإعادة التوجيه للآخرين (يمكّنك أيضاً من استخدام التتابع)",
+    "voxlink.relay.started": "جهازك يعيد توجيه البيانات بين اللاعبين",
+    "voxlink.relay.trying": "فشل الاتصال المباشر، جاري محاولة التتابع عبر لاعبين آخرين...",
+    "voxlink.relay.host_notice": "لا يمكن للاعب الاتصال مباشرة، جاري محاولة التتابع...",
+    "voxlink.relay.connected_via": "متصل عبر التتابع"
 }

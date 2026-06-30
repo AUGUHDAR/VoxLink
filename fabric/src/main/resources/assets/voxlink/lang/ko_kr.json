@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "치트: 켜짐",
     "voxlink.cheats.off": "치트: 꺼짐",
     "voxlink.p2p.on": "P2P: 켜짐",
-    "voxlink.p2p.off": "P2P: 꺼짐"
+    "voxlink.p2p.off": "P2P: 꺼짐",
+    "voxlink.relay.toggle": "P2P 릴레이: %s",
+    "voxlink.relay.on": "켜기",
+    "voxlink.relay.off": "끄기",
+    "voxlink.relay.slogan": "모두를 위해, 나를 위해...",
+    "voxlink.relay.hint": "당신의 기기가 다른 사람의 릴레이를 허용 (당신도 릴레이 사용 가능)",
+    "voxlink.relay.started": "당신의 기기가 플레이어 간 데이터 릴레이 중",
+    "voxlink.relay.trying": "직접 연결 실패, 다른 플레이어 릴레이 시도 중...",
+    "voxlink.relay.host_notice": "참가 플레이어가 직접 연결 불가, 릴레이 시도 중...",
+    "voxlink.relay.connected_via": "릴레이를 통해 연결됨"
 }
