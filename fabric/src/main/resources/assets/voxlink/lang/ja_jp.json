@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "チート: ON",
     "voxlink.cheats.off": "チート: OFF",
     "voxlink.p2p.on": "P2P: ON",
-    "voxlink.p2p.off": "P2P: OFF"
+    "voxlink.p2p.off": "P2P: OFF",
+    "voxlink.relay.toggle": "P2P中継: %s",
+    "voxlink.relay.on": "オン",
+    "voxlink.relay.off": "オフ",
+    "voxlink.relay.slogan": "一人は皆のために、皆は一人のために…",
+    "voxlink.relay.hint": "あなたのデバイスが他の人の中継を許可（あなたも中継を利用可能に）",
+    "voxlink.relay.started": "あなたのデバイスが他のプレイヤー間でデータ中継中",
+    "voxlink.relay.trying": "直接接続失敗、他のプレイヤーの中継を試みる...",
+    "voxlink.relay.host_notice": "参加プレイヤーが直接接続できない、中継を試みる...",
+    "voxlink.relay.connected_via": "中継経由で接続"
 }

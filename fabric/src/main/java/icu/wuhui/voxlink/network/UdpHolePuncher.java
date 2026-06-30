@@ -64,6 +64,11 @@ public class UdpHolePuncher {
     private volatile ScheduledFuture<?> timeoutFuture;
 
     private volatile boolean socketTransferred = false;
+
+    public void markSocketTransferred() {
+        this.socketTransferred = true;
+    }
+
     private volatile CompletableFuture<DatagramSocket> activeResult;
 
     private volatile Consumer<InetSocketAddress> onPeerPunchReceived;

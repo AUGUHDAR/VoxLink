@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "Cheats: AN",
     "voxlink.cheats.off": "Cheats: AUS",
     "voxlink.p2p.on": "P2P: AN",
-    "voxlink.p2p.off": "P2P: AUS"
+    "voxlink.p2p.off": "P2P: AUS",
+    "voxlink.relay.toggle": "P2P-Relay: %s",
+    "voxlink.relay.on": "AN",
+    "voxlink.relay.off": "AUS",
+    "voxlink.relay.slogan": "Einer für alle, alle für einen...",
+    "voxlink.relay.hint": "Erlaubt deinem Gerät, Daten für andere weiterzuleiten (du kannst auch Relay nutzen)",
+    "voxlink.relay.started": "Dein Gerät leitet Daten zwischen Spielern weiter",
+    "voxlink.relay.trying": "Direkte Verbindung fehlgeschlagen, versuche Relay über andere Spieler...",
+    "voxlink.relay.host_notice": "Ein Spieler kann nicht direkt verbinden, versuche Relay...",
+    "voxlink.relay.connected_via": "Verbunden über Relay"
 }

@@ -7,6 +7,8 @@ import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public final class GlobalIPs {
@@ -26,6 +28,11 @@ public final class GlobalIPs {
     };
 
     private static final int TIMEOUT_MS = 5000;
+    private static final ExecutorService IP_FETCH_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "VoxLink-GlobalIP");
+        t.setDaemon(true);
+        return t;
+    });
 
     public static CompletableFuture<String> fetchIPv4() {
         CompletableFuture<String> result = new CompletableFuture<>();
@@ -58,7 +65,7 @@ public final class GlobalIPs {
                 VoxLinkMod.LOGGER.debug("[GlobalIP] {}端点{}失败，试下一个", label, endpoints[index]);
                 tryFetchEndpoints(endpoints, index + 1, result, label);
             }
-        });
+        }, IP_FETCH_EXECUTOR);
     }
 
     private static String fetchFromUrl(String urlStr) {

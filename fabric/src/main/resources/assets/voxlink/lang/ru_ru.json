@@ -171,5 +171,14 @@
     "voxlink.cheats.on": "Читы: ВКЛ",
     "voxlink.cheats.off": "Читы: ВЫКЛ",
     "voxlink.p2p.on": "P2P: ВКЛ",
-    "voxlink.p2p.off": "P2P: ВЫКЛ"
+    "voxlink.p2p.off": "P2P: ВЫКЛ",
+    "voxlink.relay.toggle": "P2P-ретрансляция: %s",
+    "voxlink.relay.on": "ВКЛ",
+    "voxlink.relay.off": "ВЫКЛ",
+    "voxlink.relay.slogan": "Один за всех, все за одного...",
+    "voxlink.relay.hint": "Разрешить вашему устройству ретранслировать для других (также включает ретрансляцию для вас)",
+    "voxlink.relay.started": "Ваше устройство ретранслирует данные между игроками",
+    "voxlink.relay.trying": "Прямое соединение не удалось, попытка ретрансляции через других игроков...",
+    "voxlink.relay.host_notice": "Игрок не может подключиться напрямую, попытка ретрансляции...",
+    "voxlink.relay.connected_via": "Подключено через ретрансляцию"
 }
