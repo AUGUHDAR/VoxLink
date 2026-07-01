@@ -548,6 +548,21 @@ public class ConnectionManager {
             if (mapped != null) {
                 fOfferData.addProperty("hostMappedIp", mapped.ip());
                 fOfferData.addProperty("hostMappedPort", mapped.port());
+            } else {
+                // MC端口UDP被防火墙挡了, 用NAT探测时的动态socket映射地址兜底
+                if (stunProbeResult != null && !stunProbeResult.serverResults.isEmpty()) {
+                    for (StunProbe.StunServerResult sr : stunProbeResult.serverResults) {
+                        if (sr.reachable && sr.mappedIp != null && sr.mappedPort > 0) {
+                            fOfferData.addProperty("hostMappedIp", sr.mappedIp);
+                            fOfferData.addProperty("hostMappedPort", sr.mappedPort);
+                            mapped = new StunProbe.PublicMappedAddress(sr.mappedIp, sr.mappedPort);
+                            VoxLinkMod.LOGGER.info("[RoomManager] MC端口STUN失败, 用NAT探测映射地址兜底: {}:{}", sr.mappedIp, sr.mappedPort);
+                            break;
+                        }
+                    }
+                }
+            }
+            if (mapped != null) {
                 if (symOrUnknown) {
                     fOfferData.addProperty("hostSymmetric", true);
                 }
@@ -861,14 +876,14 @@ public class ConnectionManager {
                         VoxLinkMod.LOGGER.info("[handleHolepunchMapped] CGNAT: 补充尝试hostLocalIp {}:{}", receivedHostLocalIp, connectPort);
                         ConnectionFallback localFallback = new ConnectionFallback();
                         localFallback.tryIpv4Direct(receivedHostLocalIp, connectPort).thenAccept(result -> {
-                            if (result.success && connectionWon.compareAndSet(false, true) && roomManager.currentRoom.get() == state) {
+                            if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                                 VoxLinkMod.LOGGER.info("[handleHolepunchMapped] CGNAT hostLocalIp直连赢了");
                                 connectViaBridge(state, result);
                             }
                         });
                         ConnectionFallback mcLocalFallback = new ConnectionFallback();
                         mcLocalFallback.tryIpv4Direct(receivedHostLocalIp, mcPort).thenAccept(result -> {
-                            if (result.success && connectionWon.compareAndSet(false, true) && roomManager.currentRoom.get() == state) {
+                            if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                                 VoxLinkMod.LOGGER.info("[handleHolepunchMapped] CGNAT hostLocalIp MC端口赢了");
                                 connectViaBridge(state, result);
                             }
@@ -1096,6 +1111,10 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
             java.util.List<UdpHolePuncher> hostPunchers = new java.util.ArrayList<>();
             java.util.List<StunProbe.PublicMappedAddress> mappedAddrs = new java.util.ArrayList<>();
             boolean hostPunchSocketSymmetric = false;
+
+            // 清理旧的host socket, 避免handleHostPunchInfo反复调用导致socket泄漏
+            UdpHolePuncher oldHost = activeHolePunchers.remove("host");
+            if (oldHost != null) { try { oldHost.close(); } catch (Exception ignored) {} }
 
             // 顺序创建socket并并行STUN（EasyTier做法：逐个创建避免Windows资源耗尽）
             java.util.List<CompletableFuture<StunProbe.PublicMappedAddress[]>> stunFutures = new java.util.ArrayList<>();
@@ -1834,7 +1853,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                     VoxLinkMod.LOGGER.info("[Connection] Wave 1: 检测到{}(localIp={})，尝试直连", reason, hostLocalIp);
                     ConnectionFallback lanFallback = new ConnectionFallback();
                     wave1Futures.add(lanFallback.tryIpv4Direct(hostLocalIp, hostPort).thenAccept(result -> {
-                        if (result.success && connectionWon.compareAndSet(false, true) && roomManager.currentRoom.get() == state) {
+                        if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                             VoxLinkMod.LOGGER.info("[Connection] Wave 1: {}直连赢了", reason);
                             wave1Settled.set(true);
                             connectViaBridge(state, result);
@@ -1845,7 +1864,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                         VoxLinkMod.LOGGER.info("[Connection] Wave 1: CGNAT还尝试localIp MC端口 {}:{}", hostLocalIp, mcPort);
                         ConnectionFallback mcFallback = new ConnectionFallback();
                         wave1Futures.add(mcFallback.tryIpv4Direct(hostLocalIp, mcPort).thenAccept(result -> {
-                            if (result.success && connectionWon.compareAndSet(false, true) && roomManager.currentRoom.get() == state) {
+                            if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                                 VoxLinkMod.LOGGER.info("[Connection] Wave 1: CGNAT localIp MC端口赢了");
                                 wave1Settled.set(true);
                                 connectViaBridge(state, result);
@@ -1858,7 +1877,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                     VoxLinkMod.LOGGER.info("[Connection] Wave 1: 并行尝试IPv6直连");
                     ConnectionFallback ipv6Fallback = new ConnectionFallback();
                     wave1Futures.add(ipv6Fallback.tryIpv6Direct(hostIpv6, hostPort).thenAccept(result -> {
-                        if (result.success && connectionWon.compareAndSet(false, true) && roomManager.currentRoom.get() == state) {
+                        if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                             VoxLinkMod.LOGGER.info("[Connection] Wave 1: IPv6直连赢了");
                             wave1Settled.set(true);
                             connectViaBridge(state, result);
@@ -1959,7 +1978,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
 
                 for (CompletableFuture<ConnectionFallback.ConnectResult> future : wave2Futures) {
                     future.thenAccept(result -> {
-                        if (result.success && connectionWon.compareAndSet(false, true) && roomManager.currentRoom.get() == state) {
+                        if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                             VoxLinkMod.LOGGER.info("[Connection] Wave 2: {}赢了", result.errorCode);
                             connectViaBridge(state, result);
                         }
@@ -2393,7 +2412,10 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
             if (key.startsWith("joiner")) {
                 UdpHolePuncher p = entry.getValue();
                 try { p.stopPunch(); } catch (Exception ignored) {}
-                try { p.close(); } catch (Exception ignored) {}
+                //joiner_reverse保留给反向打洞复用
+                if (key.startsWith("joiner_ms_")) {
+                    try { p.close(); } catch (Exception ignored) {}
+                }
             }
         }
         int delayIdx = Math.min(cycle, BACKOFF_DELAYS_MS.length - 1);
@@ -2853,7 +2875,7 @@ return null;
             state.roomInfo.setConnectionAttemptFailed(true);
             boolean hostSym = state.roomInfo.isHostSymmetric() || (stunProbeResult != null && stunProbeResult.natType.isSymmetric());
             if (hostSym) {
-                VoxLinkMod.LOGGER.info("[Connection] 一方对称NAT, 尝试P2P中继");
+                VoxLinkMod.LOGGER.info("[Connection] 房主对称NAT, 尝试P2P中继");
                 state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.trying"));
                 tryRelay(state);
                 return;
@@ -3030,27 +3052,44 @@ return null;
         if (relayIp == null || relayPort <= 0) return;
         VoxLinkMod.LOGGER.info("[Relay] 收到relay_notify, 打洞到Cone {}:{}", relayIp, relayPort);
         state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.trying"));
-        UdpHolePuncher conePuncher = new UdpHolePuncher();
-        try { conePuncher.createSocket(); } catch (Exception e) { return; }
-        activeHolePunchers.put("relay_to_cone", conePuncher);
+
+        // Sym→Cone: 5 socket birthday attack, 比1 socket命中率高得多
+        final int RELAY_SOCKET_COUNT = 5;
+        java.util.List<UdpHolePuncher> relayPunchers = new java.util.ArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean relayWon = new java.util.concurrent.atomic.AtomicBoolean(false);
         String fRelayIp = relayIp;
         int fRelayPort = relayPort;
-        conePuncher.punch(fRelayIp, fRelayPort)
+
+        for (int i = 0; i < RELAY_SOCKET_COUNT; i++) {
+            UdpHolePuncher rp = new UdpHolePuncher();
+            try { rp.createSocket(); } catch (Exception e) { continue; }
+            relayPunchers.add(rp);
+            activeHolePunchers.put("relay_to_cone_" + i, rp);
+            final int idx = i;
+            rp.punch(fRelayIp, fRelayPort)
                 .orTimeout(15, TimeUnit.SECONDS)
                 .thenAccept(socket -> {
-                    if (!connectionWon.compareAndSet(false, true)) {
-                        try { conePuncher.close(); } catch (Exception ignored) {}
+                    if (!relayWon.compareAndSet(false, true)) {
+                        try { rp.close(); } catch (Exception ignored) {}
                         return;
                     }
-                    conePuncher.markSocketTransferred();
+                    if (!connectionWon.compareAndSet(false, true)) {
+                        try { rp.close(); } catch (Exception ignored) {}
+                        return;
+                    }
+                    VoxLinkMod.LOGGER.info("[Relay] Sym→Cone socket#{} 打洞成功", idx);
+                    rp.markSocketTransferred();
                     killAllConnectionAttempts();
-                    conePuncher.stopPunch();
+                    rp.stopPunch();
+                    // 停掉其他 relay puncher
+                    for (UdpHolePuncher op : relayPunchers) {
+                        if (op != rp) { try { op.cancel(); op.close(); } catch (Exception ignored) {} }
+                    }
                     ReliableUdpTransport transport = new ReliableUdpTransport(socket, new java.net.InetSocketAddress(fRelayIp, fRelayPort));
                     activeUdpTransports.put("relay_cone", transport);
                     transport.start();
                     state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.connected_via"));
                     startUdpPunchBridge(state, transport);
-                    // 进世界后聊天栏提示
                     scheduler.schedule(() -> {
                         Minecraft mc = Minecraft.getInstance();
                         if (mc.player != null) {
@@ -3060,11 +3099,29 @@ return null;
                     }, 2, TimeUnit.SECONDS);
                 })
                 .exceptionally(e -> {
-                    try { conePuncher.close(); } catch (Exception ignored) {}
-                    activeHolePunchers.remove("relay_to_cone");
-                    showConnectFailedFinal(state);
+                    if (!relayWon.get()) {
+                        try { rp.close(); } catch (Exception ignored) {}
+                        activeHolePunchers.remove("relay_to_cone_" + idx);
+                    }
                     return null;
                 });
+            // 每个socket间隔50ms避免资源耗尽
+            if (i < RELAY_SOCKET_COUNT - 1) {
+                try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+            }
+        }
+
+        // relay 超时兜底
+        scheduler.schedule(() -> {
+            if (!relayWon.get() && !connectionWon.get()) {
+                VoxLinkMod.LOGGER.warn("[Relay] Sym→Cone relay打洞超时");
+                for (UdpHolePuncher op : relayPunchers) {
+                    try { op.cancel(); op.close(); } catch (Exception ignored) {}
+                }
+                activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("relay_to_cone_"));
+                showConnectFailedFinal(state);
+            }
+        }, 18, TimeUnit.SECONDS);
     }
 
     public void handleRelayDeclined(String from, JsonObject data) {
@@ -3093,30 +3150,66 @@ return null;
             }
         }
         if (hostTransport == null) return;
-        UdpHolePuncher peerPuncher = new UdpHolePuncher();
-        try { peerPuncher.createSocket(); } catch (Exception e) { return; }
-        activeHolePunchers.put("relay_to_sym", peerPuncher);
+
+        // Cone→Sym: 5 socket birthday attack, 并发打洞提高命中率
+        final int RELAY_SOCKET_COUNT = 5;
+        java.util.List<UdpHolePuncher> conePunchers = new java.util.ArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean coneWon = new java.util.concurrent.atomic.AtomicBoolean(false);
         String fTargetIp = targetIp;
         int fTargetPort = targetPort;
+        String fTargetClientId = targetClientId;
         final ReliableUdpTransport fHostTransport = hostTransport;
-        peerPuncher.punch(fTargetIp, fTargetPort)
+
+        for (int i = 0; i < RELAY_SOCKET_COUNT; i++) {
+            UdpHolePuncher cp = new UdpHolePuncher();
+            try { cp.createSocket(); } catch (Exception e) { continue; }
+            conePunchers.add(cp);
+            activeHolePunchers.put("relay_to_sym_" + i, cp);
+            final int idx = i;
+            cp.punchWithPortPrediction(fTargetIp, fTargetPort, 10)
                 .orTimeout(15, TimeUnit.SECONDS)
                 .thenAccept(socket -> {
-                    peerPuncher.markSocketTransferred();
+                    if (!coneWon.compareAndSet(false, true)) {
+                        try { cp.close(); } catch (Exception ignored) {}
+                        return;
+                    }
+                    VoxLinkMod.LOGGER.info("[Relay] Cone→Sym socket#{} 打洞成功", idx);
+                    cp.markSocketTransferred();
+                    // 停掉其他 puncher
+                    for (UdpHolePuncher op : conePunchers) {
+                        if (op != cp) { try { op.cancel(); op.close(); } catch (Exception ignored) {} }
+                    }
                     ReliableUdpTransport peerTransport = new ReliableUdpTransport(socket, new java.net.InetSocketAddress(fTargetIp, fTargetPort));
                     peerTransport.start();
-                    activeUdpTransports.put(targetClientId != null ? targetClientId : "sym_relayed", peerTransport);
-                    RelayBridge.getInstance(scheduler).startRelay("host", targetClientId != null ? targetClientId : "sym", fHostTransport, peerTransport);
+                    activeUdpTransports.put(fTargetClientId != null ? fTargetClientId : "sym_relayed", peerTransport);
+                    RelayBridge.getInstance(scheduler).startRelay("host", fTargetClientId != null ? fTargetClientId : "sym", fHostTransport, peerTransport);
                     JsonObject reply = new JsonObject();
-                    reply.addProperty("forClientId", targetClientId != null ? targetClientId : "sym");
+                    reply.addProperty("forClientId", fTargetClientId != null ? fTargetClientId : "sym");
                     signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_accept", reply, "host");
                 })
                 .exceptionally(e -> {
-                    try { peerPuncher.close(); } catch (Exception ignored) {}
-                    activeHolePunchers.remove("relay_to_sym");
-                    signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), "host");
+                    if (!coneWon.get()) {
+                        try { cp.close(); } catch (Exception ignored) {}
+                        activeHolePunchers.remove("relay_to_sym_" + idx);
+                    }
                     return null;
                 });
+            if (i < RELAY_SOCKET_COUNT - 1) {
+                try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+            }
+        }
+
+        // 超时兜底
+        scheduler.schedule(() -> {
+            if (!coneWon.get()) {
+                VoxLinkMod.LOGGER.warn("[Relay] Cone→Sym relay打洞超时");
+                for (UdpHolePuncher op : conePunchers) {
+                    try { op.cancel(); op.close(); } catch (Exception ignored) {}
+                }
+                activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("relay_to_sym_"));
+                signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), "host");
+            }
+        }, 18, TimeUnit.SECONDS);
     }
 
     public void onRelayDisconnected(String peerA, String peerB) {
