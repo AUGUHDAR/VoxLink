@@ -692,6 +692,58 @@ if (wasPending) {
         connectionManager.stopAllConnectionWork();
     }
 
+    // 审核状态跟踪: 避免重复通知
+    private volatile String lastModerationStatus = "";
+    private volatile String lastModeratedName = "";
+
+    private synchronized void handleNameModerationUpdate(RoomState state, String status, String reason, String newName, boolean approved) {
+        if (status == null || status.isEmpty()) return;
+
+        // 状态和名字都没变 → 跳过
+        if (status.equals(lastModerationStatus) && newName != null && newName.equals(lastModeratedName)) return;
+
+        // rejected/unavailable 只通知一次, 不因名字不同重复
+        if (status.equals(lastModerationStatus) && !"approved".equals(status)) return;
+
+        lastModerationStatus = status;
+        if (newName != null) lastModeratedName = newName;
+
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.player == null) return;
+
+        state.roomInfo.setNameApproved(approved);
+        if (approved && newName != null && !newName.isEmpty() && !"name_pending_review".equals(newName)) {
+            state.roomInfo.setName(newName);
+        }
+
+        mc.execute(() -> {
+            if (mc.player == null) return;
+            switch (status) {
+                case "approved" -> {
+                    mc.player.displayClientMessage(
+                        Component.literal("§a[VoxLink] " + Component.translatable("voxlink.chat.name_approved").getString()), false);
+                    if (newName != null && !newName.isEmpty()) {
+                        mc.player.displayClientMessage(
+                            Component.literal("§7  " + newName), false);
+                    }
+                }
+                case "rejected" -> {
+                    String reasonText = reason != null && !reason.isEmpty() ? reason : Component.translatable("voxlink.chat.unknown_reason").getString();
+                    mc.player.displayClientMessage(
+                        Component.literal("§c[VoxLink] " + Component.translatable("voxlink.chat.name_rejected").getString() + " - " + Component.translatable("voxlink.chat.please_change_name").getString()), false);
+                    mc.player.displayClientMessage(
+                        Component.literal("§7  " + Component.translatable("voxlink.chat.reason").getString() + ": " + reasonText), false);
+                }
+                case "unavailable" -> {
+                    mc.player.displayClientMessage(
+                        Component.literal("§e[VoxLink] " + Component.translatable("voxlink.chat.name_unavailable").getString()), false);
+                    mc.player.displayClientMessage(
+                        Component.literal("§7  " + Component.translatable("voxlink.chat.please_retry").getString()), false);
+                }
+            }
+        });
+    }
+
     volatile Runnable roomLostCallback;
 
     public void setRoomLostCallback(Runnable callback) {
@@ -957,6 +1009,17 @@ if (wasPending) {
                                 capturedState.roomInfo.setCurrentPlayers(players);
                             } catch (Exception ignored) {}
                         }
+
+                        // 审核状态: 心跳回调中更新房间名和显示通知
+                        if (response.data != null && response.data.has("nameModerationStatus")) {
+                            try {
+                                String status = response.data.get("nameModerationStatus").getAsString();
+                                String newName = response.data.has("name") ? response.data.get("name").getAsString() : null;
+                                handleNameModerationUpdate(capturedState, status,
+                                    response.data.has("nameModerationReason") ? response.data.get("nameModerationReason").getAsString() : null,
+                                    newName, response.data.has("nameApproved") && response.data.get("nameApproved").getAsBoolean());
+                            } catch (Exception ignored) {}
+                        }
                     }
                 })
                 .exceptionally(e -> {
@@ -1119,6 +1182,29 @@ if (wasPending) {
             case "relay_declined" -> connectionManager.handleRelayDeclined(from, data);
             case "relay_setup" -> connectionManager.handleRelaySetup(from, data);
             case "relay_notify" -> connectionManager.handleRelayNotify(from, data);
+
+            case "room_name_approved" -> {
+                RoomState st = currentRoom.get();
+                if (st != null && st != PENDING) {
+                    String approvedName = data.has("name") ? data.get("name").getAsString() : null;
+                    handleNameModerationUpdate(st, "approved", null, approvedName, true);
+                }
+            }
+            case "room_name_rejected" -> {
+                RoomState st = currentRoom.get();
+                if (st != null && st != PENDING) {
+                    String rejectedName = data.has("name") ? data.get("name").getAsString() : null;
+                    String rejectedReason = data.has("reason") ? data.get("reason").getAsString() : null;
+                    handleNameModerationUpdate(st, "rejected", rejectedReason, rejectedName, false);
+                }
+            }
+            case "room_name_unavailable" -> {
+                RoomState st = currentRoom.get();
+                if (st != null && st != PENDING) {
+                    String unavailableName = data.has("name") ? data.get("name").getAsString() : null;
+                    handleNameModerationUpdate(st, "unavailable", null, unavailableName, false);
+                }
+            }
 
             case "topology_optimization_done" -> topologyClient.handleTopologySignal(type, data);
             case "topology_change" -> topologyClient.handleTopologySignal(type, data);

@@ -44,6 +44,8 @@ public class RoomBrowserScreen extends Screen {
     private Button shuffleCustomBtn;
     private Button showMoreCustomBtn;
     private String savedSearch = "";
+    private EditBox pageInput;
+    private java.util.List<int[]> pageClickAreas = new java.util.ArrayList<>();
 
     private static final java.util.Set<String> DEFAULT_CATEGORY_KEYS = java.util.Set.of(
             "survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"
@@ -89,13 +91,19 @@ public class RoomBrowserScreen extends Screen {
                 .bounds(w - pad - 60, 6, 60, 20).build());
 
         joinBtn = Button.builder(Component.translatable("voxlink.join_room"), b -> joinSelected())
-                .bounds(w / 2 - 10, this.height - 26, 100, 20).build();
+                .bounds(w / 2 - 10, this.height - 24, 100, 20).build();
         joinBtn.active = false;
         this.addRenderableWidget(joinBtn);
 
         this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), b ->
                 Minecraft.getInstance().setScreen(parent))
-                .bounds(w / 2 - 130, this.height - 26, 100, 20).build());
+                .bounds(w / 2 - 130, this.height - 24, 100, 20).build());
+
+        pageInput = new EditBox(Minecraft.getInstance().font, -100, -100, 32, 14, Component.literal(""));
+        pageInput.setMaxLength(4);
+        pageInput.setVisible(false);
+        pageInput.setResponder(t -> {});
+        this.addRenderableWidget(pageInput);
 
         if (!initialFetchDone) {
             initialFetchDone = true;
@@ -173,7 +181,7 @@ public class RoomBrowserScreen extends Screen {
             }
             Button btn = Button.builder(Component.literal(label), b -> {
                 selectedCategory = cat;
-                applyFilter();
+                fetchRooms();
                 rebuildCategoryButtons();
             }).bounds(defStartX + i * (defW + 2), catY, defW, 18).build();
             categoryButtons.add(btn);
@@ -206,7 +214,7 @@ public class RoomBrowserScreen extends Screen {
                     String label = categoryMap.getOrDefault(cat, cat);
                     Button btn = Button.builder(Component.literal(label), b -> {
                         selectedCategory = cat;
-                        applyFilter();
+                        fetchRooms();
                         rebuildCategoryButtons();
                     }).bounds(itemStartX + i * (itemW + 2), customRowY, itemW, 18).build();
                     customTagRowButtons.add(btn);
@@ -237,78 +245,54 @@ public class RoomBrowserScreen extends Screen {
         }
     }
 
+    private static final int PAGE_SIZE = 20;
+
     private void fetchRooms() {
-        statusMsg = Component.translatable("voxlink.browser.loading").getString();
-        statusColor = 0xFFFFFF55;
-        currentPage = 1;
-        allRooms.clear();
-        String category = "all".equals(selectedCategory) ? null : selectedCategory;
-        VoxLinkMod.getSignalingClient().listRooms(1, 50, category)
-                .thenAccept(apiResponse -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    mc.execute(() -> {
-                        if (removed) return;
-                        try {
-                            if (!apiResponse.success || apiResponse.data == null) {
-                                statusMsg = "\u00a7c" + Component.translatable("voxlink.browser.load_failed").getString();
-                                statusColor = 0xFFFF5555;
-                                return;
-                            }
-                            JsonObject data = apiResponse.data;
-                            totalRooms = data.has("total") ? data.get("total").getAsInt() : 0;
-                            if (data.has("rooms") && data.get("rooms").isJsonArray()) {
-                                java.util.Set<String> existingCodes = new java.util.HashSet<>();
-                                for (RoomEntry existing : allRooms) {
-                                    existingCodes.add(existing.code);
-                                }
-                                for (JsonElement e : data.getAsJsonArray("rooms")) {
-                                    JsonObject r = e.getAsJsonObject();
-                                    String code = r.has("code") ? r.get("code").getAsString() : "";
-                                    if (existingCodes.contains(code)) continue;
-                                    allRooms.add(new RoomEntry(
-                                            code,
-                                            r.has("name") ? r.get("name").getAsString() : Component.translatable("voxlink.unknown").getString(),
-                                            r.has("category") ? r.get("category").getAsString() : "other",
-                                            r.has("currentPlayers") ? r.get("currentPlayers").getAsInt() : 0,
-                                            r.has("maxPlayers") ? r.get("maxPlayers").getAsInt() : 20,
-                                            r.has("hasPassword") && r.get("hasPassword").getAsBoolean(),
-                                            r.has("natType") ? r.get("natType").getAsString() : "unknown",
-                                            r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0
-                                    ));
-                                    existingCodes.add(code);
-                                }
-                            }
-                            fetchP2PDetails();
-                        } catch (Exception ex) {
-                        statusMsg = Component.translatable("voxlink.browser.load_rooms_failed").getString();
-                        statusColor = 0xFFFF5555;
-                        }
-                    });
-                })
-                .exceptionally(e -> {
-                    Minecraft.getInstance().execute(() -> {
-                        statusMsg = Component.translatable("voxlink.error.network_error").getString();
-                        statusColor = 0xFFFF5555;
-                    });
-                    return null;
-                });
+        fetchPage(1, true);
     }
 
     private void fetchMoreRooms() {
-        if (loadingMore || allRooms.size() >= totalRooms) return;
+        if (loadingMore) return;
+        int tp = totalPages();
+        if (tp > 0 && currentPage >= tp) return;
+        fetchPage(currentPage + 1, false);
+    }
+
+    private int totalPages() {
+        return totalRooms > 0 ? (int) Math.ceil(totalRooms / (double) PAGE_SIZE) : 0;
+    }
+
+    private void fetchPage(int page, boolean clear) {
+        if (loadingMore) return;
+        int tp = totalPages();
+        if (tp > 0 && (page < 1 || page > tp)) return;
         loadingMore = true;
-        int nextPage = currentPage + 1;
+        if (clear) {
+            currentPage = 1;
+            allRooms.clear();
+            scrollOffset = 0;
+            statusMsg = Component.translatable("voxlink.browser.loading").getString();
+            statusColor = 0xFFFFFF55;
+        }
         String category = "all".equals(selectedCategory) ? null : selectedCategory;
-        VoxLinkMod.getSignalingClient().listRooms(nextPage, 50, category)
+        final int finalPage = page;
+        VoxLinkMod.getSignalingClient().listRooms(page, PAGE_SIZE, category)
                 .thenAccept(apiResponse -> {
                     Minecraft mc = Minecraft.getInstance();
                     mc.execute(() -> {
                         if (removed) return;
                         loadingMore = false;
                         try {
-                            if (!apiResponse.success || apiResponse.data == null) return;
+                            if (!apiResponse.success || apiResponse.data == null) {
+                                if (clear) {
+                                    statusMsg = "\u00a7c" + Component.translatable("voxlink.browser.load_failed").getString();
+                                    statusColor = 0xFFFF5555;
+                                }
+                                return;
+                            }
                             JsonObject data = apiResponse.data;
                             totalRooms = data.has("total") ? data.get("total").getAsInt() : totalRooms;
+                            if (clear) allRooms.clear();
                             if (data.has("rooms") && data.get("rooms").isJsonArray()) {
                                 java.util.Set<String> existingCodes = new java.util.HashSet<>();
                                 for (RoomEntry existing : allRooms) {
@@ -331,14 +315,20 @@ public class RoomBrowserScreen extends Screen {
                                     existingCodes.add(code);
                                 }
                             }
-                            currentPage = nextPage;
-                            applyFilter();
+                            currentPage = finalPage;
+                            fetchP2PDetails();
                         } catch (Exception ex) {
+                            statusMsg = Component.translatable("voxlink.browser.load_rooms_failed").getString();
+                            statusColor = 0xFFFF5555;
                         }
                     });
                 })
                 .exceptionally(e -> {
-                    Minecraft.getInstance().execute(() -> loadingMore = false);
+                    Minecraft.getInstance().execute(() -> {
+                        loadingMore = false;
+                        statusMsg = Component.translatable("voxlink.error.network_error").getString();
+                        statusColor = 0xFFFF5555;
+                    });
                     return null;
                 });
     }
@@ -386,6 +376,17 @@ public class RoomBrowserScreen extends Screen {
         if (processed) return super.mouseClicked(event, processed);
         double mouseX = event.x();
         double mouseY = event.y();
+        for (int[] a : pageClickAreas) {
+            if (mouseX >= a[0] && mouseX < a[0] + a[2] && mouseY >= a[1] && mouseY < a[1] + a[3]) {
+                int page = a[4];
+                if (page == -1) fetchPage(Math.max(1, currentPage - 1), true);
+                else if (page == -3) fetchPage(Math.min(totalPages(), currentPage + 1), true);
+                else if (page == -2) {
+                    try { int p = Integer.parseInt(pageInput.getValue().trim()); fetchPage(p, true); } catch (Exception ignored) {}
+                } else if (page > 0) fetchPage(page, true);
+                return true;
+            }
+        }
         int button = event.button();
         int cols = getColumns();
         int cardW = getCardWidth(cols);
@@ -427,6 +428,7 @@ public class RoomBrowserScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        updatePageInput();
         super.render(graphics, mouseX, mouseY, partialTick);
 
         int cols = getColumns();
@@ -435,7 +437,7 @@ public class RoomBrowserScreen extends Screen {
         int gap = getGap();
         int gridX = getGridStartX(cols, cardW, gap);
         int gridY = getGridY();
-        int bottom = this.height - 36;
+        int bottom = this.height - 52;
 
         for (int i = 0; i < displayedRooms.size(); i++) {
             int col = i % cols;
@@ -484,8 +486,67 @@ public class RoomBrowserScreen extends Screen {
                 }
                 clippedStatus = clippedStatus + "...";
             }
-            graphics.drawCenteredString(Minecraft.getInstance().font, clippedStatus, this.width / 2, this.height - 50, statusColor);
+            graphics.drawCenteredString(Minecraft.getInstance().font, clippedStatus, this.width / 2, this.height - 64, statusColor);
         }
+
+        renderPagination(graphics, mouseX, mouseY);
+    }
+
+    private void renderPagination(GuiGraphics graphics, int mouseX, int mouseY) {
+        pageClickAreas.clear();
+        int tp = totalPages();
+        if (tp <= 1) return;
+        int py = this.height - 46;
+        int bw = 16, bh = 14, gp = 2, iw = 32;
+        boolean showInput = tp > 6;
+        int totalW = showInput ? (bw + gp) * 2 + bw * 3 + gp * 3 + iw + gp + bw + gp + bw
+                               : (bw + gp) * 2 + bw * tp + gp * (tp - 1);
+        int x = (this.width - totalW) / 2;
+        var font = Minecraft.getInstance().font;
+        drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, "<", currentPage > 1, -1, currentPage);
+        x += bw + gp;
+        if (showInput) {
+            for (int i = 1; i <= 3; i++) {
+                drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, String.valueOf(i), true, i, currentPage);
+                x += bw + gp;
+            }
+            x += iw + gp;
+            drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, "\u2192", true, -2, currentPage);
+            x += bw + gp;
+            drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, String.valueOf(tp), true, tp, currentPage);
+            x += bw + gp;
+        } else {
+            for (int i = 1; i <= tp; i++) {
+                drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, String.valueOf(i), true, i, currentPage);
+                x += bw + gp;
+            }
+        }
+        drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, ">", currentPage < tp, -3, currentPage);
+    }
+
+    private void updatePageInput() {
+        int tp = totalPages();
+        if (tp > 6) {
+            int py = this.height - 46;
+            int bw = 16, gp = 2, iw = 32;
+            int totalW = (bw + gp) * 2 + bw * 3 + gp * 3 + iw + gp + bw + gp + bw;
+            int startX = (this.width - totalW) / 2;
+            int inputX = startX + bw + gp + (bw + gp) * 3;
+            pageInput.setPosition(inputX, py);
+            pageInput.setVisible(true);
+        } else {
+            pageInput.setVisible(false);
+        }
+    }
+
+    private void drawPageBtn(GuiGraphics graphics, net.minecraft.client.gui.Font font, int mx, int my, int x, int y, int w, int h, String label, boolean enabled, int page, int currentPage) {
+        boolean active = enabled && page == currentPage;
+        boolean hover = enabled && mx >= x && mx < x + w && my >= y && my < y + h;
+        int bg = !enabled ? 0x44888888 : (active ? 0xDD122E8A : (hover ? 0xDD666666 : 0xDD444444));
+        graphics.fill(x, y, x + w, y + h, bg);
+        int tc = !enabled ? 0xFF888888 : (active ? 0xFFFFFFFF : 0xFFCCCCCC);
+        graphics.drawCenteredString(font, label, x + w / 2, y + 3, tc);
+        if (enabled) pageClickAreas.add(new int[]{x, y, w, h, page});
     }
 
     private String getCategoryLabel(String category) {
