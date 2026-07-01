@@ -18,6 +18,24 @@ Open your world, create a room, get a **6-digit code**, share with your friend, 
 
 Huge thanks to **XIOPNM**, 200+ remote tests out of 300+, absolute legend / 特别感谢XIOPNM在300多次测试中参与异地测试200多次。
 
+## Fallback & Relay / 联机互助
+
+**Available in VoxLink 1.0.0+** / **需 VoxLink 1.0.0 及以上版本**
+
+When direct punching fails, VoxLink doesn't give up:
+
+- **Reverse punch** — if one side's NAT is unfavorable for forward punching, the other side fires back a reverse punch to bypass the restriction.
+- **Peer relay** — if both sides can't connect directly (e.g. both symmetric NAT), VoxLink picks a suitable Cone-NAT player from currently online public rooms as a relay node. Traffic goes through their client, **never through the server**. The relay player won't notice anything.
+
+Relay can be toggled off anytime in settings. Turn it off = you won't relay for others, and you can't use others as relay either. Fair trade.
+
+打洞失败时，VoxLink 还有多重后备方案：
+
+- **逆向打洞** — 当一方 NAT 不利于正向打洞时，由对方反向发起连接请求，绕过单向 NAT 限制。
+- **玩家互助中继** — 双方无法直连时（如双方均为对称 NAT），模组会从在线公开房间玩家中挑选网络条件合适的玩家作为中继节点，由其客户端转发连接数据，**全程不经过服务器转发流量**，中继节点玩家本身也不会感知到明显影响。
+
+中继功能可在设置中随时关闭，关闭后既不为他人转发，也无法使用他人中继建立连接。
+
 ## Rooms / 房间
 
 No player limit, offline players supported. Room names get AI checked before going public. Latency ~15-20ms Guangdong to Jiangxi (depends on your network). Public rooms show in the lobby without exposing IPs — all traffic stays P2P. Tags help find the right room.
@@ -30,7 +48,7 @@ Works with **Simple Voice Chat**, **ViaVersion**, **ViaFabric**, **Floodgate** (
 
 ## Bugs? / 问题反馈
 
-[GitHub Issues](https://github.com/AUGUHDAR/VoxLink/issues) — bring both sides' logs:
+`https://github.com/AUGUHDAR/VoxLink/issues` — bring both sides' logs:
 ```
 .minecraft/versions/<version>/logs/latest.log
 ```
