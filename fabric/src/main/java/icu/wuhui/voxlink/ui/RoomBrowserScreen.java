@@ -53,7 +53,7 @@ public class RoomBrowserScreen extends Screen {
 
     private enum SortMode {
         PLAYERS_DESC(Component.translatable("voxlink.sort.players_desc")), PLAYERS_ASC(Component.translatable("voxlink.sort.players_asc")),
-        VERSION_SAME(Component.translatable("voxlink.sort.version_same")), NAME_ASC(Component.literal("A-Z")), NAME_DESC(Component.literal("Z-A"));
+        VERSION_SAME(Component.translatable("voxlink.sort.version_same")), NAME_ASC(Component.translatable("voxlink.sort.name_asc")), NAME_DESC(Component.translatable("voxlink.sort.name_desc"));
         final Component label;
         SortMode(Component label) { this.label = label; }
     }
@@ -103,6 +103,7 @@ public class RoomBrowserScreen extends Screen {
         pageInput.setMaxLength(4);
         pageInput.setVisible(false);
         pageInput.setResponder(t -> {});
+        pageInput.setHint(Component.translatable("voxlink.page.input_hint"));
         this.addRenderableWidget(pageInput);
 
         if (!initialFetchDone) {
@@ -171,15 +172,15 @@ public class RoomBrowserScreen extends Screen {
         int defStartX = (w - totalDef * (defW + 2)) / 2;
         for (int i = 0; i < totalDef; i++) {
             final String cat = defaultKeys.get(i);
-            String label;
+            Component label;
             if ("all".equals(cat)) {
-                label = Component.translatable("voxlink.category.all").getString();
+                label = Component.translatable("voxlink.category.all");
             } else if (DEFAULT_CATEGORY_KEYS.contains(cat)) {
-                label = Component.translatable("voxlink.category." + cat).getString();
+                label = Component.translatable("voxlink.category." + cat);
             } else {
-                label = categoryMap.getOrDefault(cat, cat);
+                label = Component.literal(categoryMap.getOrDefault(cat, cat));
             }
-            Button btn = Button.builder(Component.literal(label), b -> {
+            Button btn = Button.builder(label, b -> {
                 selectedCategory = cat;
                 fetchRooms();
                 rebuildCategoryButtons();
@@ -211,8 +212,8 @@ public class RoomBrowserScreen extends Screen {
 
                 for (int i = 0; i < visibleCount; i++) {
                     final String cat = customCatKeys.get(customTagStartIndex + i);
-                    String label = categoryMap.getOrDefault(cat, cat);
-                    Button btn = Button.builder(Component.literal(label), b -> {
+                    Component label = Component.literal(categoryMap.getOrDefault(cat, cat));
+                    Button btn = Button.builder(label, b -> {
                         selectedCategory = cat;
                         fetchRooms();
                         rebuildCategoryButtons();
@@ -412,6 +413,18 @@ public class RoomBrowserScreen extends Screen {
     }
 
     @Override
+    public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+        if (event.key() == 257 && pageInput != null && pageInput.isVisible() && pageInput.isFocused()) {
+            try {
+                int p = Integer.parseInt(pageInput.getValue().trim());
+                fetchPage(p, true);
+                return true;
+            } catch (Exception ignored) {}
+        }
+        return super.keyPressed(event);
+    }
+
+    @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         int cols = getColumns();
         int totalRows = (displayedRooms.size() + cols - 1) / cols;
@@ -457,12 +470,11 @@ public class RoomBrowserScreen extends Screen {
             if ("name_not_approved".equals(roomName)) {
                 roomName = Component.translatable("voxlink.room.name_not_approved").getString();
             }
-            String lock = r.hasPassword ? "\u00a7c\u2612" : "\u00a7a\u2610";
 
             int textX = x + 6;
             int textY = y + 5;
 
-            graphics.drawString(Minecraft.getInstance().font, lock + " " + truncate(roomName, cardW / 6 - 2), textX, textY, 0xFFFFFFFF);
+            graphics.drawString(Minecraft.getInstance().font, truncate(roomName, cardW / 6), textX, textY, 0xFFFFFFFF);
             graphics.drawString(Minecraft.getInstance().font, "\u00a77" + r.code, textX, textY + 11, 0xFFAAAAAA);
             graphics.drawString(Minecraft.getInstance().font, "\u00a7f" + r.players + "/" + r.maxPlayers, textX, textY + 22, 0xFFCCCCCC);
 
@@ -503,7 +515,7 @@ public class RoomBrowserScreen extends Screen {
                                : (bw + gp) * 2 + bw * tp + gp * (tp - 1);
         int x = (this.width - totalW) / 2;
         var font = Minecraft.getInstance().font;
-        drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, "<", currentPage > 1, -1, currentPage);
+        drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, Component.translatable("voxlink.page.prev").getString(), currentPage > 1, -1, currentPage);
         x += bw + gp;
         if (showInput) {
             for (int i = 1; i <= 3; i++) {
@@ -511,7 +523,7 @@ public class RoomBrowserScreen extends Screen {
                 x += bw + gp;
             }
             x += iw + gp;
-            drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, "\u2192", true, -2, currentPage);
+            drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, Component.translatable("voxlink.page.jump").getString(), true, -2, currentPage);
             x += bw + gp;
             drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, String.valueOf(tp), true, tp, currentPage);
             x += bw + gp;
@@ -521,7 +533,7 @@ public class RoomBrowserScreen extends Screen {
                 x += bw + gp;
             }
         }
-        drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, ">", currentPage < tp, -3, currentPage);
+        drawPageBtn(graphics, font, mouseX, mouseY, x, py, bw, bh, Component.translatable("voxlink.page.next").getString(), currentPage < tp, -3, currentPage);
     }
 
     private void updatePageInput() {

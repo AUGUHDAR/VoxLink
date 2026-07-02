@@ -49,7 +49,7 @@ public class ManageRoomScreen extends Screen {
         this.parent = parent;
         this.roomInfo = roomInfo;
 
-        this.visible = roomInfo.isVisible();
+        this.visible = roomInfo.hasPassword() ? false : roomInfo.isVisible();
         this.visibleBeforePassword = roomInfo.isVisible();
         this.authType = "ONLINE".equals(roomInfo.getAuthType()) ? AuthType.ONLINE : AuthType.OFFLINE;
 
@@ -70,7 +70,7 @@ public class ManageRoomScreen extends Screen {
         int y = Math.max(24, (this.height - formHeight) / 2);
 
         nameField = new EditBox(this.font, centerX - 100, y, 200, 20, Component.translatable("voxlink.room_name"));
-        nameField.setMaxLength(64);
+        nameField.setMaxLength(10);
         nameField.setValue(roomInfo.getName() != null ? roomInfo.getName() : "");
         this.addRenderableWidget(nameField);
 
@@ -116,6 +116,12 @@ public class ManageRoomScreen extends Screen {
 
         if (saving) {
             saveButton.active = false;
+            nameField.setEditable(false);
+            passwordField.setEditable(false);
+            maxPlayersField.setEditable(false);
+            categoryBtn.active = false;
+            visibleButton.active = false;
+            authButton.active = false;
         }
     }
 
@@ -233,7 +239,7 @@ public class ManageRoomScreen extends Screen {
                         net.minecraft.network.chat.MutableComponent addrLine = Component.translatable("voxlink.chat.your_addresses");
                         if (hasV4) {
                             String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
-                            addrLine.append(Component.literal("[IPv4]")
+                            addrLine.append(Component.translatable("voxlink.chat.ipv4_label")
                                     .withStyle(Style.EMPTY
                                             .withClickEvent(new ClickEvent.CopyToClipboard(addr))
                                             .withHoverEvent(new HoverEvent.ShowText(Component.translatable("voxlink.chat.copy_for_non_voxlink")))
@@ -242,7 +248,7 @@ public class ManageRoomScreen extends Screen {
                         if (hasV4 && hasV6) addrLine.append(Component.literal(" "));
                         if (hasV6) {
                             String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
-                            addrLine.append(Component.literal("[IPv6]")
+                            addrLine.append(Component.translatable("voxlink.chat.ipv6_label")
                                     .withStyle(Style.EMPTY
                                             .withClickEvent(new ClickEvent.CopyToClipboard(ipv6Addr))
                                             .withHoverEvent(new HoverEvent.ShowText(Component.translatable("voxlink.chat.copy_for_non_voxlink")))

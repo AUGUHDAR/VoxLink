@@ -16,7 +16,6 @@ public class AttemptingJoinScreen extends Screen {
     private int statusColor = 0xFFFFFFFF;
     private volatile boolean active = false;
     private boolean joinApiDone = false;
-    private boolean wasRemoved = false;
     private volatile java.util.concurrent.ScheduledExecutorService connectionScheduler;
     private java.util.concurrent.ScheduledFuture<?> connectionFuture;
     private int monitorTicks = 0;
@@ -34,16 +33,9 @@ public class AttemptingJoinScreen extends Screen {
         super.init();
         this.clearWidgets();
 
-        if (wasRemoved) {
-            wasRemoved = false;
-            if (VoxLinkMod.getRoomManager().getCurrentRoom() != null
-                    && VoxLinkMod.getRoomManager().getCurrentRoom().isConnectionFailed()) {
-                VoxLinkMod.getRoomManager().leaveRoom();
-            }
-        }
-
         RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
-        if (room != null && room.getLocalBridgePort() > 0) {
+        boolean bridgeReady = room != null && room.getLocalBridgePort() > 0;
+        if (bridgeReady) {
             active = false;
             statusMessage = "\u00a7a" + Component.translatable("voxlink.browser.connected_entering").getString();
             statusColor = 0xFF55FF55;
@@ -56,16 +48,18 @@ public class AttemptingJoinScreen extends Screen {
         int centerX = this.width / 2;
         int btnY = this.height / 2 + 30;
 
-        if (!joinApiDone || active) {
-            this.addRenderableWidget(Button.builder(
-                    Component.translatable("voxlink.cancel"),
-                    button -> cancelJoin()
-            ).bounds(centerX - 100, btnY, 200, 20).build());
-        } else {
-            this.addRenderableWidget(Button.builder(
-                    Component.translatable("voxlink.back"),
-                    button -> goBack()
-            ).bounds(centerX - 100, btnY, 200, 20).build());
+        if (!bridgeReady) {
+            if (!joinApiDone || active) {
+                this.addRenderableWidget(Button.builder(
+                        Component.translatable("voxlink.cancel"),
+                        button -> cancelJoin()
+                ).bounds(centerX - 100, btnY, 200, 20).build());
+            } else {
+                this.addRenderableWidget(Button.builder(
+                        Component.translatable("voxlink.back"),
+                        button -> goBack()
+                ).bounds(centerX - 100, btnY, 200, 20).build());
+            }
         }
 
         if (!joinApiDone) {
@@ -76,7 +70,7 @@ public class AttemptingJoinScreen extends Screen {
 
     @Override
     public boolean shouldCloseOnEsc() {
-        return false;
+        return !active;
     }
 
     @Override
@@ -92,14 +86,13 @@ public class AttemptingJoinScreen extends Screen {
         if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
             VoxLinkMod.getRoomManager().leaveRoom();
         }
-        // 直接回主菜单
-        Minecraft.getInstance().setScreen(new net.minecraft.client.gui.screens.TitleScreen());
+        Minecraft.getInstance().setScreen(parent);
     }
 
     private void cancelJoin() {
         active = false;
         VoxLinkMod.getRoomManager().leaveRoom();
-        Minecraft.getInstance().setScreen(new net.minecraft.client.gui.screens.TitleScreen());
+        Minecraft.getInstance().setScreen(parent);
     }
 
     private void startJoin() {
@@ -261,7 +254,6 @@ public class AttemptingJoinScreen extends Screen {
     @Override
     public void removed() {
         super.removed();
-        wasRemoved = true;
         stopConnectionMonitor();
         // 桥已建好别断
         RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();

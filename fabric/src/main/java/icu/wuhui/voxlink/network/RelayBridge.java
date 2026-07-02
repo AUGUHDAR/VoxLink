@@ -62,8 +62,7 @@ public class RelayBridge {
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
-            mc.player.displayClientMessage(Component.literal("\u00a7e[VoxLink] \u00a7f" +
-                Component.translatable("voxlink.relay.started").getString()), false);
+            mc.player.displayClientMessage(Component.translatable("voxlink.relay.started"), false);
         }
 
         if (running.compareAndSet(false, true)) {

@@ -721,7 +721,7 @@ if (wasPending) {
             switch (status) {
                 case "approved" -> {
                     mc.player.displayClientMessage(
-                        Component.literal("§a[VoxLink] " + Component.translatable("voxlink.chat.name_approved").getString()), false);
+                        Component.translatable("voxlink.chat.name_approved"), false);
                     if (newName != null && !newName.isEmpty()) {
                         mc.player.displayClientMessage(
                             Component.literal("§7  " + newName), false);
@@ -730,15 +730,15 @@ if (wasPending) {
                 case "rejected" -> {
                     String reasonText = reason != null && !reason.isEmpty() ? reason : Component.translatable("voxlink.chat.unknown_reason").getString();
                     mc.player.displayClientMessage(
-                        Component.literal("§c[VoxLink] " + Component.translatable("voxlink.chat.name_rejected").getString() + " - " + Component.translatable("voxlink.chat.please_change_name").getString()), false);
+                        Component.translatable("voxlink.chat.name_rejected_with_hint"), false);
                     mc.player.displayClientMessage(
-                        Component.literal("§7  " + Component.translatable("voxlink.chat.reason").getString() + ": " + reasonText), false);
+                        Component.translatable("voxlink.chat.reason_label", reasonText), false);
                 }
                 case "unavailable" -> {
                     mc.player.displayClientMessage(
-                        Component.literal("§e[VoxLink] " + Component.translatable("voxlink.chat.name_unavailable").getString()), false);
+                        Component.translatable("voxlink.chat.name_unavailable"), false);
                     mc.player.displayClientMessage(
-                        Component.literal("§7  " + Component.translatable("voxlink.chat.please_retry").getString()), false);
+                        Component.translatable("voxlink.chat.please_retry"), false);
                 }
             }
         });

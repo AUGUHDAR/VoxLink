@@ -2800,6 +2800,7 @@ return null;
                             connectionCycleActive.set(false);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "connected", new JsonObject(), "host");
+                            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
                             ConnectionHelper.connectToServer(localPort, state.roomInfo);
                         } else {
                             connectionCycleActive.set(false);
@@ -2817,6 +2818,7 @@ return null;
                             connectionCycleActive.set(false);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "connected", new JsonObject(), "host");
+                            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
                             ConnectionHelper.connectToServer(localPort, state.roomInfo);
                         } else {
                             connectionCycleActive.set(false);
@@ -2986,7 +2988,7 @@ return null;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             mc.player.displayClientMessage(
-                Component.literal("§e[VoxLink] §7" + Component.translatable("voxlink.relay.host_notice").getString()), false);
+                Component.translatable("voxlink.relay.host_notice"), false);
         }
         RoomInfo.PeerInfo requestingPeer = state.roomInfo.getPeer(requestingClientId);
         if (requestingPeer == null || requestingPeer.mappedIp == null || requestingPeer.mappedPort <= 0) {
@@ -3094,7 +3096,7 @@ return null;
                         Minecraft mc = Minecraft.getInstance();
                         if (mc.player != null) {
                             mc.player.displayClientMessage(
-                                Component.literal("§e[VoxLink] §7" + Component.translatable("voxlink.relay.connected_via").getString()), false);
+                                Component.translatable("voxlink.relay.connected_via"), false);
                         }
                     }, 2, TimeUnit.SECONDS);
                 })
@@ -3312,6 +3314,7 @@ return null;
         if (localPort > 0) {
             connectionCycleActive.set(false);
             ConnectionState.transitionTo(ConnectionState.CONNECTED, "Joiner桥接建立 port=" + localPort);
+            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
             ConnectionHelper.connectToServer(localPort, state.roomInfo);
         } else {
             connectionCycleActive.set(false);
@@ -3330,6 +3333,7 @@ return null;
     public void startHostUdpPunchBridge(RoomManager.RoomState state, String clientId, ReliableUdpTransport transport) {
         int mcPort = state.roomInfo.getHostPort();
         ConnectionState.transitionTo(ConnectionState.CONNECTED, "Host桥接建立 client=" + clientId);
+        state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
         P2PBridge.startUdpHostBridgeForClient(clientId, transport, mcPort, () -> {
             ReliableUdpTransport t = activeUdpTransports.remove(clientId);
             if (t != null) {
