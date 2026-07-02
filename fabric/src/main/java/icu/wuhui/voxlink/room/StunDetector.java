@@ -12,15 +12,20 @@ import java.util.List;
 public final class StunDetector {
     private StunDetector() {}
 
+    //国内外混合12个, 兼容国外玩家(国内不通的国外可能通, 竞速下自动忽略超时的)
     private static final List<List<String>> STUN_SERVER_GROUPS = List.of(
-            List.of("stun:stun.qq.com"),
             List.of("stun:stun.miwifi.com"),
             List.of("stun:stun.hitv.com"),
-            List.of("stun:stun.syncthing.net"),
-            List.of("stun:stun.sipnet.com"),
-            List.of("stun:stun.ekiga.net"),
+            List.of("stun:stun.chat.bilibili.com"),
             List.of("stun:stun.l.google.com:19302"),
-            List.of("stun:stun1.l.google.com:19302")
+            List.of("stun:stun3.l.google.com:19302"),
+            List.of("stun:stun1.l.google.com:19302"),
+            List.of("stun:stun.nextcloud.com"),
+            List.of("stun:stun.nfon.net"),
+            List.of("stun:stun.freeswitch.org"),
+            List.of("stun:stun.syncthing.net"),
+            List.of("stun:stun.ekiga.net"),
+            List.of("stun:stun.sipnet.com")
     );
 
     public static List<String> getStunGroup(int index) {
