@@ -251,6 +251,8 @@ public class SignalingClient {
         return post(buildPath("send_signal"), body);
     }
 
+    // pollSignals是高频轮询请求, 用5s短超时避免服务器卡顿时锁住轮询链路
+    private static final int POLL_SIGNALS_TIMEOUT_MS = 5000;
     public CompletableFuture<ApiResponse> pollSignals(String code, String token, boolean isHost, long since) {
         JsonObject body = new JsonObject();
         body.addProperty("code", code != null ? code : "");
@@ -258,7 +260,7 @@ public class SignalingClient {
         body.addProperty("isHost", isHost);
         body.addProperty("since", since);
         body.addProperty("action", "poll_signals");
-        return postNoRetry(buildPath("poll_signals"), body);
+        return postOnce(buildPath("poll_signals"), body, POLL_SIGNALS_TIMEOUT_MS);
     }
 
     //获取公网IP专用: 3s超时不重试, 超时用本地IPv6兜底, 不阻塞建房

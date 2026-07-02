@@ -12,10 +12,11 @@ import java.util.List;
 public final class StunDetector {
     private StunDetector() {}
 
+    //防退化: 快服务器(miwifi/hitv)前置, stun.qq.com慢/不可达放后面兜底
     private static final List<List<String>> STUN_SERVER_GROUPS = List.of(
-            List.of("stun:stun.qq.com"),
             List.of("stun:stun.miwifi.com"),
             List.of("stun:stun.hitv.com"),
+            List.of("stun:stun.qq.com"),
             List.of("stun:stun.syncthing.net"),
             List.of("stun:stun.sipnet.com"),
             List.of("stun:stun.ekiga.net"),

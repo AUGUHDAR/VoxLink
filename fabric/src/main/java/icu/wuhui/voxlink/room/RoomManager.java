@@ -1048,44 +1048,49 @@ if (wasPending) {
     }
 
     private void scheduleSignalPoll() {
-        signalPollFuture = scheduler.scheduleAtFixedRate(() -> {
-            try {
-                RoomState state = currentRoom.get();
-                if (state == null || state == PENDING) return;
-                if (!signalPollInFlight.compareAndSet(false, true)) return;
-                final RoomState capturedState = state;
-                final int seq = pollCount.incrementAndGet();
-                final long startTime = System.currentTimeMillis();
-                signalingClient.pollSignals(state.roomInfo.getCode(), state.roomInfo.getToken(),
-                                state.roomInfo.isHost(), signalPollTimestamp.get())
-                        .thenAccept(response -> {
-                            if (currentRoom.get() != capturedState) {
-                                signalPollInFlight.set(false);
-                                return;
-                            }
-                            long elapsed = System.currentTimeMillis() - startTime;
-                            if (seq <= 5 || elapsed > 5000 || !response.success) {
-                                VoxLinkMod.LOGGER.info("[RoomManager] 信号轮询 #{}: {}ms, success={}, hasSignals={}",
-                                    seq, elapsed, response.success,
-                                    response.success && response.data != null && (response.data.has("s") || response.data.has("signals")));
-                            }
-                            try {
-                                handleSignalPollResponse(response);
-                            } catch (Exception e) {
-                                VoxLinkMod.LOGGER.warn("信号轮询响应处理出错: {}", e.getMessage());
-                            }
-                        })
-                        .exceptionally(e -> {
-                            long elapsed = System.currentTimeMillis() - startTime;
-                            VoxLinkMod.LOGGER.warn("信号轮询 #{} 错误 ({}ms): {}", seq, elapsed, e.getMessage());
-                            return null;
-                        })
-                        .whenComplete((r, e) -> signalPollInFlight.set(false));
-            } catch (Exception e) {
-                signalPollInFlight.set(false);
-                VoxLinkMod.LOGGER.error("信号轮询同步错误", e);
-            }
-        }, currentSignalPollInterval, currentSignalPollInterval, TimeUnit.MILLISECONDS);
+        // 首次立即执行, 不干等一个间隔
+        scheduler.execute(this::doSignalPoll);
+        signalPollFuture = scheduler.scheduleAtFixedRate(this::doSignalPoll,
+                currentSignalPollInterval, currentSignalPollInterval, TimeUnit.MILLISECONDS);
+    }
+
+    private void doSignalPoll() {
+        try {
+            RoomState state = currentRoom.get();
+            if (state == null || state == PENDING) return;
+            if (!signalPollInFlight.compareAndSet(false, true)) return;
+            final RoomState capturedState = state;
+            final int seq = pollCount.incrementAndGet();
+            final long startTime = System.currentTimeMillis();
+            signalingClient.pollSignals(state.roomInfo.getCode(), state.roomInfo.getToken(),
+                            state.roomInfo.isHost(), signalPollTimestamp.get())
+                    .thenAccept(response -> {
+                        if (currentRoom.get() != capturedState) {
+                            signalPollInFlight.set(false);
+                            return;
+                        }
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        if (seq <= 5 || elapsed > 5000 || !response.success) {
+                            VoxLinkMod.LOGGER.info("[RoomManager] 信号轮询 #{}: {}ms, success={}, hasSignals={}",
+                                seq, elapsed, response.success,
+                                response.success && response.data != null && (response.data.has("s") || response.data.has("signals")));
+                        }
+                        try {
+                            handleSignalPollResponse(response);
+                        } catch (Exception e) {
+                            VoxLinkMod.LOGGER.warn("信号轮询响应处理出错: {}", e.getMessage());
+                        }
+                    })
+                    .exceptionally(e -> {
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        VoxLinkMod.LOGGER.warn("信号轮询 #{} 错误 ({}ms): {}", seq, elapsed, e.getMessage());
+                        return null;
+                    })
+                    .whenComplete((r, e) -> signalPollInFlight.set(false));
+        } catch (Exception e) {
+            signalPollInFlight.set(false);
+            VoxLinkMod.LOGGER.error("信号轮询同步错误", e);
+        }
     }
 
     private void handleSignalPollResponse(SignalingClient.ApiResponse response) {
