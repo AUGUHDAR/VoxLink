@@ -472,9 +472,11 @@ public class ConnectionManager {
             if (fHostPuncher != null) {
                 try {
                     java.util.List<String> allStun = StunDetector.getAllStunUrls();
-                    VoxLinkMod.LOGGER.info("[RoomManager] 主机NAT: {} — 在打洞socket上STUN({}服务器)", fNatType != null ? fNatType : "null", allStun.size());
-                    m1 = fHostPuncher.discoverMappedAddress(java.util.List.of(allStun.get(0)));
-                    m2 = fHostPuncher.discoverMappedAddress(java.util.List.of(allStun.get(1)));
+                    VoxLinkMod.LOGGER.info("[RoomManager] 主机NAT: {} — 8并发竞速STUN({}服务器)", fNatType != null ? fNatType : "null", allStun.size());
+                    StunProbe.PublicMappedAddress[] top2 = StunProbe.discoverMappedAddressRace(
+                            fHostPuncher.getSocket(), allStun, 2);
+                    m1 = top2[0];
+                    m2 = top2[1];
                 } catch (Exception e) {
                     VoxLinkMod.LOGGER.warn("[RoomManager] 打洞socket STUN失败: {}", e.getMessage());
                 }
@@ -492,7 +494,9 @@ public class ConnectionManager {
                             UdpHolePuncher bp = new UdpHolePuncher();
                             try { bp.createSocket(); }
                             catch (Exception e) { return null; }
-                            StunProbe.PublicMappedAddress addr = bp.discoverMappedAddress(StunDetector.getAllStunUrls());
+                            StunProbe.PublicMappedAddress[] race = StunProbe.discoverMappedAddressRace(
+                                    bp.getSocket(), StunDetector.getAllStunUrls(), 1);
+                            StunProbe.PublicMappedAddress addr = race[0];
                             if (addr != null) {
                                 String key = "host_birthday_" + idx;
                                 activeHolePunchers.put(key, bp);
