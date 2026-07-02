@@ -82,7 +82,10 @@ public class VoxLinkScreen extends Screen {
 
         // P2P中继开关: 人人为我，我为人人
         boolean relayOn = VoxLinkMod.getConfig().isRelayEnabled();
-        addRenderableWidget(Button.builder(
+        Component connMode = currentRoom != null ? currentRoom.getConnectionMode() : null;
+        boolean usingRelay = connMode != null && connMode.getString().contains(
+                Component.translatable("voxlink.relay.connected_via").getString());
+        Button relayBtn = Button.builder(
                 Component.translatable("voxlink.relay.toggle",
                         Component.translatable(relayOn ? "voxlink.relay.on" : "voxlink.relay.off")),
                 button -> {
@@ -92,7 +95,9 @@ public class VoxLinkScreen extends Screen {
                     button.setMessage(Component.translatable("voxlink.relay.toggle",
                             Component.translatable(newVal ? "voxlink.relay.on" : "voxlink.relay.off")));
                 }
-        ).bounds(centerX - 100, this.height - 52, 200, 20).build());
+        ).bounds(centerX - 100, this.height - 52, 200, 20).build();
+        if (usingRelay) relayBtn.active = false;
+        addRenderableWidget(relayBtn);
 
         needsRebuild = false;
     }
@@ -133,13 +138,25 @@ public class VoxLinkScreen extends Screen {
         }
 
         // 中继开关说明（始终显示）
-        graphics.drawCenteredString(this.font,
-                Component.translatable("voxlink.relay.slogan").getString(),
-                centerX, this.height - 64, 0xFFAAAAAA);
-        graphics.drawCenteredString(this.font,
+        int maxWidth = this.width - 20;
+        drawCenteredClipped(graphics,
                 Component.translatable("voxlink.relay.hint").getString(),
-                centerX, this.height - 74, 0xFF888888);
+                centerX, this.height - 74, 0xFF888888, maxWidth);
+        drawCenteredClipped(graphics,
+                Component.translatable("voxlink.relay.slogan").getString(),
+                centerX, this.height - 64, 0xFFAAAAAA, maxWidth);
 
+    }
+
+    private void drawCenteredClipped(GuiGraphics graphics, String text, int centerX, int y, int color, int maxWidth) {
+        String clipped = text;
+        if (this.font.width(text) > maxWidth) {
+            while (this.font.width(clipped + "...") > maxWidth && clipped.length() > 0) {
+                clipped = clipped.substring(0, clipped.length() - 1);
+            }
+            clipped = clipped + "...";
+        }
+        graphics.drawCenteredString(this.font, clipped, centerX, y, color);
     }
 
     @Override

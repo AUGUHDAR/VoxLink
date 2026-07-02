@@ -3,13 +3,14 @@ package icu.wuhui.voxlink.ui;
 import icu.wuhui.voxlink.VoxLinkMod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 public class CreatingRoomScreen extends Screen {
     private final CreateRoomScreen parent;
     private long startTime;
-    private static final long TIMEOUT_MS = 90000;
+    private static final long TIMEOUT_MS = 30000;
 
     protected CreatingRoomScreen(CreateRoomScreen parent) {
         super(Component.translatable("voxlink.create_room"));
@@ -20,11 +21,29 @@ public class CreatingRoomScreen extends Screen {
     protected void init() {
         super.init();
         if (startTime == 0) startTime = System.currentTimeMillis();
+        this.addRenderableWidget(Button.builder(
+                Component.translatable("voxlink.cancel"),
+                button -> {
+                    Minecraft mc = Minecraft.getInstance();
+                    if (mc.player != null) {
+                        mc.player.displayClientMessage(
+                                Component.translatable("voxlink.create_room.timeout").withStyle(s -> s.withColor(0xFF5555)), false);
+                    }
+                    parent.onCreateTimeout();
+                    mc.setScreen(parent);
+                }
+        ).bounds(this.width / 2 - 100, this.height / 2 + 20, 200, 20).build());
     }
 
     @Override
     public boolean shouldCloseOnEsc() {
-        return false;
+        return true;
+    }
+
+    @Override
+    public void onClose() {
+        parent.onCreateTimeout();
+        Minecraft.getInstance().setScreen(parent);
     }
 
     @Override
@@ -44,7 +63,8 @@ public class CreatingRoomScreen extends Screen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
         long elapsed = (System.currentTimeMillis() - startTime) / 1000;
-        String msg = Component.translatable("voxlink.create_room.creating").getString() + " (" + elapsed + "s)";
+        String msg = Component.translatable("voxlink.create_room.creating").getString()
+                + Component.translatable("voxlink.create_room.elapsed_seconds", elapsed).getString();
         int maxWidth = this.width - 20;
         String clipped = msg;
         if (this.font.width(msg) > maxWidth) {

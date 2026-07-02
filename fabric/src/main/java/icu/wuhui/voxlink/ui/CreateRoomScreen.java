@@ -53,6 +53,9 @@ public class CreateRoomScreen extends Screen {
     private String savedName = "";
     private String savedPassword = "";
     private String savedMaxPlayers = "20";
+    private final java.util.List<int[]> successClickAreas = new java.util.ArrayList<>();
+    private final java.util.List<String> successClickTexts = new java.util.ArrayList<>();
+    private final java.util.List<String> successClickLabels = new java.util.ArrayList<>();
 
     private static final Map<String, String> DEFAULT_CATEGORIES = new java.util.LinkedHashMap<>() {{
         put("survival", "voxlink.category.survival");
@@ -213,12 +216,9 @@ public class CreateRoomScreen extends Screen {
 
         for (int i = 0; i < totalCats; i++) {
             String key = keys.get(i);
-            String label = DEFAULT_CATEGORIES.containsKey(key)
-                    ? Component.translatable(DEFAULT_CATEGORIES.get(key)).getString()
-                    : categoryMap.getOrDefault(key, key);
             final String catKey = key;
 
-            Button btn = Button.builder(Component.literal(label), b -> {
+            Button btn = Button.builder(getLabelComponentForKey(key, false), b -> {
                 selectedCategory = catKey;
                 boolean nowOther = catKey.equals("other");
                 if (nowOther != showCustomInput) {
@@ -236,40 +236,11 @@ public class CreateRoomScreen extends Screen {
         rebuildCategoryLabels();
     }
 
-    private void repositionLowerWidgets() {
-        int centerX = this.width / 2;
-        int formHeight = 240;
-        int y = Math.max(4, (this.height - formHeight) / 2);
-        int catY = y + 74;
-        customCategoryField.setX(centerX - 100);
-        customCategoryField.setY(catY + 22);
-        int advY = catY + 42;
-
-        visibleButton.setX(centerX - 100);
-        visibleButton.setY(advY);
-        authButton.setX(centerX + 2);
-        authButton.setY(advY);
-        gameTypeButton.setX(centerX - 100);
-        gameTypeButton.setY(advY + 24);
-        cheatsButton.setX(centerX + 2);
-        cheatsButton.setY(advY + 24);
-        guestOpButton.setX(centerX - 100);
-        guestOpButton.setY(advY + 48);
-        createButton.setX(centerX - 100);
-        createButton.setY(advY + 72);
-        backButton.setX(centerX + 2);
-        backButton.setY(advY + 72);
-    }
-
     private void rebuildCategoryLabels() {
         for (int i = 0; i < categoryButtons.size(); i++) {
             Button btn = categoryButtons.get(i);
             String key = getCategoryKeyAtIndex(i);
-            if (key.equals(selectedCategory)) {
-                btn.setMessage(Component.literal("\u00a7l" + getLabelForKey(key)));
-            } else {
-                btn.setMessage(Component.literal(getLabelForKey(key)));
-            }
+            btn.setMessage(getLabelComponentForKey(key, key.equals(selectedCategory)));
         }
     }
 
@@ -286,10 +257,11 @@ public class CreateRoomScreen extends Screen {
         return "other";
     }
 
-    private String getLabelForKey(String key) {
-        return DEFAULT_CATEGORIES.containsKey(key)
-                ? Component.translatable(DEFAULT_CATEGORIES.get(key)).getString()
-                : categoryMap.getOrDefault(key, key);
+    private Component getLabelComponentForKey(String key, boolean bold) {
+        net.minecraft.network.chat.MutableComponent label = DEFAULT_CATEGORIES.containsKey(key)
+                ? Component.translatable(DEFAULT_CATEGORIES.get(key))
+                : Component.literal(categoryMap.getOrDefault(key, key));
+        return bold ? label.withStyle(Style.EMPTY.withBold(true)) : label;
     }
 
     private void fetchCategories() {
@@ -532,7 +504,7 @@ public class CreateRoomScreen extends Screen {
             net.minecraft.network.chat.MutableComponent addrLine = Component.translatable("voxlink.chat.your_addresses");
             if (hasV4) {
                 String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
-                addrLine.append(Component.literal("[IPv4]")
+                addrLine.append(Component.translatable("voxlink.chat.ipv4_label")
                         .withStyle(Style.EMPTY
                                 .withClickEvent(new ClickEvent.CopyToClipboard(addr))
                                 .withHoverEvent(new HoverEvent.ShowText(Component.translatable("voxlink.chat.copy_for_non_voxlink")))
@@ -541,7 +513,7 @@ public class CreateRoomScreen extends Screen {
             if (hasV4 && hasV6) addrLine.append(Component.literal(" "));
             if (hasV6) {
                 String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
-                addrLine.append(Component.literal("[IPv6]")
+                addrLine.append(Component.translatable("voxlink.chat.ipv6_label")
                         .withStyle(Style.EMPTY
                                 .withClickEvent(new ClickEvent.CopyToClipboard(ipv6Addr))
                                 .withHoverEvent(new HoverEvent.ShowText(Component.translatable("voxlink.chat.copy_for_non_voxlink")))
@@ -621,11 +593,20 @@ public class CreateRoomScreen extends Screen {
         int centerX = this.width / 2;
 
         if (createdRoom != null) {
+            successClickAreas.clear();
+            successClickTexts.clear();
+            successClickLabels.clear();
+            var font = this.font;
             int y = Math.max(20, this.height / 2 - 40);
             drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.success").getString(), centerX, y, 0xFF55FF55);
             y += 18;
             String code = createdRoom.getCode();
-            drawCenteredClipped(graphics, Component.translatable("voxlink.chat.room_code_label").getString() + "\u00a7e\u00a7l" + code, centerX, y, 0xFFFFFFFF);
+            String codeLine = Component.translatable("voxlink.chat.room_code_label").getString() + "\u00a7e\u00a7l" + code;
+            drawCenteredClipped(graphics, codeLine, centerX, y, 0xFFFFFFFF);
+            int codeW = font.width(codeLine);
+            successClickAreas.add(new int[]{centerX - codeW / 2, y, codeW, 9});
+            successClickTexts.add(code);
+            successClickLabels.add(code);
             y += 14;
             String hostIp = createdRoom.getHostIp();
             int hostPort = createdRoom.getHostPort();
@@ -633,16 +614,63 @@ public class CreateRoomScreen extends Screen {
             boolean hasV4 = hostIp != null && !hostIp.isEmpty();
             boolean hasV6 = hostIpv6 != null && !hostIpv6.isEmpty();
             if (hasV4 || hasV6) {
-                StringBuilder sb = new StringBuilder(Component.translatable("voxlink.chat.your_addresses").getString());
-                if (hasV4) sb.append("\u00a7a[IPv4]\u00a7r");
-                if (hasV4 && hasV6) sb.append(" ");
-                if (hasV6) sb.append("\u00a7a[IPv6]\u00a7r");
-                drawCenteredClipped(graphics, sb.toString(), centerX, y, 0xFFFFFFFF);
+                String addrLabel = Component.translatable("voxlink.chat.your_addresses").getString();
+                int labelW = font.width(addrLabel);
+                String v4Label = hasV4 ? Component.translatable("voxlink.chat.ipv4_label").getString() : "";
+                String v6Label = hasV6 ? Component.translatable("voxlink.chat.ipv6_label").getString() : "";
+                int v4W = hasV4 ? font.width(v4Label) : 0;
+                int v6W = hasV6 ? font.width(v6Label) : 0;
+                int spaceW = (hasV4 && hasV6) ? font.width(" ") : 0;
+                int totalW = labelW + v4W + spaceW + v6W;
+                int startX = centerX - totalW / 2;
+
+                graphics.drawString(font, addrLabel, startX, y, 0xFFFFFFFF, false);
+                int curX = startX + labelW;
+                if (hasV4) {
+                    graphics.drawString(font, "\u00a7a" + v4Label + "\u00a7r", curX, y, 0xFF55FF55, false);
+                    successClickAreas.add(new int[]{curX, y, v4W, 9});
+                    successClickTexts.add((hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort);
+                    successClickLabels.add(v4Label);
+                    curX += v4W;
+                }
+                if (hasV4 && hasV6) {
+                    graphics.drawString(font, " ", curX, y, 0xFFFFFFFF, false);
+                    curX += spaceW;
+                }
+                if (hasV6) {
+                    graphics.drawString(font, "\u00a7a" + v6Label + "\u00a7r", curX, y, 0xFF55FF55, false);
+                    successClickAreas.add(new int[]{curX, y, v6W, 9});
+                    successClickTexts.add("[" + hostIpv6 + "]:" + hostPort);
+                    successClickLabels.add(v6Label);
+                }
                 y += 14;
             }
             return;
         }
 
         drawCenteredClipped(graphics, this.title.getString(), centerX, 8, 0xFFFFFFFF);
+    }
+
+    @Override
+    public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean processed) {
+        if (processed) return super.mouseClicked(event, processed);
+        if (createdRoom != null) {
+            double mx = event.x();
+            double my = event.y();
+            for (int i = 0; i < successClickAreas.size(); i++) {
+                int[] a = successClickAreas.get(i);
+                if (mx >= a[0] && mx < a[0] + a[2] && my >= a[1] && my < a[1] + a[3]) {
+                    String text = successClickTexts.get(i);
+                    String label = successClickLabels.get(i);
+                    Minecraft.getInstance().keyboardHandler.setClipboard(text);
+                    if (Minecraft.getInstance().player != null) {
+                        Minecraft.getInstance().player.displayClientMessage(
+                                Component.translatable("voxlink.chat.copied_to_clipboard", label), false);
+                    }
+                    return true;
+                }
+            }
+        }
+        return super.mouseClicked(event, processed);
     }
 }
