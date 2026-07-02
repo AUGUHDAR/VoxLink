@@ -327,6 +327,64 @@ public class StunProbe {
         return results;
     }
 
+    //8并发竞速: 同socket同时发所有STUN, 取前need个成功响应, 谁先返回用谁
+    //不依赖服务器顺序, 单个不可达不影响, 国内外服务器都参与竞速
+    public static PublicMappedAddress[] discoverMappedAddressRace(
+            DatagramSocket socket, List<String> stunUrls, int need) {
+        PublicMappedAddress[] results = new PublicMappedAddress[need];
+        if (stunUrls == null || stunUrls.isEmpty() || need <= 0) return results;
+        int originalTimeout = -1;
+        try {
+            originalTimeout = socket.getSoTimeout();
+            socket.setSoTimeout(DUAL_STUN_TIMEOUT_MS);
+        } catch (Exception ignored) {}
+        int n = stunUrls.size();
+        ParsedStunUrl[] parsed = new ParsedStunUrl[n];
+        byte[][] reqs = new byte[n][];
+        VoxLinkMod.LOGGER.info("[StunProbe] 并行竞速{}STUN取{}个, socket port={}", n, need, socket.getLocalPort());
+        int got = 0;
+        try {
+            for (int i = 0; i < n; i++) {
+                parsed[i] = parseStunUrl(stunUrls.get(i));
+                if (parsed[i] == null) continue;
+                reqs[i] = createBindingRequest();
+                InetAddress addr = InetAddress.getByName(parsed[i].host);
+                socket.send(new DatagramPacket(reqs[i], reqs[i].length, addr, parsed[i].port));
+            }
+            byte[] buf = new byte[576];
+            DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+            long deadline = System.currentTimeMillis() + DUAL_STUN_TIMEOUT_MS;
+            while (got < need && System.currentTimeMillis() < deadline) {
+                try {
+                    socket.receive(pkt);
+                } catch (SocketTimeoutException e) {
+                    break;
+                }
+                byte[] data = new byte[pkt.getLength()];
+                System.arraycopy(pkt.getData(), 0, data, 0, pkt.getLength());
+                if (data.length < 20) continue;
+                for (int i = 0; i < n; i++) {
+                    if (reqs[i] == null) continue;
+                    if (matchTransaction(data, reqs[i])) {
+                        MappedAddress m = parseBindingResponse(data, reqs[i]);
+                        if (m != null) {
+                            results[got] = new PublicMappedAddress(m.ip, m.port);
+                            got++;
+                            VoxLinkMod.LOGGER.info("[StunProbe] 竞速第{}个: {} -> {}:{}", got, stunUrls.get(i), m.ip, m.port);
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[StunProbe] 并行竞速异常: {}", e.getMessage());
+        } finally {
+            try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
+        }
+        VoxLinkMod.LOGGER.info("[StunProbe] 竞速完成: 取到{}/{}", got, need);
+        return results;
+    }
+
     // 修复2: 4个STUN并发, 取前2个成功响应比对, 提高对称NAT检测冗余
     // 旧逻辑仅2个STUN, 任一不可达即降级单测无法判定对称; 新逻辑4个并发容错更强
     public static PublicMappedAddress[] discoverMappedAddressQuad(
@@ -904,45 +962,52 @@ public class StunProbe {
         int originalTimeout = -1;
         try {
             originalTimeout = socket.getSoTimeout();
-            socket.setSoTimeout(1000); // 首请求快速超时, 便于切换服务器
+            socket.setSoTimeout(DUAL_STUN_TIMEOUT_MS);
         } catch (Exception ignored) {}
 
-        // 自动选择第一个响应的STUN服务器
+        //8并发竞速选服务器: 同时发所有STUN, 谁先返回用谁, 记录选中服务器
         String selectedHost = null;
         int selectedPort = STUN_DEFAULT_PORT;
-        for (String url : stunUrls) {
-            ParsedStunUrl parsed = parseStunUrl(url);
-            if (parsed == null) continue;
-            try {
-                byte[] req = createBindingRequest();
-                InetAddress addr = InetAddress.getByName(parsed.host);
-                socket.send(new DatagramPacket(req, req.length, addr, parsed.port));
-                byte[] buf = new byte[576];
-                DatagramPacket recv = new DatagramPacket(buf, buf.length);
-                long deadline = System.currentTimeMillis() + 1000;
-                while (System.currentTimeMillis() < deadline) {
-                    try { socket.receive(recv); } catch (SocketTimeoutException e) { break; }
-                    byte[] respData = new byte[recv.getLength()];
-                    System.arraycopy(recv.getData(), 0, respData, 0, recv.getLength());
-                    if (respData.length < 20) continue;
-                    MappedAddress ma = parseBindingResponse(respData, req);
-                    if (ma != null) {
-                        ports.add(ma.port);
-                        selectedHost = parsed.host;
-                        selectedPort = parsed.port;
-                        VoxLinkMod.LOGGER.info("[StunProbe] P-PRE选定STUN: {}:{}, 首端口={}", selectedHost, selectedPort, ma.port);
+        int n = stunUrls.size();
+        ParsedStunUrl[] parsed = new ParsedStunUrl[n];
+        byte[][] reqs = new byte[n][];
+        try {
+            for (int i = 0; i < n; i++) {
+                parsed[i] = parseStunUrl(stunUrls.get(i));
+                if (parsed[i] == null) continue;
+                reqs[i] = createBindingRequest();
+                InetAddress addr = InetAddress.getByName(parsed[i].host);
+                socket.send(new DatagramPacket(reqs[i], reqs[i].length, addr, parsed[i].port));
+            }
+            byte[] buf = new byte[576];
+            DatagramPacket recv = new DatagramPacket(buf, buf.length);
+            long deadline = System.currentTimeMillis() + DUAL_STUN_TIMEOUT_MS;
+            while (selectedHost == null && System.currentTimeMillis() < deadline) {
+                try { socket.receive(recv); } catch (SocketTimeoutException e) { break; }
+                byte[] respData = new byte[recv.getLength()];
+                System.arraycopy(recv.getData(), 0, respData, 0, recv.getLength());
+                if (respData.length < 20) continue;
+                for (int i = 0; i < n; i++) {
+                    if (reqs[i] == null) continue;
+                    if (matchTransaction(respData, reqs[i])) {
+                        MappedAddress ma = parseBindingResponse(respData, reqs[i]);
+                        if (ma != null) {
+                            selectedHost = parsed[i].host;
+                            selectedPort = parsed[i].port;
+                            ports.add(ma.port);
+                            VoxLinkMod.LOGGER.info("[StunProbe] P-PRE竞速选定STUN: {}:{}, 首端口={}", selectedHost, selectedPort, ma.port);
+                        }
                         break;
                     }
                 }
-                if (selectedHost != null) break;
-            } catch (Exception e) {
-                VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE {}不可用, 切换: {}", url, e.getMessage());
             }
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE竞速异常: {}", e.getMessage());
         }
         if (selectedHost == null) {
-            VoxLinkMod.LOGGER.warn("[StunProbe] P-PRE所有STUN服务器无响应, 采样失败");
+            VoxLinkMod.LOGGER.warn("[StunProbe] P-PRE竞速无响应, 采样失败");
             try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
-            return ports; // 可能只有首请求的1个端口
+            return ports;
         }
 
         // 恢复探测超时, 用选定的服务器完成剩余采样
