@@ -70,7 +70,7 @@ public class ManageRoomScreen extends Screen {
         int y = Math.max(24, (this.height - formHeight) / 2);
 
         nameField = new EditBox(this.font, centerX - 100, y, 200, 20, Component.translatable("voxlink.room_name"));
-        nameField.setMaxLength(10);
+        nameField.setMaxLength(20);
         nameField.setValue(roomInfo.getName() != null ? roomInfo.getName() : "");
         this.addRenderableWidget(nameField);
 
