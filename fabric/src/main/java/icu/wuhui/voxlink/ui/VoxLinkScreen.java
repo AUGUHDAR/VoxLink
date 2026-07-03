@@ -122,7 +122,13 @@ public class VoxLinkScreen extends Screen {
             graphics.drawCenteredString(this.font, clippedCode, centerX, 36, 0xFFFFFF55);
 
             if (!currentRoom.isHost()) {
-                Component connMode = currentRoom.getConnectionMode();
+                Component connMode;
+                if (Minecraft.getInstance().player != null) {
+                    // 房客已进入世界，强制显示"已连接"
+                    connMode = Component.translatable("voxlink.connection.connected");
+                } else {
+                    connMode = currentRoom.getConnectionMode();
+                }
                 if (connMode != null && !connMode.getString().isEmpty()) {
                     String text = connMode.getString();
                     int connMaxWidth = this.width - 20;
