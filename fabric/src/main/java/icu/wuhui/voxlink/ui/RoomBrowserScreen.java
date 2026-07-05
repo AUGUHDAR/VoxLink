@@ -303,6 +303,9 @@ public class RoomBrowserScreen extends Screen {
                                     JsonObject r = e.getAsJsonObject();
                                     String code = r.has("code") ? r.get("code").getAsString() : "";
                                     if (existingCodes.contains(code)) continue;
+                                    // 兜底过滤: 跳过APP房间(clientType非mod), 防止服务器bug导致APP房间泄漏到mod大厅
+                                    String roomClientType = r.has("clientType") ? r.get("clientType").getAsString() : "mod";
+                                    if (!"mod".equals(roomClientType)) continue;
                                     allRooms.add(new RoomEntry(
                                             code,
                                             r.has("name") ? r.get("name").getAsString() : Component.translatable("voxlink.unknown").getString(),

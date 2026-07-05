@@ -206,7 +206,7 @@ public class SignalingClient {
     }
 
     public CompletableFuture<ApiResponse> listRooms(int page, int size, String category) {
-        String params = "page=" + page + "&size=" + size;
+        String params = "page=" + page + "&size=" + size + "&clientType=mod";
         if (category != null && !category.isEmpty()) {
             try {
                 params += "&category=" + java.net.URLEncoder.encode(category, "UTF-8");

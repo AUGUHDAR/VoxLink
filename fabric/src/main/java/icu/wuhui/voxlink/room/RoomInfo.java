@@ -29,6 +29,7 @@ public class RoomInfo {
     private volatile String category;
     private volatile String authType;
     private volatile int peerPort;
+    private volatile String clientType = "mod";
     private volatile Component connectionMode = Component.empty();
     private volatile boolean connectionFailed = false;
     private volatile int localBridgePort = 0;
@@ -148,6 +149,8 @@ public class RoomInfo {
     public void setAuthType(String authType) { this.authType = authType; }
     public int getPeerPort() { return peerPort; }
     public void setPeerPort(int peerPort) { this.peerPort = peerPort; }
+    public String getClientType() { return clientType; }
+    public void setClientType(String clientType) { this.clientType = clientType; }
     public Component getConnectionMode() { return connectionMode; }
     public void setConnectionMode(Component connectionMode) {
         this.connectionMode = connectionMode;

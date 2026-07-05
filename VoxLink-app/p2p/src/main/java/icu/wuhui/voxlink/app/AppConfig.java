@@ -1,6 +1,7 @@
 package icu.wuhui.voxlink.app;
 
 // APP配置，替代mod端VoxLinkConfig（去掉MC专用项如autoUPnP/voiceChatCompat）
+// APP无RelayBridge实体，relayEnabled固定false，避免被选为中继节点导致空壳调用
 public class AppConfig {
     private static final String DEFAULT_SERVER_URL = "https://p2p.wuhui.icu";
 
@@ -17,7 +18,7 @@ public class AppConfig {
         this.signalPollInterval = 200;
         this.connectionTimeout = 10000;
         this.maxReconnectAttempts = 3;
-        this.relayEnabled = true;
+        this.relayEnabled = false;
     }
 
     public String getServerUrl() { return serverUrl; }
