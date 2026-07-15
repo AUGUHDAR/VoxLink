@@ -1,0 +1,64 @@
+# Gradle
+.gradle/
+build/
+.gradle-home/
+
+# IDE / AI tools
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+.claude/
+.deepseek/
+.trae/
+.workbuddy/
+
+# Build scripts (temp)
+build_*.ps1
+build_*.py
+build_*.cmd
+check*.ps1
+chk_*.py
+fix_*.ps1
+diff_results.txt
+
+# Build logs / temp
+fabric/build_*.txt
+fabric/build_*.log
+fabric/fabric.zip
+fabric/*.launch
+fabric/bin/
+*.jar
+
+# Compiled output
+成品/
+
+# Local Minecraft metadata server
+mcmeta/
+
+# Third-party launchers (not part of VoxLink)
+FoldCraftLauncher-*/
+PCL-*/
+VoxLauncher/
+VoxLauncher-UI-Design/
+
+# Server / deploy (not mod source)
+server/
+deploy/
+
+# Backups & temp docs
+backup_original/
+日志/
+测试/
+参考/
+技术文档.txt
+其他日志/
+客户端测试/
+相关MOD参考/
+
+# OS files
+Thumbs.db
+desktop.ini
+.DS_Store

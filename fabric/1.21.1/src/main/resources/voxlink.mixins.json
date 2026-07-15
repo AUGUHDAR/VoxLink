@@ -1,0 +1,19 @@
+{
+    "required": false,
+    "minVersion": "0.8",
+    "package": "icu.wuhui.voxlink.mixin",
+    "compatibilityLevel": "JAVA_17",
+    "refmap": "voxlink-refmap.json",
+    "client": [
+        "PauseMenuMixin",
+        "TitleScreenMixin",
+        "IntegratedServerMixin",
+        "DirectConnectMixin"
+    ],
+    "mixins": [
+        "UUIDUtilMixin"
+    ],
+    "injectors": {
+        "defaultRequire": 0
+    }
+}
