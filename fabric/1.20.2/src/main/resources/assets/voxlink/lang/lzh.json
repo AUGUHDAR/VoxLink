@@ -208,5 +208,11 @@
     "voxlink.dual.status_cancelled": "已略",
     "voxlink.dual.p2p_established": "信道已通，入世中...",
     "voxlink.dual.channel_failed": "未連",
-    "voxlink.create_room.uac_hint": "陶瓦或須管理員之權，若見UAC之窗，請點是"
+    "voxlink.create_room.uac_hint": "陶瓦或須管理員之權，若見UAC之窗，請點是",
+    "voxlink.manage_room.name_pending_review": "设置已存，室名待审...",
+    "voxlink.pause.room_management": "室务",
+    "voxlink.terracotta.delete_binary": "删陶瓦",
+    "voxlink.terracotta.binary_deleted": "陶瓦已删",
+    "voxlink.update.check": "VoxLink 更新提示",
+    "voxlink.update.available": "有新版 %s，速更新 awa"
 }

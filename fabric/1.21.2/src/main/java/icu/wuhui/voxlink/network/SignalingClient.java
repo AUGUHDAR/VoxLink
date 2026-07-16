@@ -533,12 +533,7 @@ public class SignalingClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        try {
-            //Java21+ HttpClient实现了AutoCloseable, Java17没有close(), 反射兼容
-            httpClient.getClass().getMethod("close").invoke(httpClient);
-        } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("HTTP client关不掉: {}", e.getMessage());
-        }
+        //debounce JVM关闭时自动清理HttpClient,反射close()会触发模块访问警告
     }
 
     public static class ApiResponse {

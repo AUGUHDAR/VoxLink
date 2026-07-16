@@ -208,5 +208,11 @@
   "voxlink.dual.status_cancelled": "Ignoré",
   "voxlink.dual.p2p_established": "Canal établi, entrée dans le monde...",
   "voxlink.dual.channel_failed": "Non connecté",
-  "voxlink.create_room.uac_hint": "Terracotta peut nécessiter des droits d'administrateur, cliquez Oui si une fenêtre UAC apparaît"
+  "voxlink.create_room.uac_hint": "Terracotta peut nécessiter des droits d'administrateur, cliquez Oui si une fenêtre UAC apparaît",
+  "voxlink.manage_room.name_pending_review": "Paramètres enregistrés, nom du salon en cours de vérification...",
+  "voxlink.pause.room_management": "Gestion du salon",
+  "voxlink.terracotta.delete_binary": "Supprimer Terracotta",
+  "voxlink.terracotta.binary_deleted": "Terracotta supprimé",
+  "voxlink.update.check": "Vérif. mises à jour VoxLink",
+  "voxlink.update.available": "Nouvelle version %s disponible, mise à jour awa"
 }

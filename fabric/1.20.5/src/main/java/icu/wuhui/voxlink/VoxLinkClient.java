@@ -2,10 +2,12 @@ package icu.wuhui.voxlink;
 
 import icu.wuhui.voxlink.network.ConnectionHelper;
 import icu.wuhui.voxlink.network.PeerServer;
+import icu.wuhui.voxlink.network.UpdateChecker;
 import icu.wuhui.voxlink.room.RoomInfo;
 import icu.wuhui.voxlink.room.RoomManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;
@@ -58,6 +60,9 @@ public class VoxLinkClient implements ClientModInitializer {
         if (VoxLinkMod.getConfig().isAutoUPnP()) {
             icu.wuhui.voxlink.network.UPnPManager.tryMapAtStartup();
         }
+
+        //进世界时检查一次更新
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> UpdateChecker.checkOnce());
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (ConnectionHelper.isConnecting() && !(client.screen instanceof net.minecraft.client.gui.screens.ConnectScreen)) {

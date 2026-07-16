@@ -14,7 +14,6 @@ repositories {
 }
 
 loom {
-    customMinecraftMetadata = "http://127.0.0.1:8080/26.2.json"
 }
 
 dependencies {

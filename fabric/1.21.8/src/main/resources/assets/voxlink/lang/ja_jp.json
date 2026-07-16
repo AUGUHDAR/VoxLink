@@ -208,5 +208,11 @@
     "voxlink.dual.status_cancelled": "スキップ",
     "voxlink.dual.p2p_established": "チャネル確立、ワールドに入っています...",
     "voxlink.dual.channel_failed": "未接続",
-    "voxlink.create_room.uac_hint": "テラコッタは管理者権限が必要な場合があります、UACウィンドウが表示されたら「はい」をクリックしてください"
+    "voxlink.create_room.uac_hint": "テラコッタは管理者権限が必要な場合があります、UACウィンドウが表示されたら「はい」をクリックしてください",
+    "voxlink.manage_room.name_pending_review": "設定を保存しました。ルーム名を審査中...",
+    "voxlink.pause.room_management": "ルーム管理",
+    "voxlink.terracotta.delete_binary": "テラコッタを削除",
+    "voxlink.terracotta.binary_deleted": "テラコッタを削除しました",
+    "voxlink.update.check": "VoxLink 更新通知",
+    "voxlink.update.available": "新バージョン %s があります。更新しよう awa"
 }

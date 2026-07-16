@@ -145,9 +145,11 @@
     "voxlink.manage_room.saving": "正在保存...",
     "voxlink.manage_room.saved": "设置已保存！ :D",
     "voxlink.manage_room.saved_name_not_approved": "设置保存了，但房间名没通过审核，已换成默认名称 qwq",
+    "voxlink.manage_room.name_pending_review": "设置已保存，房间名审核中...",
     "voxlink.screen.room_code_display": "房间代码: %s",
     "voxlink.screen.terracotta_code_display": "[陶瓦房间号] %s",
     "voxlink.pause.button_with_code": "§aVoxLink §r[§e%s§r]",
+    "voxlink.pause.room_management": "房间管理",
     "voxlink.attempting_join": "正在加入",
     "voxlink.attempting_join.joining": "正在加入房间...",
     "voxlink.attempting_join.waiting_connection": "已加入房间，等待房主响应...",
@@ -192,6 +194,7 @@
     "voxlink.terracotta.status.exception": "异常",
     "voxlink.terracotta.parallel_p2p": "启用并行 P2P（推荐）",
     "voxlink.terracotta.clear_cache": "清除陶瓦缓存",
+    "voxlink.terracotta.delete_binary": "删除陶瓦",
     "voxlink.terracotta.redownload": "重新下载陶瓦",
     "voxlink.terracotta.download_failed": ":( 下载失败，点击重试",
     "voxlink.terracotta.unsupported_platform": ":( 当前平台不支持陶瓦下载",
@@ -199,6 +202,7 @@
     "voxlink.terracotta.android_need_launcher": ":( 请使用支持陶瓦的启动器（FCL/HMCL）并在其中启用陶瓦",
     "voxlink.terracotta.download_success": ":D 陶瓦下载完成",
     "voxlink.terracotta.cache_cleared": "陶瓦缓存已清除",
+    "voxlink.terracotta.binary_deleted": "陶瓦已删除",
     "voxlink.terracotta.status_label": "陶瓦状态：%s",
     "voxlink.terracotta.toggle": "陶瓦: %s",
     "voxlink.terracotta.on": "开",
@@ -208,5 +212,7 @@
     "voxlink.dual.status_cancelled": "已跳过",
     "voxlink.dual.p2p_established": "通道已建立，进世界中...",
     "voxlink.dual.channel_failed": "未连上",
-    "voxlink.create_room.uac_hint": "陶瓦可能需要管理员权限，如弹出UAC窗口请点击是"
+    "voxlink.create_room.uac_hint": "陶瓦可能需要管理员权限，如弹出UAC窗口请点击是",
+    "voxlink.update.check": "VoxLink 更新提示",
+    "voxlink.update.available": "发现新版本 %s，快去更新吧 awa"
 }

@@ -390,6 +390,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         return !creating;
     }
 
+    @Override
+    public void onClose() {
+        if (creating) return;
+        goBack();
+    }
+
     private void goBack() {
         Minecraft.getInstance().gui.setScreen(parent);
     }

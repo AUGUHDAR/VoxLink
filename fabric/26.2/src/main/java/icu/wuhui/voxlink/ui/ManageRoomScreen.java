@@ -149,6 +149,12 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
         return !saving;
     }
 
+    @Override
+    public void onClose() {
+        if (saving) return;
+        Minecraft.getInstance().gui.setScreen(parent);
+    }
+
     private void updateVisibleForPassword() {
         boolean hasPassword = passwordField != null && !passwordField.getValue().trim().isEmpty();
         if (hasPassword) {
@@ -220,12 +226,9 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                 saving = false;
                 saveButton.active = true;
                 if (updated != null && !updated.isNameApproved()) {
-                    statusMessage = ChatFormatting.YELLOW.toString() + Component.translatable("voxlink.manage_room.saved_name_not_approved").getString();
+                    //debounce 审核异步进行,不在此处下结论,避免与后续信号矛盾
+                    statusMessage = ChatFormatting.YELLOW.toString() + Component.translatable("voxlink.manage_room.name_pending_review").getString();
                     statusColor = COLOR_WARNING;
-                    if (mc.player != null) {
-                    mc.player.sendSystemMessage(
-                            Component.translatable("voxlink.chat.name_not_approved"));
-                }
                 } else {
                     statusMessage = ChatFormatting.GREEN.toString() + Component.translatable("voxlink.manage_room.saved").getString();
                     statusColor = COLOR_SUCCESS;

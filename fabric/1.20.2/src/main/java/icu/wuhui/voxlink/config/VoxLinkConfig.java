@@ -36,6 +36,7 @@ public class VoxLinkConfig {
     private volatile int maxReconnectAttempts;
     private volatile boolean relayEnabled = true;
     private volatile boolean parallelP2P = true;
+    private volatile boolean updateCheckEnabled = true;
 
     public VoxLinkConfig() {
         this.serverUrl = DEFAULT_SERVER_URL;
@@ -48,6 +49,7 @@ public class VoxLinkConfig {
         this.maxReconnectAttempts = DEFAULT_MAX_RECONNECT;
         this.relayEnabled = true;
         this.parallelP2P = true;
+        this.updateCheckEnabled = true;
     }
 
     public static VoxLinkConfig load() {
@@ -124,4 +126,6 @@ public class VoxLinkConfig {
     public void setRelayEnabled(boolean relayEnabled) { this.relayEnabled = relayEnabled; }
     public boolean isParallelP2P() { return parallelP2P; }
     public void setParallelP2P(boolean v) { this.parallelP2P = v; }
+    public boolean isUpdateCheckEnabled() { return updateCheckEnabled; }
+    public void setUpdateCheckEnabled(boolean v) { this.updateCheckEnabled = v; }
 }

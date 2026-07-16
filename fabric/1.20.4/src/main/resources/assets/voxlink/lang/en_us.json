@@ -145,9 +145,11 @@
   "voxlink.manage_room.saving": "Saving...",
   "voxlink.manage_room.saved": "Settings saved! :D",
   "voxlink.manage_room.saved_name_not_approved": "Settings saved, but the room name wasn't approved so it was replaced qwq",
+  "voxlink.manage_room.name_pending_review": "Settings saved, room name under review...",
   "voxlink.screen.room_code_display": "Room Code: %s",
   "voxlink.screen.terracotta_code_display": "[Terracotta Code] %s",
   "voxlink.pause.button_with_code": "§aVoxLink §r[§e%s§r]",
+  "voxlink.pause.room_management": "Room Management",
   "voxlink.attempting_join": "Joining",
   "voxlink.attempting_join.joining": "Joining room...",
   "voxlink.attempting_join.waiting_connection": "Joined room, waiting for host response...",
@@ -192,6 +194,7 @@
   "voxlink.terracotta.status.exception": "Error",
   "voxlink.terracotta.parallel_p2p": "Enable Parallel P2P (Recommended)",
   "voxlink.terracotta.clear_cache": "Clear Terracotta Cache",
+  "voxlink.terracotta.delete_binary": "Delete Terracotta",
   "voxlink.terracotta.redownload": "Re-download Terracotta",
   "voxlink.terracotta.download_failed": ":( Download failed, click to retry",
   "voxlink.terracotta.unsupported_platform": ":( Current platform doesn't support Terracotta download.",
@@ -199,6 +202,7 @@
   "voxlink.terracotta.android_need_launcher": ":( Please use a Terracotta-supported launcher (FCL/HMCL) and enable Terracotta in it",
   "voxlink.terracotta.download_success": ":D Terracotta download complete",
   "voxlink.terracotta.cache_cleared": "Terracotta cache cleared",
+  "voxlink.terracotta.binary_deleted": "Terracotta deleted",
   "voxlink.terracotta.status_label": "Terracotta status: %s",
   "voxlink.terracotta.toggle": "Terracotta: %s",
   "voxlink.terracotta.on": "On",
@@ -208,5 +212,7 @@
   "voxlink.dual.status_cancelled": "Skipped",
   "voxlink.dual.p2p_established": "Channel established, entering world...",
   "voxlink.dual.channel_failed": "Not connected",
-  "voxlink.create_room.uac_hint": "Terracotta may need admin rights, click Yes if a UAC prompt appears"
+  "voxlink.create_room.uac_hint": "Terracotta may need admin rights, click Yes if a UAC prompt appears",
+  "voxlink.update.check": "VoxLink Update Check",
+  "voxlink.update.available": "New version %s available, time to update awa"
 }
