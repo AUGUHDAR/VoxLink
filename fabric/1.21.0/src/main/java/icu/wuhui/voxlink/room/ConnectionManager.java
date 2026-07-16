@@ -84,6 +84,9 @@ public class ConnectionManager {
     private final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
     private volatile String lastPunchInfoId = "";
     private volatile boolean hostPunching = false;
+    //debounce 双P2P时追踪VoxLink桥建立 等桥建好才算赢 语义对齐陶瓦guest-ok
+    private volatile CompletableFuture<Void> dualVoxlinkBridgeFuture;
+    private static final int DUAL_VOXLINK_BRIDGE_TIMEOUT_SEC = 60;
 
     private static final int MAX_CONNECTION_CYCLES = 8;
     private static final int FALLBACK_CYCLES = 3;
@@ -2979,9 +2982,9 @@ return null;
                             connectionCycleActive.set(false);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "connected", new JsonObject(), "host");
-                            //debounce 桥已建 但MC还没真连上 显示连接中
                             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
                             ConnectionHelper.connectToServer(localPort, state.roomInfo);
+                            notifyDualVoxlinkBridge(true);
                         } else {
                             connectionCycleActive.set(false);
                             ConnectionHelper.resetConnecting();
@@ -2989,6 +2992,7 @@ return null;
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "disconnect", new JsonObject(), "host");
                             handleConnectViaBridgeFailed(state);
+                            notifyDualVoxlinkBridge(false);
                         }
                     });
         } else {
@@ -2998,9 +3002,9 @@ return null;
                             connectionCycleActive.set(false);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "connected", new JsonObject(), "host");
-                            //debounce 桥已建 但MC还没真连上 显示连接中
                             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
                             ConnectionHelper.connectToServer(localPort, state.roomInfo);
+                            notifyDualVoxlinkBridge(true);
                         } else {
                             connectionCycleActive.set(false);
                             ConnectionHelper.resetConnecting();
@@ -3008,6 +3012,7 @@ return null;
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "disconnect", new JsonObject(), "host");
                             handleConnectViaBridgeFailed(state);
+                            notifyDualVoxlinkBridge(false);
                         }
                     });
         }
@@ -3490,6 +3495,17 @@ return null;
         VoxLinkMod.LOGGER.info("[DualP2P] 终止 {} 侧连接尝试", reason);
     }
 
+    //debounce 通知双P2P的VoxLink桥建立结果 joiner桥建好/失败时调用
+    public void notifyDualVoxlinkBridge(boolean success) {
+        CompletableFuture<Void> f = dualVoxlinkBridgeFuture;
+        if (f == null) return;
+        if (success) {
+            f.complete(null);
+        } else {
+            f.completeExceptionally(new RuntimeException("VoxLink桥建立失败"));
+        }
+    }
+
     //双P2P编排: 房间码路由 + 并行竞速
     public CompletableFuture<Void> startDualP2P(String roomCode, String playerName, String password,
                                                     java.util.function.BiConsumer<String, String> statusCallback) {
@@ -3520,8 +3536,16 @@ return null;
         java.util.concurrent.atomic.AtomicBoolean won = new java.util.concurrent.atomic.AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicInteger failed = new java.util.concurrent.atomic.AtomicInteger(0);
         CompletableFuture<Void> dualResult = new CompletableFuture<>();
+        //debounce VoxLink侧等到桥建立才算赢 和陶瓦guest-ok语义对齐
+        dualVoxlinkBridgeFuture = new CompletableFuture<>();
+        final CompletableFuture<Void> bridgeFuture = dualVoxlinkBridgeFuture;
+        scheduler.schedule(() -> {
+            if (!bridgeFuture.isDone()) bridgeFuture.completeExceptionally(new RuntimeException("VoxLink桥建立超时"));
+        }, DUAL_VOXLINK_BRIDGE_TIMEOUT_SEC, TimeUnit.SECONDS);
         startVoxLinkP2P(roomCode, password)
+            .thenCompose(v -> bridgeFuture)
             .whenComplete((r, e) -> {
+                dualVoxlinkBridgeFuture = null;
                 if (e == null) {
                     if (won.compareAndSet(false, true)) {
                         killAllConnectionAttempts("terracotta");
@@ -3608,12 +3632,14 @@ return null;
             //debounce 桥已建 但MC还没真连上 显示连接中
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
             ConnectionHelper.connectToServer(localPort, state.roomInfo);
+            notifyDualVoxlinkBridge(true);
         } else {
             connectionCycleActive.set(false);
             ConnectionHelper.resetConnecting();
             ConnectionState.transitionTo(ConnectionState.FAILED, "桥接启动失败");
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
             sendDisconnectOnFailure(state);
+            notifyDualVoxlinkBridge(false);
             scheduler.execute(() -> {
                 if (roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
                     roomManager.leaveRoom();

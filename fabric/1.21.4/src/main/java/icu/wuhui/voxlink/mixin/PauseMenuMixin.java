@@ -34,9 +34,8 @@ public abstract class PauseMenuMixin extends Screen {
         RoomInfo currentRoom = rm.getCurrentRoom();
 
         if (currentRoom != null) {
-            Component label = Component.translatable("voxlink.pause.button_with_code", currentRoom.getCode());
             this.addRenderableWidget(
-                    Button.builder(label, button -> mc.setScreen(new VoxLinkScreen((Screen)(Object)this)))
+                    Button.builder(Component.translatable("voxlink.pause.room_management"), button -> mc.setScreen(new VoxLinkScreen((Screen)(Object)this)))
                     .bounds(this.width / 2 - BTN_OFFSET_X, this.height / 4 + PAUSE_BTN_Y_OFFSET, BTN_FULL_W, BTN_H)
                     .build()
             );

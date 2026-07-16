@@ -615,6 +615,9 @@ if (wasPending) {
         try {
             topologyClient.onRoomLeft();
         } catch (Exception e) { VoxLinkMod.LOGGER.debug("cleanup topology error: {}", e.getMessage()); }
+        try {
+            TerracottaManager.shutdown();
+        } catch (Exception e) { VoxLinkMod.LOGGER.debug("cleanup terracotta error: {}", e.getMessage()); }
     }
 
     public void leaveRoomSync() {
@@ -1290,12 +1293,12 @@ if (wasPending) {
     private void handleConnected(String from, JsonObject data) {
         VoxLinkMod.LOGGER.info("对端已连接: {}", from);
         RoomState st = currentRoom.get();
-        if (st != null && st != PENDING && st.roomInfo.isHost() && st.roomInfo.isGuestOp()) {
+        if (st != null && st != PENDING && st.roomInfo.isHost()) {
+            boolean guestOp = st.roomInfo.isGuestOp();
             scheduler.schedule(() -> {
                 try {
                     Minecraft mc = Minecraft.getInstance();
                     if (mc == null) return;
-                    // 服务端操作必须在主线程执行
                     mc.execute(() -> {
                         try {
                             var server = mc.getSingleplayerServer();
@@ -1304,12 +1307,13 @@ if (wasPending) {
                             for (var player : server.getPlayerList().getPlayers()) {
                                 String name = player.getName().getString();
                                 if (name.equals(hostName)) continue;
+                                String cmd = guestOp ? "op " + name : "deop " + name;
                                 server.getCommands().performPrefixedCommand(
-                                    server.createCommandSourceStack(), "op " + name);
-                                VoxLinkMod.LOGGER.info("[RoomManager] 自动OP访客: {}", name);
+                                    server.createCommandSourceStack(), cmd);
+                                VoxLinkMod.LOGGER.info("[RoomManager] {}访客: {}", guestOp ? "自动OP" : "自动DEOP", name);
                             }
                         } catch (Exception e) {
-                            VoxLinkMod.LOGGER.warn("[RoomManager] 自动OP访客失败: {}", e.getMessage());
+                            VoxLinkMod.LOGGER.warn("[RoomManager] 访客OP处理失败: {}", e.getMessage());
                         }
                     });
                 } catch (Exception e) {

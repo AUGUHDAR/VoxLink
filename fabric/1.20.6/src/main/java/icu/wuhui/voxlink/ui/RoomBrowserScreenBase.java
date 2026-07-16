@@ -118,6 +118,11 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     @Override
+    public void onClose() {
+        Minecraft.getInstance().setScreen(parent);
+    }
+
+    @Override
     protected void init() {
         super.init();
 

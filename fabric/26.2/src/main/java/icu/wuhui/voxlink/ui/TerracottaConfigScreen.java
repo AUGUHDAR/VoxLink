@@ -46,14 +46,23 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
         super.init();
         int centerX = this.width / 2;
         boolean isDownloading = TerracottaManager.isDownloading();
-        //下载中: 5 项 (toggle, clear, redownload, pause/cancel, done)
-        //非下载: 4 项 (toggle, clear, redownload, done)
-        int itemCount = isDownloading ? 5 : 4;
+        //下载中: 6 项 (update, toggle, delete, redownload, pause/cancel, done)
+        //非下载: 5 项 (update, toggle, delete, redownload, done)
+        int itemCount = isDownloading ? 6 : 5;
         int formHeight = itemCount * BTN_H + (itemCount - 1) * GAP;
         int y = Math.max(MIN_FORM_HEIGHT, (this.height - formHeight) / 2);
 
-        CycleButton<Boolean> parallelToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isParallelP2P())
+        CycleButton<Boolean> updateCheckToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isUpdateCheckEnabled())
                 .create(centerX - BTN_W / 2, y, BTN_W, BTN_H,
+                        Component.translatable("voxlink.update.check"),
+                        (btn, val) -> {
+                            VoxLinkMod.getConfig().setUpdateCheckEnabled(val);
+                            VoxLinkMod.getConfig().save();
+                        });
+        addRenderableWidget(updateCheckToggle);
+
+        CycleButton<Boolean> parallelToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isParallelP2P())
+                .create(centerX - BTN_W / 2, y + BTN_H + GAP, BTN_W, BTN_H,
                         Component.translatable("voxlink.terracotta.parallel_p2p"),
                         (btn, val) -> {
                             VoxLinkMod.getConfig().setParallelP2P(val);
@@ -61,13 +70,14 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
                         });
         addRenderableWidget(parallelToggle);
 
-        Button clearCacheBtn = Button.builder(
-                Component.translatable("voxlink.terracotta.clear_cache"),
-                button -> clearCache()
-        ).bounds(centerX - BTN_W / 2, y + BTN_H + GAP, BTN_W, BTN_H).build();
-        addRenderableWidget(clearCacheBtn);
+        Button deleteBinaryBtn = Button.builder(
+                Component.translatable("voxlink.terracotta.delete_binary"),
+                button -> deleteBinary()
+        ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 2, BTN_W, BTN_H).build();
+        deleteBinaryBtn.active = !isDownloading;
+        addRenderableWidget(deleteBinaryBtn);
 
-        int redownloadY = y + (BTN_H + GAP) * 2;
+        int redownloadY = y + (BTN_H + GAP) * 3;
         Component redownloadLabel = buildRedownloadLabel();
         redownloadBtn = Button.builder(redownloadLabel, button -> startRedownload())
                 .bounds(centerX - BTN_W / 2, redownloadY, BTN_W, BTN_H).build();
@@ -75,7 +85,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
         addRenderableWidget(redownloadBtn);
 
         if (isDownloading) {
-            int pauseCancelY = y + (BTN_H + GAP) * 3;
+            int pauseCancelY = y + (BTN_H + GAP) * 4;
             boolean paused = TerracottaManager.isDownloadPaused();
             pauseResumeBtn = Button.builder(
                     Component.translatable(paused ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"),
@@ -106,14 +116,14 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
             addRenderableWidget(Button.builder(
                     Component.translatable("gui.done"),
                     button -> Minecraft.getInstance().gui.setScreen(parent)
-            ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 4, BTN_W, BTN_H).build());
+            ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 5, BTN_W, BTN_H).build());
         } else {
             pauseResumeBtn = null;
             cancelBtn = null;
             addRenderableWidget(Button.builder(
                     Component.translatable("gui.done"),
                     button -> Minecraft.getInstance().gui.setScreen(parent)
-            ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 3, BTN_W, BTN_H).build());
+            ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 4, BTN_W, BTN_H).build());
         }
     }
 
@@ -198,14 +208,19 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
         return "voxlink.terracotta.status.not_downloaded";
     }
 
-    private void clearCache() {
+    private void deleteBinary() {
+        try {
+            TerracottaManager.shutdown();
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("删除前停止陶瓦失败: {}", e.getMessage());
+        }
         Path cacheDir = TerracottaBinary.getCacheDir();
         try {
             deleteRecursively(cacheDir);
-            statusMessage = Component.translatable("voxlink.terracotta.cache_cleared").getString();
+            statusMessage = Component.translatable("voxlink.terracotta.binary_deleted").getString();
             statusColor = COLOR_SUCCESS;
         } catch (IOException e) {
-            VoxLinkMod.LOGGER.warn("清除陶瓦缓存失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.warn("删除陶瓦失败: {}", e.getMessage());
             statusMessage = Component.translatable("voxlink.terracotta.download_failed").getString();
             statusColor = COLOR_ERROR;
         }
@@ -251,7 +266,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
         drawCenteredClipped(graphics, this.title.getString(), centerX, TITLE_Y, COLOR_WHITE);
 
         boolean isDownloading = TerracottaManager.isDownloading();
-        int itemCount = isDownloading ? 5 : 4;
+        int itemCount = isDownloading ? 6 : 5;
         int formHeight = itemCount * BTN_H + (itemCount - 1) * GAP;
         int y = Math.max(MIN_FORM_HEIGHT, (this.height - formHeight) / 2);
 

@@ -208,5 +208,11 @@
   "voxlink.dual.status_cancelled": "Übersprungen",
   "voxlink.dual.p2p_established": "Kanal aufgebaut, Welt wird betreten...",
   "voxlink.dual.channel_failed": "Nicht verbunden",
-  "voxlink.create_room.uac_hint": "Terracotta benötigt eventuell Admin-Rechte, klicke Ja bei einer UAC-Abfrage"
+  "voxlink.create_room.uac_hint": "Terracotta benötigt eventuell Admin-Rechte, klicke Ja bei einer UAC-Abfrage",
+  "voxlink.manage_room.name_pending_review": "Einstellungen gespeichert, Raumname wird geprüft...",
+  "voxlink.pause.room_management": "Raumverwaltung",
+  "voxlink.terracotta.delete_binary": "Terracotta löschen",
+  "voxlink.terracotta.binary_deleted": "Terracotta gelöscht",
+  "voxlink.update.check": "VoxLink Update-Prüfung",
+  "voxlink.update.available": "Neue Version %s verfügbar, Zeit für ein Update awa"
 }

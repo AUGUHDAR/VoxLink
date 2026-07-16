@@ -208,5 +208,11 @@
     "voxlink.dual.status_cancelled": "تخطي",
     "voxlink.dual.p2p_established": "تم إنشاء القناة، جاري الدخول إلى العالم...",
     "voxlink.dual.channel_failed": "غير متصل",
-    "voxlink.create_room.uac_hint": "قد تحتاج تيراكوتا إلى صلاحيات المسؤول، انقر نعم إذا ظهرت نافذة UAC"
+    "voxlink.create_room.uac_hint": "قد تحتاج تيراكوتا إلى صلاحيات المسؤول، انقر نعم إذا ظهرت نافذة UAC",
+    "voxlink.manage_room.name_pending_review": "تم حفظ الإعدادات، اسم الغرفة قيد المراجعة...",
+    "voxlink.pause.room_management": "إدارة الغرفة",
+    "voxlink.terracotta.delete_binary": "حذف تيراكوتا",
+    "voxlink.terracotta.binary_deleted": "تم حذف تيراكوتا",
+    "voxlink.update.check": "تنبيه تحديث VoxLink",
+    "voxlink.update.available": "إصدار جديد %s متاح، حان وقت التحديث awa"
 }

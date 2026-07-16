@@ -60,6 +60,7 @@ public class VoxLinkMod implements ModInitializer {
         icu.wuhui.voxlink.network.ConnectionFallback.shutdown();
         icu.wuhui.voxlink.network.UdpHolePuncher.shutdown();
         icu.wuhui.voxlink.network.TopologyClient.shutdown();
+        icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown();
     }
 
     @Override

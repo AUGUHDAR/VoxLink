@@ -208,5 +208,11 @@
     "voxlink.dual.status_cancelled": "已跳過",
     "voxlink.dual.p2p_established": "通道已建立，進入世界中...",
     "voxlink.dual.channel_failed": "未連上",
-    "voxlink.create_room.uac_hint": "陶瓦可能需要管理員權限，如彈出UAC視窗請點擊是"
+    "voxlink.create_room.uac_hint": "陶瓦可能需要管理員權限，如彈出UAC視窗請點擊是",
+    "voxlink.manage_room.name_pending_review": "設定已儲存，房間名稱審核中...",
+    "voxlink.pause.room_management": "房間管理",
+    "voxlink.terracotta.delete_binary": "刪除陶瓦",
+    "voxlink.terracotta.binary_deleted": "陶瓦已刪除",
+    "voxlink.update.check": "VoxLink 更新提示",
+    "voxlink.update.available": "發現新版本 %s，快去更新吧 awa"
 }

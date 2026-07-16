@@ -208,5 +208,11 @@
     "voxlink.dual.status_cancelled": "건너뜀",
     "voxlink.dual.p2p_established": "채널 설정됨, 월드 진입 중...",
     "voxlink.dual.channel_failed": "연결 안 됨",
-    "voxlink.create_room.uac_hint": "테라코타에 관리자 권한이 필요할 수 있습니다, UAC 창이 나타나면 예를 클릭하세요"
+    "voxlink.create_room.uac_hint": "테라코타에 관리자 권한이 필요할 수 있습니다, UAC 창이 나타나면 예를 클릭하세요",
+    "voxlink.manage_room.name_pending_review": "설정이 저장되었습니다. 방 이름 심사 중...",
+    "voxlink.pause.room_management": "방 관리",
+    "voxlink.terracotta.delete_binary": "테라코타 삭제",
+    "voxlink.terracotta.binary_deleted": "테라코타가 삭제되었습니다",
+    "voxlink.update.check": "VoxLink 업데이트 알림",
+    "voxlink.update.available": "새 버전 %s이(가) 있습니다. 업데이트해요 awa"
 }

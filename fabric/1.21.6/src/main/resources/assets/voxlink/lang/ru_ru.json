@@ -208,5 +208,11 @@
     "voxlink.dual.status_cancelled": "Пропущено",
     "voxlink.dual.p2p_established": "Канал установлен, вход в мир...",
     "voxlink.dual.channel_failed": "Не подключено",
-    "voxlink.create_room.uac_hint": "Terracotta может потребовать права администратора, нажмите Да при появлении окна UAC"
+    "voxlink.create_room.uac_hint": "Terracotta может потребовать права администратора, нажмите Да при появлении окна UAC",
+    "voxlink.manage_room.name_pending_review": "Настройки сохранены, имя комнаты на проверке...",
+    "voxlink.pause.room_management": "Управление комнатой",
+    "voxlink.terracotta.delete_binary": "Удалить Terracotta",
+    "voxlink.terracotta.binary_deleted": "Terracotta удалена",
+    "voxlink.update.check": "Проверка обновлений VoxLink",
+    "voxlink.update.available": "Доступна новая версия %s, пора обновляться awa"
 }

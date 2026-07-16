@@ -3,7 +3,7 @@
     "id": "${mod_id}",
     "version": "${version}",
     "name": "VoxLink",
-    "description": "P2P tunneling mod for Minecraft - connect with friends easily, supports offline players and voice chat mods.",
+    "description": "轻松地与其他玩家进行联机/Easily connect with other players",
     "authors": [
         "AUGUHDAR"
     ],
