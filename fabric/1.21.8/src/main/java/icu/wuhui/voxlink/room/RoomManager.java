@@ -111,6 +111,8 @@ public class RoomManager {
             "NETWORK_ERROR", "CDN_ERROR", "RATE_LIMITED"
     );
 
+    private static final String GAME_VERSION = "1.21.8";
+
     public CompletableFuture<RoomInfo> createRoom(String name, String password, int maxPlayers, int hostPort, boolean visible, String authType, String category) {
         if (!currentRoom.compareAndSet(null, PENDING)) {
             return CompletableFuture.failedFuture(new IllegalStateException(Component.translatable("voxlink.error.already_in_room_or_pending").getString()));
@@ -230,7 +232,7 @@ try {
             final String finalHostIpv6 = result.hostIpv6;
             final NatResult ctx = result.natResult;
             VoxLinkMod.LOGGER.info("[createRoom] 第2步: 调API建房");
-            return signalingClient.createRoom(name, (password != null && !password.isEmpty()) ? password : null, maxPlayers, ctx.port, ctx.nat, ctx.geyserPort, visible, authType, category, protocolVersion, peerPort, finalHostIpv6)
+            return signalingClient.createRoom(name, (password != null && !password.isEmpty()) ? password : null, maxPlayers, ctx.port, ctx.nat, ctx.geyserPort, visible, authType, category, protocolVersion, peerPort, finalHostIpv6, GAME_VERSION)
                     .thenApply(response -> {
                         VoxLinkMod.LOGGER.info("[createRoom] 第2步完成: success={}", response.success);
                         return new CreateRoomResult(ctx, response, finalHostIp, finalHostIpv6);

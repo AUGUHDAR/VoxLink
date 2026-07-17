@@ -22,6 +22,7 @@ import java.util.function.Consumer;
 public final class TerracottaBinary {
     private static final String VERSION = "0.4.2";
     private static final String GITHUB_URL = "https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION;
+    private static final String GITEE_URL = "https://gitee.com/burningtnt/Terracotta/releases/download/v" + VERSION;
     private static final String[] MIRROR_BASES = {
         "https://ghproxy.net/https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION,
         "https://mirror.ghproxy.com/https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION,
@@ -36,6 +37,9 @@ public final class TerracottaBinary {
     private static final int PROGRESS_PERCENT_THRESHOLD = 2;
     private static final int EXTRACT_TIMEOUT_SEC = 120;
     private static final int VERIFY_BUFFER_SIZE = 8192;
+    //debounce 镜像竞速探测 单源HEAD超时+总超时
+    private static final int PROBE_TIMEOUT_SEC = 4;
+    private static final int PROBE_TOTAL_TIMEOUT_SEC = 6;
     private static final HttpClient DOWNLOAD_CLIENT = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.ALWAYS)
         .connectTimeout(Duration.ofSeconds(DOWNLOAD_CONNECT_TIMEOUT_SEC))
@@ -208,11 +212,9 @@ public final class TerracottaBinary {
                 Path binaryPath = CACHE_DIR.resolve(CURRENT.binaryName);
                 Path archivePath = CACHE_DIR.resolve(CURRENT.filename + ".downloading");
 
-                String[] urls = new String[MIRROR_BASES.length + 1];
-                urls[0] = GITHUB_URL + "/" + CURRENT.filename;
-                for (int i = 0; i < MIRROR_BASES.length; i++) {
-                    urls[i + 1] = MIRROR_BASES[i] + "/" + CURRENT.filename;
-                }
+                //debounce 镜像竞速: 并发HEAD探测 GitHub/Gitee/ghproxy 谁先通用谁
+                java.util.List<String> urls = raceMirrors(CURRENT.filename);
+                LOGGER.info("[download] 镜像竞速排序: {}", urls);
 
                 Exception lastError = null;
                 for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -276,6 +278,56 @@ public final class TerracottaBinary {
     }
 
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("voxlink-terracotta");
+
+    //debounce 镜像竞速: 并发HEAD探测 GitHub/Gitee/ghproxy 谁先返回200/3xx谁排前面 全失败则按原顺序兜底
+    private static java.util.List<String> raceMirrors(String filename) {
+        String[] bases = new String[MIRROR_BASES.length + 2];
+        bases[0] = GITHUB_URL;
+        bases[1] = GITEE_URL;
+        for (int i = 0; i < MIRROR_BASES.length; i++) {
+            bases[i + 2] = MIRROR_BASES[i];
+        }
+
+        java.util.concurrent.ConcurrentLinkedQueue<String> okQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        java.util.List<CompletableFuture<Void>> futures = new java.util.ArrayList<>();
+        for (String base : bases) {
+            final String url = base + "/" + filename;
+            futures.add(CompletableFuture.runAsync(() -> {
+                try {
+                    HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                        .timeout(Duration.ofSeconds(PROBE_TIMEOUT_SEC))
+                        .build();
+                    HttpResponse<Void> resp = DOWNLOAD_CLIENT.send(req, HttpResponse.BodyHandlers.discarding());
+                    if (resp.statusCode() >= 200 && resp.statusCode() < 400) {
+                        okQueue.add(url);
+                        LOGGER.info("[probe] 镜像可用: {} (status={})", url, resp.statusCode());
+                    } else {
+                        LOGGER.info("[probe] 镜像不可用: {} (status={})", url, resp.statusCode());
+                    }
+                } catch (Exception e) {
+                    LOGGER.info("[probe] 镜像探测失败: {} ({})", url, e.getMessage());
+                }
+            }));
+        }
+
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .get(PROBE_TOTAL_TIMEOUT_SEC, TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+            //debounce 超时也用已返回的结果
+        }
+
+        java.util.List<String> ordered = new java.util.ArrayList<>(okQueue);
+        if (ordered.isEmpty()) {
+            LOGGER.warn("[probe] 所有镜像探测失败,按原顺序尝试全部");
+            for (String base : bases) {
+                ordered.add(base + "/" + filename);
+            }
+        }
+        return ordered;
+    }
 
     private static void downloadOne(String url, Path archivePath, Consumer<DownloadProgress> progressCallback) throws Exception {
         long existingBytes = 0;

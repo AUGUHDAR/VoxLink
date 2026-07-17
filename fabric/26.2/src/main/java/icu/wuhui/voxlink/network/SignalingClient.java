@@ -112,7 +112,7 @@ public class SignalingClient {
         VoxLinkMod.LOGGER.info("[SignalingClient] HTTP客户端就绪, connectTimeout={}ms", config.getConnectionTimeout());
     }
 
-    public CompletableFuture<ApiResponse> createRoom(String name, String password, int maxPlayers, int hostPort, String natType, int geyserPort, boolean visible, String authType, String category, int protocolVersion, int peerPort, String hostIpv6) {
+    public CompletableFuture<ApiResponse> createRoom(String name, String password, int maxPlayers, int hostPort, String natType, int geyserPort, boolean visible, String authType, String category, int protocolVersion, int peerPort, String hostIpv6, String gameVersion) {
         JsonObject body = new JsonObject();
         body.addProperty("name", name != null ? name : "");
         if (password != null && !password.isEmpty()) {
@@ -132,6 +132,9 @@ public class SignalingClient {
         }
         if (peerPort > 0) {
             body.addProperty("peerPort", peerPort);
+        }
+        if (gameVersion != null && !gameVersion.isEmpty()) {
+            body.addProperty("gameVersion", gameVersion);
         }
         if (hostIpv6 != null && !hostIpv6.isEmpty()) {
             body.addProperty("hostIpv6", hostIpv6);
