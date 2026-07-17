@@ -102,6 +102,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             "survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"
     );
 
+    private static final String GAME_VERSION = "1.20.2";
+
     protected enum SortMode {
         PLAYERS_DESC(Component.translatable("voxlink.sort.players_desc")), PLAYERS_ASC(Component.translatable("voxlink.sort.players_asc")),
         VERSION_SAME(Component.translatable("voxlink.sort.version_same")), NAME_ASC(Component.translatable("voxlink.sort.name_asc")), NAME_DESC(Component.translatable("voxlink.sort.name_desc"));
@@ -110,7 +112,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected record RoomEntry(String code, String name, String category, int players, int maxPlayers,
-                               boolean hasPassword, String natType, int protocolVersion) {}
+                               boolean hasPassword, String natType, int protocolVersion, String gameVersion) {}
 
     public RoomBrowserScreenBase(Screen parent) {
         super(Component.translatable("voxlink.browser.title"));
@@ -368,7 +370,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                                             r.has("maxPlayers") ? r.get("maxPlayers").getAsInt() : 20,
                                             r.has("hasPassword") && r.get("hasPassword").getAsBoolean(),
                                             r.has("natType") ? r.get("natType").getAsString() : "unknown",
-                                            r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0
+                                            r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
+                                            r.has("gameVersion") ? r.get("gameVersion").getAsString() : ""
                                     ));
                                     existingCodes.add(code);
                                 }
@@ -416,7 +419,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         return switch (sortMode) {
             case PLAYERS_DESC -> Comparator.comparingInt((RoomEntry r) -> r.players).reversed();
             case PLAYERS_ASC -> Comparator.comparingInt(r -> r.players);
-            case VERSION_SAME -> Comparator.comparingInt((RoomEntry r) -> r.protocolVersion == myProtocol ? 0 : 1)
+            case VERSION_SAME -> Comparator.comparingInt((RoomEntry r) -> GAME_VERSION.equals(r.gameVersion) ? 0 : 1)
                     .thenComparingInt(r -> -r.players);
             case NAME_ASC -> Comparator.comparing(r -> r.name.toLowerCase());
             case NAME_DESC -> Comparator.comparing((RoomEntry r) -> r.name.toLowerCase()).reversed();
