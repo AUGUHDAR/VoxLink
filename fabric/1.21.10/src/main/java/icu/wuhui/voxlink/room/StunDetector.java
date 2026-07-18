@@ -142,9 +142,4 @@ public final class StunDetector {
         }
         return false;
     }
-
-    public static void invalidateCache() {
-        cachedLocalIp = null;
-        cachedIpv6Reachable = null;
-    }
 }

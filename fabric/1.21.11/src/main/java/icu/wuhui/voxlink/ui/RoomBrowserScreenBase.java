@@ -20,6 +20,7 @@ import java.util.List;
 
 //1.21.x 专属: 原生输入 API
 public class RoomBrowserScreenBase extends VoxLinkScreenBase {
+    private static final int KEY_ENTER = 257;
     protected final Screen parent;
 
     protected List<RoomEntry> allRooms = new ArrayList<>();
@@ -420,7 +421,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected boolean handleKeyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == 257 && pageInput != null && pageInput.isVisible() && pageInput.isFocused()) {
+        if (keyCode == KEY_ENTER && pageInput != null && pageInput.isVisible() && pageInput.isFocused()) {
             try {
                 int p = Integer.parseInt(pageInput.getValue().trim());
                 fetchPage(p, true);

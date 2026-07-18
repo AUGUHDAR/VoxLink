@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class VoxLinkScreen extends VoxLinkScreenBase {
+    private static final int SIDE_MARGIN = 20;
     private final Screen parent;
     private RoomInfo lastRenderedRoom = null;
     private boolean lastRenderedIsHost = false;
@@ -286,7 +287,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
         drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, COLOR_TITLE);
 
         RoomInfo currentRoom = VoxLinkMod.getRoomManager().getCurrentRoom();
-        int maxWidth = this.width - 20;
+        int maxWidth = this.width - SIDE_MARGIN;
 
         //底部按钮位置 (与 rebuildWidgetsForState 一致)
         int bottomY = this.height - BOTTOM_MARGIN;

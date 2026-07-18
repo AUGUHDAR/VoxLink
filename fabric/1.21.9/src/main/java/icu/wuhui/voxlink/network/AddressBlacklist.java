@@ -42,9 +42,4 @@ public final class AddressBlacklist {
         expireAt.put(addr, System.currentTimeMillis() + DIRECT_BLACKLIST_MS);
         udpFailCount.remove(addr);
     }
-
-    public void clear() {
-        expireAt.clear();
-        udpFailCount.clear();
-    }
 }

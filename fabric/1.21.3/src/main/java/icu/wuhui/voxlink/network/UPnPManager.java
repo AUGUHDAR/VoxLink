@@ -124,39 +124,6 @@ public class UPnPManager {
         return addPortMapping(port, port);
     }
 
-    public static void deletePortMapping(int externalPort) {
-        closeUdpPort(externalPort);
-    }
-
-    public static String getExternalIp() {
-        try {
-            GatewayInfo gateway = discoverGateway();
-            if (gateway == null) return null;
-
-            String soapBody = "<?xml version=\"1.0\"?>\n" +
-                    "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" " +
-                    "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\n" +
-                    "<s:Body><m:GetExternalIPAddress xmlns:m=\"" + gateway.serviceType + "\"></m:GetExternalIPAddress></s:Body></s:Envelope>";
-
-            String response = sendSoapRequest(gateway, "GetExternalIPAddress", soapBody);
-            if (response != null) {
-                int start = response.indexOf("<NewExternalIPAddress>");
-                if (start < 0) start = response.indexOf(":NewExternalIPAddress>");
-                int end = response.indexOf("</NewExternalIPAddress>");
-                if (end < 0 && start >= 0) {
-                    int nsEnd = response.indexOf(":NewExternalIPAddress>", response.indexOf('>', start) + 1);
-                    if (nsEnd > 0) end = response.lastIndexOf("</", nsEnd);
-                }
-                if (start >= 0 && end > start) {
-                    return response.substring(response.indexOf('>', start) + 1, end);
-                }
-            }
-        } catch (Exception e) {
-            LOGGER.error("UPnP获取外网IP出错: {}", e.getMessage());
-        }
-        return null;
-    }
-
     private static GatewayInfo getCachedGateway() throws Exception {
         if (cachedGateway != null && System.currentTimeMillis() - gatewayCacheTime < CACHE_DURATION) {
             return cachedGateway;
@@ -179,13 +146,6 @@ public class UPnPManager {
             localIpCacheTime = System.currentTimeMillis();
         }
         return ip;
-    }
-
-    public static void invalidateCache() {
-        cachedGateway = null;
-        cachedLocalIp = null;
-        gatewayCacheTime = 0;
-        localIpCacheTime = 0;
     }
 
     //优化: 启动即尝试UPnP, 预发现网关(最耗时). 开房时用缓存网关快速映射, 无延迟
@@ -219,10 +179,6 @@ public class UPnPManager {
             }
         });
         LOGGER.info("[UPnP] 启动即尝试UPnP预发现网关");
-    }
-
-    public static boolean isGatewayPrecached() {
-        return cachedGateway != null && System.currentTimeMillis() - gatewayCacheTime < CACHE_DURATION;
     }
 
     private static GatewayInfo discoverGateway() throws Exception {

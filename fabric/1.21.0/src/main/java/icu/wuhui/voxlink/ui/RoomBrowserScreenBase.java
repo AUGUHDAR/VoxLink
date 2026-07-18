@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.List;
 
 public class RoomBrowserScreenBase extends VoxLinkScreenBase {
+    private static final int KEY_ENTER = 257;
     private static final int COLOR_WHITE = 0xFFFFFFFF;
     private static final int COLOR_MUTED = 0xFFAAAAAA;
     private static final int COLOR_ERROR = 0xFFFF5555;
@@ -468,7 +469,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected boolean handleKeyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == 257 && pageInput != null && pageInput.isVisible() && pageInput.isFocused()) {
+        if (keyCode == KEY_ENTER && pageInput != null && pageInput.isVisible() && pageInput.isFocused()) {
             try {
                 int p = Integer.parseInt(pageInput.getValue().trim());
                 fetchPage(p, true);

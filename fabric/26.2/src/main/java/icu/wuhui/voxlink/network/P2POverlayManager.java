@@ -188,25 +188,6 @@ public class P2POverlayManager {
         LOGGER.info("切换到直连模式");
     }
 
-    public void sendData(String targetNodeId, String priority, JsonObject payload) {
-        if (!running.get()) return;
-        if (nodeId == null || nodeId.isEmpty()) {
-            LOGGER.warn("发不了P2P数据，nodeId没设");
-            return;
-        }
-        JsonObject packet = new JsonObject();
-        packet.addProperty("type", "data_relay");
-        packet.addProperty("seq", packetSeq.incrementAndGet());
-        packet.addProperty("from", nodeId);
-        if (targetNodeId != null) {
-            packet.addProperty("to", targetNodeId);
-        }
-        packet.addProperty("priority", priority);
-        packet.add("payload", payload);
-
-        sendPacket(packet);
-    }
-
     public int getUpstreamLatency() {
         return upstreamLatency.get();
     }

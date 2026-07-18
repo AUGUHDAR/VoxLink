@@ -73,41 +73,6 @@ public class RelayBridge {
         }
     }
 
-    public void stopRelay(String peerAId, String peerBId) {
-        String relayKey = peerAId + "<->" + peerBId;
-        RelaySession session = activeRelays.remove(relayKey);
-        if (session != null) {
-            session.stop();
-            LOGGER.info("[Relay] 中继停止: {}", relayKey);
-        }
-    }
-
-    public void stopAll() {
-        for (Map.Entry<String, RelaySession> entry : activeRelays.entrySet()) {
-            entry.getValue().stop();
-            LOGGER.info("[Relay] 中继停止: {}", entry.getKey());
-        }
-        activeRelays.clear();
-        if (monitorTask != null) {
-            monitorTask.cancel(false);
-            monitorTask = null;
-        }
-        running.set(false);
-    }
-
-    public int getActiveRelayCount() {
-        return activeRelays.size();
-    }
-
-    public boolean isRelayingFor(String peerId) {
-        for (RelaySession session : activeRelays.values()) {
-            if (session.peerAId.equals(peerId) || session.peerBId.equals(peerId)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public int getRelayCountForPeer(String peerId) {
         int count = 0;
         for (RelaySession session : activeRelays.values()) {

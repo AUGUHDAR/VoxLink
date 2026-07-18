@@ -104,102 +104,6 @@ public class StunProbe {
 
     public record PublicMappedAddress(String ip, int port) {}
 
-    public record NatCheckResult(boolean symmetric, boolean unknown, String mappedIp1, int mappedPort1, String mappedIp2, int mappedPort2) {
-        public NatCheckResult(boolean symmetric) {
-            this(symmetric, false, null, 0, null, 0);
-        }
-        public NatCheckResult(boolean symmetric, String mappedIp1, int mappedPort1, String mappedIp2, int mappedPort2) {
-            this(symmetric, false, mappedIp1, mappedPort1, mappedIp2, mappedPort2);
-        }
-        public static NatCheckResult unknownResult() {
-            return new NatCheckResult(false, true, null, 0, null, 0);
-        }
-    }
-
-    public static NatCheckResult checkNatType(DatagramSocket socket, List<String> stunUrls) {
-        List<ParsedStunUrl> parsed = new ArrayList<>();
-        for (String url : stunUrls) {
-            ParsedStunUrl p = parseStunUrl(url);
-            if (p != null) parsed.add(p);
-        }
-        if (parsed.size() < 2) {
-            VoxLinkMod.LOGGER.info("[StunProbe] STUN服务器不够({})", parsed.size());
-            return NatCheckResult.unknownResult();
-        }
-
-        int originalTimeout = -1;
-        try {
-            originalTimeout = socket.getSoTimeout();
-            socket.setSoTimeout(DISCOVER_TIMEOUT_MS);
-        } catch (Exception ignored) {}
-
-        try {
-            ParsedStunUrl first = parsed.get(0);
-            ParsedStunUrl second = parsed.get(1);
-            InetAddress firstAddr = InetAddress.getByName(first.host);
-            InetAddress secondAddr = InetAddress.getByName(second.host);
-
-            byte[] req1 = createBindingRequest();
-            byte[] req2 = createBindingRequest();
-
-            socket.send(new DatagramPacket(req1, req1.length, firstAddr, first.port));
-            socket.send(new DatagramPacket(req2, req2.length, secondAddr, second.port));
-
-            MappedAddress mapped1 = null;
-            MappedAddress mapped2 = null;
-
-            byte[] buf = new byte[576];
-            long deadline = System.currentTimeMillis() + DISCOVER_TIMEOUT_MS * TIMEOUT_MULTIPLIER;
-
-            for (int i = 0; i < 2 && System.currentTimeMillis() < deadline; i++) {
-                DatagramPacket recv = new DatagramPacket(buf, buf.length);
-                try {
-                    socket.receive(recv);
-                } catch (SocketTimeoutException e) {
-                    break;
-                }
-
-                byte[] respData = new byte[recv.getLength()];
-                System.arraycopy(recv.getData(), 0, respData, 0, recv.getLength());
-
-                if (mapped1 == null) {
-                    MappedAddress ma = parseBindingResponse(respData, req1);
-                    if (ma != null) { mapped1 = ma; continue; }
-                    ma = parseBindingResponse(respData, req2);
-                    if (ma != null) { mapped2 = ma; continue; }
-                } else {
-                    MappedAddress ma = parseBindingResponse(respData, req2);
-                    if (ma != null) { mapped2 = ma; continue; }
-                    ma = parseBindingResponse(respData, req1);
-                    if (ma != null) { mapped1 = ma; }
-                }
-            }
-
-            if (mapped1 == null || mapped2 == null) {
-                VoxLinkMod.LOGGER.info("[StunProbe] 拿不到两个映射地址 ({} / {})",
-                        mapped1 != null ? mapped1.ip + ":" + mapped1.port : "null",
-                        mapped2 != null ? mapped2.ip + ":" + mapped2.port : "null");
-                return NatCheckResult.unknownResult();
-            }
-
-            if (!mapped1.ip.equals(mapped2.ip) || mapped1.port != mapped2.port) {
-                VoxLinkMod.LOGGER.info("[StunProbe] 对称NAT ({}:{} vs {}:{})",
-                        mapped1.ip, mapped1.port, mapped2.ip, mapped2.port);
-                return new NatCheckResult(true, mapped1.ip, mapped1.port, mapped2.ip, mapped2.port);
-            }
-
-            VoxLinkMod.LOGGER.info("[StunProbe] 非对称NAT (映射地址 {}:{})", mapped1.ip, mapped1.port);
-            return new NatCheckResult(false, mapped1.ip, mapped1.port, mapped2.ip, mapped2.port);
-        } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunProbe] NAT检测失败: {}", e.getMessage());
-            return NatCheckResult.unknownResult();
-        } finally {
-            try {
-                if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout);
-            } catch (Exception ignored) {}
-        }
-    }
-
     public static PublicMappedAddress discoverMappedAddress(DatagramSocket socket, List<String> stunUrls) {
         int originalTimeout = -1;
         try {
@@ -514,7 +418,7 @@ public class StunProbe {
         return null;
     }
 
-    public static void setCachedResult(ProbeResult result) {
+    private static void setCachedResult(ProbeResult result) {
         cachedEntry.set(new CacheEntry(result, System.currentTimeMillis()));
     }
 

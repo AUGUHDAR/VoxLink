@@ -50,6 +50,8 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
     private boolean showCustomInput = false;
     private volatile net.minecraft.server.MinecraftServer publishedServer;
     private volatile boolean creating = false;
+    //debounce 用户主动取消后 静默丢弃迟到结果 不再显示error
+    private volatile boolean cancelled = false;
     private boolean categoriesFetched = false;
     private String savedName = "";
     private String savedPassword = "";
@@ -199,7 +201,6 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         }).bounds(centerX - BTN_W / 2, advY + ADV_ROW2_OFFSET_Y, HALF_BTN_W, BTN_H).build();
         this.addRenderableWidget(guestOpButton);
 
-        //启用陶瓦开关 (仅陶瓦就绪时显示)
         if (TerracottaManager.isBinaryReady()) {
             addRenderableWidget(Button.builder(
                     Component.translatable("voxlink.terracotta.toggle",
@@ -401,6 +402,16 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
     }
 
     void onCreateTimeout() {
+        cancelled = true;
+        creating = false;
+        createStartTime = 0;
+        closeLan();
+        VoxLinkMod.getRoomManager().leaveRoom();
+    }
+
+    //用户主动取消 走cancelled消息 静默丢弃后续结果
+    void onCancelCreate() {
+        cancelled = true;
         creating = false;
         createStartTime = 0;
         closeLan();
@@ -437,6 +448,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
         createButton.active = false;
         backButton.active = false;
+        cancelled = false;
         creating = true;
         createStartTime = System.currentTimeMillis();
 
@@ -479,6 +491,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         VoxLinkMod.getRoomManager().createRoom(roomName, password.isEmpty() ? null : password, maxPlayers, effectivePort, visible, authType.name(), categoryText)
                 .thenAccept(roomInfo -> {
                     mc.execute(() -> {
+                        if (cancelled) return;
                         createStartTime = 0;
                         if (roomInfo == null) {
                             creating = false;
@@ -506,6 +519,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                     String msg = cause.getMessage();
                     final String displayMsg = simplifyError(msg);
                     mc.execute(() -> {
+                        if (cancelled) return;
                         createStartTime = 0;
                         creating = false;
                         closeLan();
@@ -535,23 +549,14 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         if (mc.player == null) return;
 
         String code = roomInfo.getCode();
-        mc.player.sendSystemMessage(
-                Component.translatable("voxlink.chat.room_created").withStyle(Style.EMPTY.withBold(true))
-        );
-        //debounce 不显示明文房间号 只显示点击复制标签
-        mc.player.sendSystemMessage(
-                Component.translatable("voxlink.chat.room_code_label")
+        mc.player.sendSystemMessage(Component.translatable("voxlink.chat.room_created").withStyle(Style.EMPTY.withBold(true)));
+        mc.player.sendSystemMessage(Component.translatable("voxlink.chat.room_code_label")
                         .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
                                         + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
                                 .withStyle(ChatCompat.styleWithCopy(code,
-                                        Component.translatable("voxlink.chat.click_to_copy"))))
-        );
-        mc.player.sendSystemMessage(
-                Component.translatable("voxlink.chat.friends_install_hint")
-        );
-        mc.player.sendSystemMessage(
-                Component.translatable("voxlink.create_room.recommend_voxlink")
-        );
+                                        Component.translatable("voxlink.chat.click_to_copy")))));
+        mc.player.sendSystemMessage(Component.translatable("voxlink.chat.friends_install_hint"));
+        mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.recommend_voxlink"));
 
         String hostIp = roomInfo.getHostIp();
         int hostPort = roomInfo.getHostPort();
@@ -646,9 +651,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             y += SUCCESS_LINE_H;
             //debounce 不显示明文 只显示标签 点击复制
             String code = createdRoom.getCode();
-            String codeLine = Component.translatable("voxlink.chat.room_code_label").getString() + ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString() + Component.translatable("voxlink.chat.click_to_copy").getString();
-            drawCenteredClipped(graphics, codeLine, centerX, y, COLOR_TITLE);
-            int codeW = font.width(codeLine);
+            Component codeLine = Component.translatable("voxlink.chat.room_code_label")
+                    .append(Component.translatable("voxlink.chat.click_to_copy").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+            drawCenteredComponent(graphics, codeLine, centerX, y, COLOR_TITLE);
+            int codeW = fontWidth(codeLine);
             successClickAreas.add(new int[]{centerX - codeW / 2, y, codeW, SUCCESS_CODE_H});
             successClickTexts.add(code);
             successClickLabels.add(Component.translatable("voxlink.chat.room_code_label").getString());
@@ -658,9 +664,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             //陶瓦房间号 (异步获取, 可能为空) 不显示明文
             String tc = createdRoom.getTerracottaCode();
             if (tc != null && !tc.isEmpty()) {
-                String tcLine = Component.translatable("voxlink.chat.terracotta_code_label", "").getString() + " " + ChatFormatting.AQUA.toString() + ChatFormatting.BOLD.toString() + Component.translatable("voxlink.chat.click_to_copy").getString();
-                drawCenteredClipped(graphics, tcLine, centerX, y, COLOR_TITLE);
-                int tcW = font.width(tcLine);
+                Component tcLine = Component.translatable("voxlink.chat.terracotta_code_label", " ")
+                        .append(Component.translatable("voxlink.chat.click_to_copy").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
+                drawCenteredComponent(graphics, tcLine, centerX, y, COLOR_TITLE);
+                int tcW = fontWidth(tcLine);
                 successClickAreas.add(new int[]{centerX - tcW / 2, y, tcW, SUCCESS_CODE_H});
                 successClickTexts.add(tc);
                 successClickLabels.add(Component.translatable("voxlink.chat.terracotta_code_label", "").getString().trim());

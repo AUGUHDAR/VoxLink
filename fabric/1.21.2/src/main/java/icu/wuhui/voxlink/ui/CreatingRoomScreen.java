@@ -31,15 +31,7 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
         if (startTime == 0) startTime = System.currentTimeMillis();
         this.addRenderableWidget(Button.builder(
                 Component.translatable("voxlink.cancel"),
-                button -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    if (mc.player != null) {
-                        mc.player.displayClientMessage(
-                                Component.translatable("voxlink.create_room.timeout").withStyle(s -> s.withColor(COLOR_ERROR_RGB)), false);
-                    }
-                    parent.onCreateTimeout();
-                    mc.setScreen(parent);
-                }
+                button -> onCancel()
         ).bounds(this.width / 2 - BTN_W / 2, this.height / 2 + CANCEL_BTN_Y_OFFSET, BTN_W, BTN_H).build());
     }
 
@@ -50,8 +42,18 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
 
     @Override
     public void onClose() {
-        parent.onCreateTimeout();
-        Minecraft.getInstance().setScreen(parent);
+        onCancel();
+    }
+
+    //debounce 用户主动取消 走cancelled分支 不走timeout
+    private void onCancel() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.displayClientMessage(
+                    Component.translatable("voxlink.create_room.cancelled").withStyle(s -> s.withColor(COLOR_ERROR_RGB)), false);
+        }
+        parent.onCancelCreate();
+        mc.setScreen(parent);
     }
 
     @Override
