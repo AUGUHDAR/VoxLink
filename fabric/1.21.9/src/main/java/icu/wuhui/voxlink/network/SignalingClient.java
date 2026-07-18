@@ -28,7 +28,6 @@ public class SignalingClient {
             java.util.Map.entry("update_room", "/room/update"),
             java.util.Map.entry("join_room", "/room/join"),
             java.util.Map.entry("leave_room", "/room/leave"),
-            java.util.Map.entry("get_room_info", "/room/info"),
             java.util.Map.entry("list_rooms", "/room/list"),
             java.util.Map.entry("heartbeat", "/room/heartbeat"),
             java.util.Map.entry("send_signal", "/signal/send"),
@@ -38,9 +37,7 @@ public class SignalingClient {
             java.util.Map.entry("get_categories", "/categories"),
             java.util.Map.entry("report_ready", "/topology/report_ready"),
             java.util.Map.entry("poll_topology", "/topology/poll"),
-            java.util.Map.entry("get_bedrock", "/room/bedrock"),
-            java.util.Map.entry("relay_register", "/relay/register"),
-            java.util.Map.entry("relay_candidates", "/relay/candidates")
+            java.util.Map.entry("relay_register", "/relay/register")
     );
 
     private final VoxLinkConfig config;
@@ -201,14 +198,6 @@ public class SignalingClient {
         return postNoRetry(buildPath("leave_room"), body);
     }
 
-    public CompletableFuture<ApiResponse> getRoomInfo(String code) {
-        return get(buildGetPath("get_room_info", "code=" + (code != null ? code : "")));
-    }
-
-    public CompletableFuture<ApiResponse> listRooms(int page, int size) {
-        return listRooms(page, size, null);
-    }
-
     public CompletableFuture<ApiResponse> listRooms(int page, int size, String category) {
         String params = "page=" + page + "&size=" + size + "&clientType=mod";
         if (category != null && !category.isEmpty()) {
@@ -292,17 +281,6 @@ public class SignalingClient {
         body.addProperty("relayEnabled", relayEnabled);
         body.addProperty("action", "relay_register");
         return post(buildPath("relay_register"), body);
-    }
-
-    public CompletableFuture<ApiResponse> fetchRelayCandidates() {
-        return getOnce(buildGetPath("relay_candidates", null), 5000);
-    }
-
-    public CompletableFuture<ApiResponse> getBedrockInfo(String code) {
-        JsonObject body = new JsonObject();
-        body.addProperty("code", code != null ? code.toUpperCase() : "");
-        body.addProperty("action", "get_bedrock");
-        return postNoRetry(buildPath("get_bedrock"), body);
     }
 
     public CompletableFuture<ApiResponse> getCategories() {

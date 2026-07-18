@@ -4,7 +4,6 @@ import com.google.gson.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -27,7 +26,6 @@ public final class TerracottaManager {
     private static volatile boolean initialized = false;
     private static volatile int port = 0;
     private static final AtomicReference<JsonObject> lastState = new AtomicReference<>();
-    private static final AtomicReference<Consumer<JsonObject>> stateListener = new AtomicReference<>();
     private static ScheduledExecutorService scheduler;
     private static ScheduledFuture<?> pollTask;
     private static final Object POLL_LOCK = new Object();
@@ -188,16 +186,7 @@ public final class TerracottaManager {
             try {
                 String stateJson = TerracottaAndroidBridge.getState();
                 if (stateJson != null && !stateJson.isEmpty()) {
-                    JsonObject stateObj = com.google.gson.JsonParser.parseString(stateJson).getAsJsonObject();
-                    JsonObject prev = lastState.getAndSet(stateObj);
-                    boolean changed = prev == null
-                        || !stateObj.has("index")
-                        || !prev.has("index")
-                        || !stateObj.get("index").equals(prev.get("index"));
-                    if (changed) {
-                        Consumer<JsonObject> listener = stateListener.get();
-                        if (listener != null) listener.accept(stateObj);
-                    }
+                    lastState.set(com.google.gson.JsonParser.parseString(stateJson).getAsJsonObject());
                 }
             } catch (Exception e) {
                 LOGGER.warn("安卓状态轮询异常: {}", e.getMessage());
@@ -220,17 +209,7 @@ public final class TerracottaManager {
                 if (port <= 0 || !TerracottaProcess.isAlive()) return;
                 try {
                     TerracottaClient.getState(port)
-                        .thenAccept(state -> {
-                            JsonObject prev = lastState.getAndSet(state);
-                            boolean changed = prev == null
-                                || !state.has("index")
-                                || !prev.has("index")
-                                || !state.get("index").equals(prev.get("index"));
-                            if (changed) {
-                                Consumer<JsonObject> listener = stateListener.get();
-                                if (listener != null) listener.accept(state);
-                            }
-                        })
+                        .thenAccept(state -> lastState.set(state))
                         .exceptionally(e -> {
                             LOGGER.debug("陶瓦状态轮询失败: {}", e.getMessage());
                             return null;
@@ -240,14 +219,6 @@ public final class TerracottaManager {
                 }
             }, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
         }
-    }
-
-    public static void setStateListener(Consumer<JsonObject> listener) {
-        stateListener.set(listener);
-    }
-
-    public static JsonObject getCurrentState() {
-        return lastState.get();
     }
 
     public static CompletableFuture<String> createRoom(String playerName) {
@@ -387,14 +358,6 @@ public final class TerracottaManager {
         JsonObject state = lastState.get();
         return state != null && "exception".equals(TerracottaClient.getStateName(state));
     }
-
-    public static int getExceptionType() {
-        JsonObject state = lastState.get();
-        if (state == null || !state.has("type")) return -1;
-        return state.get("type").getAsInt();
-    }
-
-    public static int getPort() { return port; }
 
     public static boolean isReady() {
         if (TerracottaAndroidBridge.isInitialized()) return true;

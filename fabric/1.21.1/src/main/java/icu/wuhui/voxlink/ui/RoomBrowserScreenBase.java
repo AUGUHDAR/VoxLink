@@ -52,6 +52,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     private static final int CARD_TEXT_X = 6;
     private static final int CARD_TRUNC_DIV = 6;
     private static final int CARD_TEXT_Y = 5;
+    private static final int KEY_ENTER = 257;
     private static final int CARD_CODE_Y = 11;
     private static final int CARD_PLAYERS_Y = 22;
     private static final int CAT_BADGE_W_PAD = 4;
@@ -103,7 +104,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             "survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"
     );
 
-    private static final String GAME_VERSION = "1.21.1";
+    private static final String GAME_VERSION = icu.wuhui.voxlink.VoxLinkConstants.GAME_VERSION;
 
     protected enum SortMode {
         PLAYERS_DESC(Component.translatable("voxlink.sort.players_desc")), PLAYERS_ASC(Component.translatable("voxlink.sort.players_asc")),
@@ -469,7 +470,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected boolean handleKeyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == 257 && pageInput != null && pageInput.isVisible() && pageInput.isFocused()) {
+        if (keyCode == KEY_ENTER && pageInput != null && pageInput.isVisible() && pageInput.isFocused()) {
             try {
                 int p = Integer.parseInt(pageInput.getValue().trim());
                 fetchPage(p, true);

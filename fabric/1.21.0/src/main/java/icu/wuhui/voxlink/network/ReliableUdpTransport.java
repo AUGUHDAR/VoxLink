@@ -57,7 +57,6 @@ public class ReliableUdpTransport implements AutoCloseable {
     private volatile boolean running = true;
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile long lastRecvTime = System.currentTimeMillis();
-    private volatile long lastAckTime = System.currentTimeMillis();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private volatile int nextSendSeq = 0;
@@ -147,7 +146,7 @@ public class ReliableUdpTransport implements AutoCloseable {
 
                 switch (type) {
                     case TYPE_DATA -> handleData(seq, ack, buf, packet.getLength());
-                    case TYPE_ACK -> { handleAck(ack); lastRecvTime = System.currentTimeMillis(); lastAckTime = lastRecvTime; }
+                    case TYPE_ACK -> { handleAck(ack); lastRecvTime = System.currentTimeMillis(); }
                     case TYPE_DISCONNECT -> handleDisconnect();
                     case TYPE_KEEPALIVE -> lastRecvTime = System.currentTimeMillis();
                     case TYPE_FEC_XOR -> handleFecXor(readInt32(buf, 3), buf, packet.getLength());

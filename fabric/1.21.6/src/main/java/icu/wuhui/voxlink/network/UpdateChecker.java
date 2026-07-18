@@ -63,10 +63,6 @@ public final class UpdateChecker {
                 });
     }
 
-    public static void reset() {
-        checked.set(false);
-    }
-
     private static String stripPrefix(String tag) {
         if (tag == null) return "";
         String s = tag.trim();
@@ -112,8 +108,7 @@ public final class UpdateChecker {
             if (mc.player == null) return;
             mc.player.displayClientMessage(
                     Component.literal("[VoxLink] ").withStyle(ChatFormatting.AQUA)
-                            .append(Component.translatable("voxlink.update.available", latest))
-                            .withStyle(ChatFormatting.WHITE),
+                            .append(Component.translatable("voxlink.update.available", latest)),
                     false);
             mc.player.displayClientMessage(
                     Component.literal(url).withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BLUE),

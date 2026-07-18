@@ -38,12 +38,10 @@ public enum ConnectionState {
 
     private static volatile ConnectionState currentState = IDLE;
     private static volatile long stateEnterTime = System.currentTimeMillis();
-    private static volatile String stateDetail = "";
 
     public static synchronized void transitionTo(ConnectionState newState, String detail) {
         ConnectionState oldState = currentState;
         if (oldState == newState) {
-            stateDetail = detail;
             return;
         }
         if (!oldState.canTransitionTo(newState)) {
@@ -54,24 +52,14 @@ public enum ConnectionState {
         VoxLinkMod.LOGGER.info("[ConnState] {} -> {} (耗时{}ms) {}", oldState.displayName, newState.displayName, duration, detail);
         currentState = newState;
         stateEnterTime = System.currentTimeMillis();
-        stateDetail = detail;
     }
 
     public static ConnectionState getCurrent() {
         return currentState;
     }
 
-    public static String getDetail() {
-        return stateDetail;
-    }
-
-    public static long getStateDurationMs() {
-        return System.currentTimeMillis() - stateEnterTime;
-    }
-
     public static void reset() {
         currentState = IDLE;
         stateEnterTime = System.currentTimeMillis();
-        stateDetail = "";
     }
 }

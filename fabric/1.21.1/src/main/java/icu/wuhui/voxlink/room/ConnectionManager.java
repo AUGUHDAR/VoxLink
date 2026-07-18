@@ -102,12 +102,7 @@ public class ConnectionManager {
     private static final int BIRTHDAY_SOCKET_COUNT = 32;
     private static final int HARD_SYM_SOCKET_COUNT = 84;
 
-    // 修复9: 对称NAT打洞黑名单 + 全局串行锁, 对齐EasyTier BLACKLIST_TIMEOUT_SEC/SYM_PUNCH_LOCK
-    // 失败对端加入黑名单1小时内不再尝试UDP打洞, 多对端同时打洞串行化避免资源竞争
-    private final java.util.Map<String, Long> natPunchBlacklist = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final long BLACKLIST_TIMEOUT_MS = 3600_000L; // 1小时
-    private final Object symPunchLock = new Object();
-    //黑名单: InetSocketAddress级, UDP3连失败1h, 直连失败5min
+    //地址黑名单: InetSocketAddress级, UDP3连失败1h, 直连失败5min
     private final AddressBlacklist addressBlacklist = new AddressBlacklist();
 
     // 修复6: 生日攻击socket预创建与复用, 对齐EasyTier prepare_udp_array
@@ -318,39 +313,6 @@ public class ConnectionManager {
             try { t.close(); } catch (Exception e) { VoxLinkMod.LOGGER.debug("cleanup udp transport close error: {}", e.getMessage()); }
         }
         activeUdpTransports.clear();
-    }
-
-    public void stopPunchersAndTransports() {
-        clearActiveHolePunchers();
-        clearActiveUdpTransports();
-    }
-
-    // 修复9: 黑名单检查, 对齐EasyTier BLACKLIST_TIMEOUT_SEC=3600
-    public boolean isPeerBlacklisted(String peerId) {
-        if (peerId == null) return false;
-        Long ts = natPunchBlacklist.get(peerId);
-        return ts != null && System.currentTimeMillis() - ts < BLACKLIST_TIMEOUT_MS;
-    }
-
-    public void addPeerToBlacklist(String peerId) {
-        if (peerId == null) return;
-        natPunchBlacklist.put(peerId, System.currentTimeMillis());
-        VoxLinkMod.LOGGER.info("[Connection] 对端{}加入打洞黑名单(1小时)", peerId);
-    }
-
-    public void clearPeerBlacklist(String peerId) {
-        if (peerId != null) natPunchBlacklist.remove(peerId);
-    }
-
-    //地址黑名单
-    public AddressBlacklist getAddressBlacklist() { return addressBlacklist; }
-
-    public void clearAddressBlacklist() { addressBlacklist.clear(); }
-
-    // 修复9: 对称NAT打洞串行锁, 对齐EasyTier SYM_PUNCH_LOCK
-    // 多对端同时打洞时资源竞争, 串行化避免84 socket并发创建耗尽资源
-    public Object getSymPunchLock() {
-        return symPunchLock;
     }
 
     public void stopAllConnectionWork() {

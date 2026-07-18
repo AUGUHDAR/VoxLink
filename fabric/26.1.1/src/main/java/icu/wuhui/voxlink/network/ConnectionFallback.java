@@ -200,14 +200,6 @@ public class ConnectionFallback {
         return false;
     }
 
-    /**
-     * 清除IPv6连通性缓存（网络变化时调用）
-     */
-    public static void resetIPv6Cache() {
-        ipv6ConnectivityCached = null;
-        ipv6ConnectivityCheckTime = 0;
-    }
-
     public static boolean hasIPv6Connectivity() {
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();

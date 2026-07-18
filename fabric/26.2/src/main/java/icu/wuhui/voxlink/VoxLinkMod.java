@@ -54,8 +54,6 @@ public class VoxLinkMod implements ModInitializer {
         }
         P2PBridge.disconnect();
         PeerServer.stop();
-        icu.wuhui.voxlink.fw.FirewallGuard.shutdown();
-        icu.wuhui.voxlink.fw.PlatformFirewall.shutdown();
         icu.wuhui.voxlink.network.StunProbe.shutdown();
         icu.wuhui.voxlink.network.ConnectionFallback.shutdown();
         icu.wuhui.voxlink.network.UdpHolePuncher.shutdown();

@@ -69,7 +69,6 @@ public class ConnectionManager {
     private static final int STUN_PROBE_TIMEOUT_SEC = 10;
     private static final int RTT_SYNC_MAX_DELAY_MS = 15000;
     private static final byte PUNCH_ACK_TYPE = 0x02;
-    // 中继调度：记录已尝试失败的 relay peer 和当前 relay 会话
     private final java.util.Set<String> failedRelayPeers = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final AtomicReference<String> currentRelayPeer = new AtomicReference<>(null);
     private volatile ScheduledFuture<?> relayFailoverTask = null;
@@ -103,12 +102,7 @@ public class ConnectionManager {
     private static final int BIRTHDAY_SOCKET_COUNT = 32;
     private static final int HARD_SYM_SOCKET_COUNT = 84;
 
-    // 修复9: 对称NAT打洞黑名单 + 全局串行锁, 对齐EasyTier BLACKLIST_TIMEOUT_SEC/SYM_PUNCH_LOCK
-    // 失败对端加入黑名单1小时内不再尝试UDP打洞, 多对端同时打洞串行化避免资源竞争
-    private final java.util.Map<String, Long> natPunchBlacklist = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final long BLACKLIST_TIMEOUT_MS = 3600_000L; // 1小时
-    private final Object symPunchLock = new Object();
-    //黑名单: InetSocketAddress级, UDP3连失败1h, 直连失败5min
+    //地址黑名单: InetSocketAddress级, UDP3连失败1h, 直连失败5min
     private final AddressBlacklist addressBlacklist = new AddressBlacklist();
 
     // 修复6: 生日攻击socket预创建与复用, 对齐EasyTier prepare_udp_array
@@ -196,7 +190,7 @@ public class ConnectionManager {
         }
         //优化: allOf(15s)→early success, 凑够min(32, requiredSize)个就返回, 5s截止
         //joiner侧birthday attack启动提速: 不再被最慢的socket拖住
-        int minRequired = Math.min(32, requiredSize);
+        int minRequired = Math.min(BIRTHDAY_SOCKET_COUNT, requiredSize);
         long deadline = System.currentTimeMillis() + TCP_CONNECT_TIMEOUT_MS;
         while (System.currentTimeMillis() < deadline) {
             int done = 0, success = 0;
@@ -319,39 +313,6 @@ public class ConnectionManager {
             try { t.close(); } catch (Exception e) { VoxLinkMod.LOGGER.debug("cleanup udp transport close error: {}", e.getMessage()); }
         }
         activeUdpTransports.clear();
-    }
-
-    public void stopPunchersAndTransports() {
-        clearActiveHolePunchers();
-        clearActiveUdpTransports();
-    }
-
-    // 修复9: 黑名单检查, 对齐EasyTier BLACKLIST_TIMEOUT_SEC=3600
-    public boolean isPeerBlacklisted(String peerId) {
-        if (peerId == null) return false;
-        Long ts = natPunchBlacklist.get(peerId);
-        return ts != null && System.currentTimeMillis() - ts < BLACKLIST_TIMEOUT_MS;
-    }
-
-    public void addPeerToBlacklist(String peerId) {
-        if (peerId == null) return;
-        natPunchBlacklist.put(peerId, System.currentTimeMillis());
-        VoxLinkMod.LOGGER.info("[Connection] 对端{}加入打洞黑名单(1小时)", peerId);
-    }
-
-    public void clearPeerBlacklist(String peerId) {
-        if (peerId != null) natPunchBlacklist.remove(peerId);
-    }
-
-    //地址黑名单
-    public AddressBlacklist getAddressBlacklist() { return addressBlacklist; }
-
-    public void clearAddressBlacklist() { addressBlacklist.clear(); }
-
-    // 修复9: 对称NAT打洞串行锁, 对齐EasyTier SYM_PUNCH_LOCK
-    // 多对端同时打洞时资源竞争, 串行化避免84 socket并发创建耗尽资源
-    public Object getSymPunchLock() {
-        return symPunchLock;
     }
 
     public void stopAllConnectionWork() {
@@ -543,7 +504,7 @@ public class ConnectionManager {
                 // 对称NAT时预创建84个birthday socket, 端口塞进holepunch_offer避免holepunch_mapped延迟
                 // 参考DCUtR/P-PRE: 已知端口列表比端口扫描成功率高出数倍, 且消除信号轮询11s延迟
                 if (fIsSymmetricOrUnknown && m1 != null && m2 != null) {
-                    int birthdayCount = 84;
+                    int birthdayCount = HARD_SYM_SOCKET_COUNT;
                     VoxLinkMod.LOGGER.info("[RoomManager] 对称NAT, 预创建{}个birthday socket纳入holepunch_offer", birthdayCount);
                     birthdayAddrs = new java.util.ArrayList<>();
                     java.util.List<CompletableFuture<StunProbe.PublicMappedAddress>> bFutures = new java.util.ArrayList<>();
@@ -567,7 +528,7 @@ public class ConnectionManager {
                     }
                     try {
                         CompletableFuture.allOf(bFutures.toArray(new CompletableFuture[0]))
-                                .get(20, TimeUnit.SECONDS);
+                                .get(AWAIT_TIMEOUT_SEC, TimeUnit.SECONDS);
                     } catch (Exception e) {
                         VoxLinkMod.LOGGER.warn("[RoomManager] birthday socket创建部分超时: {}", e.getMessage());
                     }
@@ -637,7 +598,7 @@ public class ConnectionManager {
                 // P-PRE端口预测: 10次连续采样替代2次, PortPredictor综合预测(线性回归+差值序列)
                 if (mapped1 != null && mapped2 != null && mapped1.port() != mapped2.port()) {
                     int delta = mapped2.port() - mapped1.port();
-                    int portRange = PORT_RANGE_MAX; //默认置信范围
+                    int portRange = PORT_RANGE_MAX;
                     // 同socket同服务器连续采样10次(100ms间隔), 获取端口序列用于精确预测
                     if (fHostPuncher != null && fHostPuncher.getSocket() != null) {
                         java.util.List<Integer> samples = StunProbe.samplePortsSequential(
@@ -885,7 +846,7 @@ public class ConnectionManager {
                         runConnectionCycle(state, from, finalHostIpv6, finalHostIp, finalHostPort, null, 0, 0);
                     }
                 }
-            }, 12, java.util.concurrent.TimeUnit.SECONDS);
+            }, ICE_POOL_RETAIN_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
             return;
         }
 
@@ -1177,9 +1138,9 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         //Sym×Cone 对方端口固定, 只需少量socket覆盖房主映射端口; 84个socket×3线程=252线程导致进程资源耗尽崩溃
         final int HOST_MULTI_COUNT;
         if (isHostSym && joinerSym) {
-            HOST_MULTI_COUNT = 84;  //双方对称NAT, Birthday Attack
+            HOST_MULTI_COUNT = HARD_SYM_SOCKET_COUNT;
         } else if (isHostSym) {
-            HOST_MULTI_COUNT = HOST_MULTI_MIN;   //房主Sym×对方Cone, 对方端口固定, 5个socket足够覆盖映射端口
+            HOST_MULTI_COUNT = HOST_MULTI_MIN;
         } else if (portUnreachable) {
             HOST_MULTI_COUNT = HOST_MULTI_DEFAULT;
         } else {
@@ -1204,7 +1165,6 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
             UdpHolePuncher oldHost = activeHolePunchers.remove("host");
             if (oldHost != null) { try { oldHost.close(); } catch (Exception ignored) {} }
 
-            //优化: 去掉Thread.sleep(50)×84=4.2s纯睡眠, socket创建本身很快; 双STUN并发替代2次顺序; early success不等最慢的
             java.util.List<CompletableFuture<StunProbe.PublicMappedAddress[]>> stunFutures = new java.util.ArrayList<>();
             int createdCount = 0;
             for (int i = 0; i < fHostMultiCount; i++) {
@@ -1237,7 +1197,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
             VoxLinkMod.LOGGER.info("[HostPunchInfo] 并行启动{}/{}个socket+双STUN任务(无sleep)", createdCount, fHostMultiCount);
 
             //优化: early success - 收集到足够端口(>=32或全部完成)就继续, 不等最慢的STUN拖累
-            int minRequired = Math.min(32, fHostMultiCount);
+            int minRequired = Math.min(BIRTHDAY_SOCKET_COUNT, fHostMultiCount);
             long stunDeadline = System.currentTimeMillis() + TCP_CONNECT_TIMEOUT_MS;
             while (System.currentTimeMillis() < stunDeadline) {
                 int done = 0, success = 0;
@@ -1588,7 +1548,6 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                 hostPortRange = 0;
                 VoxLinkMod.LOGGER.info("[ReversePunch] 生日攻击模式: 主机打{}个joiner端口: {}", allJoinerPorts.size(), allJoinerPorts);
             } else if (fJoinerSymmetric) {
-                // EasyTier Sym→Cone: 预测50个端口
                 hostPortRange = PORT_RANGE_WIDE;
             } else if (hostSymmetric) {
                 hostPortRange = PORT_RANGE_DEFAULT;
@@ -2031,7 +1990,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                         if (roomManager.currentRoom.get() == state && connectionCycleActive.get()) {
                             tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 1);
                         }
-                    }, 5, TimeUnit.SECONDS);
+                    }, EXTRA_TIMEOUT_SEC, TimeUnit.SECONDS);
                 }
                 return;
             }
@@ -2393,7 +2352,6 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
         if (joinerIsSymmetric && hostConfirmedNonSymmetric) {
             portRange = 0;
         } else if (state.roomInfo.isHostSymmetric()) {
-            //优化: 用PortPredictor置信范围替代固定50, 收窄打洞目标
             if (hostMappedPortDelta != 0) {
                 portRange = hostMappedPortRange > 0 ? hostMappedPortRange : PORT_RANGE_WIDE;
             } else if (cycle == 0) {
@@ -2415,9 +2373,6 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
             VoxLinkMod.LOGGER.info("[Connection] 端口预测(range=+/-{}) (尝试{}, hostSym={}, joinerSym={}, hostNat={})",
                     portRange, attempt, state.roomInfo.isHostSymmetric(), joinerIsSymmetric, state.roomInfo.getNatType());
         }
-        // Cone joiner不创建新socket: host的84 birthday socket已打向joiner同一端口,
-        // joiner复用STUN socket回包即可维持mapped port一致, Sym NAT才能放行
-        // Sym joiner才需要多socket birthday attack
         int socketCount = 0;
         if (joinerIsSymmetric) {
             socketCount = state.roomInfo.isHostSymmetric() ? HARD_SYM_SOCKET_COUNT : JOINER_SYM_SOCKET_COUNT;
@@ -2908,7 +2863,6 @@ return null;
                 VoxLinkMod.LOGGER.info("[BirthdayPunch] Socket #{}收到对端打洞到 {}:{}", idx, addr.getAddress().getHostAddress(), addr.getPort());
             });
 
-            // EasySym±20
             int portRange = PORT_RANGE_DEFAULT;
             if (isEasySym) {
                 portRange = EASY_SYM_PORT_RANGE;
@@ -2990,7 +2944,6 @@ return null;
                             connectionCycleActive.set(false);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "connected", new JsonObject(), "host");
-                            //debounce 桥已建 但MC还没真连上 显示连接中
                             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
                             ConnectionHelper.connectToServer(localPort, state.roomInfo);
                             notifyDualVoxlinkBridge(true);
@@ -3011,7 +2964,6 @@ return null;
                             connectionCycleActive.set(false);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "connected", new JsonObject(), "host");
-                            //debounce 桥已建 但MC还没真连上 显示连接中
                             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
                             ConnectionHelper.connectToServer(localPort, state.roomInfo);
                             notifyDualVoxlinkBridge(true);
@@ -3190,8 +3142,7 @@ return null;
         // 房主在world中，聊天栏提示
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
-            mc.player.sendSystemMessage(
-                Component.translatable("voxlink.relay.host_notice"));
+            mc.player.sendSystemMessage(Component.translatable("voxlink.relay.host_notice"));
         }
         RoomInfo.PeerInfo requestingPeer = state.roomInfo.getPeer(requestingClientId);
         if (requestingPeer == null || requestingPeer.mappedIp == null || requestingPeer.mappedPort <= 0) {
@@ -3258,7 +3209,6 @@ return null;
         VoxLinkMod.LOGGER.info("[Relay] 收到relay_notify, 打洞到Cone {}:{}", relayIp, relayPort);
         state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.trying"));
 
-        // Sym→Cone: 5 socket birthday attack, 比1 socket命中率高得多
         java.util.List<UdpHolePuncher> relayPunchers = new java.util.ArrayList<>();
         java.util.concurrent.atomic.AtomicBoolean relayWon = new java.util.concurrent.atomic.AtomicBoolean(false);
         String fRelayIp = relayIp;
@@ -3285,7 +3235,6 @@ return null;
                     rp.markSocketTransferred();
                     killAllConnectionAttempts();
                     rp.stopPunch();
-                    // 停掉其他 relay puncher
                     for (UdpHolePuncher op : relayPunchers) {
                         if (op != rp) { try { op.cancel(); op.close(); } catch (Exception ignored) {} }
                     }
@@ -3297,8 +3246,7 @@ return null;
                     scheduler.schedule(() -> {
                         Minecraft mc = Minecraft.getInstance();
                         if (mc.player != null) {
-                            mc.player.sendSystemMessage(
-                                Component.translatable("voxlink.relay.connected_via"));
+                            mc.player.sendSystemMessage(Component.translatable("voxlink.relay.connected_via"));
                         }
                     }, AWAIT_TERM_SEC, TimeUnit.SECONDS);
                 })
@@ -3309,7 +3257,6 @@ return null;
                     }
                     return null;
                 });
-            //优化: 去掉socket间隔sleep(50), 并行创建无副作用
         }
 
         //优化: relay超时18s→8s, 与host侧并行failover对齐
@@ -3356,7 +3303,6 @@ return null;
         }
         if (hostTransport == null) return;
 
-        // Cone→Sym: 5 socket birthday attack, 并发打洞提高命中率
         java.util.List<UdpHolePuncher> conePunchers = new java.util.ArrayList<>();
         java.util.concurrent.atomic.AtomicBoolean coneWon = new java.util.concurrent.atomic.AtomicBoolean(false);
         String fTargetIp = targetIp;
@@ -3379,7 +3325,6 @@ return null;
                     }
                     VoxLinkMod.LOGGER.info("[Relay] Cone→Sym socket#{} 打洞成功", idx);
                     cp.markSocketTransferred();
-                    // 停掉其他 puncher
                     for (UdpHolePuncher op : conePunchers) {
                         if (op != cp) { try { op.cancel(); op.close(); } catch (Exception ignored) {} }
                     }
@@ -3398,10 +3343,8 @@ return null;
                     }
                     return null;
                 });
-            //优化: 去掉socket间隔sleep(50), 并行创建无副作用
         }
 
-        //优化: 超时18s→8s, 与并行failover对齐
         scheduler.schedule(() -> {
             if (!coneWon.get()) {
                 VoxLinkMod.LOGGER.warn("[Relay] Cone→Sym relay打洞超时(8s)");
@@ -3418,12 +3361,10 @@ return null;
         VoxLinkMod.LOGGER.warn("[Relay] 中继断开通知: {}<->{}", peerA, peerB);
         RoomManager.RoomState state = roomManager.currentRoom.get();
         if (state == null || state == RoomManager.PENDING || connectionWon.get()) return;
-        // 标记当前中继失败，尝试下一候选
         if (currentRelayPeer.get() != null) {
             failedRelayPeers.add(currentRelayPeer.get());
         }
         clearRelayTracking();
-        // 自动切换：延迟500ms后重试（给网络一点缓冲）
         scheduler.schedule(() -> {
             if (roomManager.currentRoom.get() == state && !connectionWon.get()) {
                 VoxLinkMod.LOGGER.info("[Relay] 自动切换备选中继...");
@@ -3464,12 +3405,10 @@ return null;
         if (mc != null) {
             mc.execute(() -> {
                 if (mc.player != null) {
-                    mc.player.sendSystemMessage(
-                            Component.translatable("voxlink.chat.error_prefix")
+                    mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error_prefix")
                                     .append(Component.translatable("voxlink.connection.all_failed")));
                     if (state.roomInfo.isSameCgnat()) {
-                        mc.player.sendSystemMessage(
-                                Component.translatable("voxlink.chat.same_cgnat_warning"));
+                        mc.player.sendSystemMessage(Component.translatable("voxlink.chat.same_cgnat_warning"));
                     }
                 }
                 try {
@@ -3670,7 +3609,6 @@ return null;
     public void startHostUdpPunchBridge(RoomManager.RoomState state, String clientId, ReliableUdpTransport transport) {
         int mcPort = state.roomInfo.getHostPort();
         ConnectionState.transitionTo(ConnectionState.CONNECTED, "Host桥接建立 client=" + clientId);
-        //debounce 桥已建 host侧不需要再connectToServer 因为对方joiner会连过来
         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
         P2PBridge.startUdpHostBridgeForClient(clientId, transport, mcPort, () -> {
             ReliableUdpTransport t = activeUdpTransports.remove(clientId);
@@ -3735,7 +3673,7 @@ return null;
     public void shutdown() {
         if (punchExecutor != null && !punchExecutor.isShutdown()) {
             punchExecutor.shutdown();
-            try { punchExecutor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+            try { punchExecutor.awaitTermination(AWAIT_TERM_SEC, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
         }
         clearRelayTracking();
         failedRelayPeers.clear();

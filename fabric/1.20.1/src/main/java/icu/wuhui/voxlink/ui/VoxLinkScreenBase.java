@@ -93,4 +93,12 @@ public abstract class VoxLinkScreenBase extends Screen {
     protected void drawTitle(GuiGraphics graphics, int y) {
         drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, COLOR_TITLE, this.width - MARGIN_X);
     }
+    protected void drawCenteredComponent(GuiGraphics graphics, Component component, int centerX, int y, int color) {
+        int width = Minecraft.getInstance().font.width(component);
+        graphics.drawString(Minecraft.getInstance().font, component, centerX - width / 2, y, color);
+    }
+
+    protected int fontWidth(Component component) {
+        return Minecraft.getInstance().font.width(component);
+    }
 }

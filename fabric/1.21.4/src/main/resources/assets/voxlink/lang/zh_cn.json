@@ -116,6 +116,7 @@
     "voxlink.create_room.elapsed_seconds": " (%ss)",
     "voxlink.create_room.lan_failed": "开放局域网失败了 :(",
     "voxlink.create_room.timeout": "创建超时了，再试一次？",
+    "voxlink.create_room.cancelled": "已取消创建房间",
     "voxlink.create_room.success": "房间创建成功！ :D",
     "voxlink.visible.password_hidden": "§c有密码 - 大厅中隐藏",
     "voxlink.create_room.error.cannot_connect_server": "连不上服务器 :(",

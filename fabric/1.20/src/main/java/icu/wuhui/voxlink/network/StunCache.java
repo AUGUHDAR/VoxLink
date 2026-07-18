@@ -2,13 +2,8 @@ package icu.wuhui.voxlink.network;
 
 import com.google.gson.*;
 import icu.wuhui.voxlink.VoxLinkMod;
-import icu.wuhui.voxlink.room.StunDetector;
 import net.minecraft.client.Minecraft;
 
-import javax.naming.Context;
-import javax.naming.directory.Attribute;
-import javax.naming.directory.Attributes;
-import javax.naming.directory.InitialDirContext;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -112,73 +107,5 @@ public class StunCache {
             VoxLinkMod.LOGGER.debug("[StunCache] 保存失败: {}", e.getMessage());
         }
     }
-
-    public static void clear() {
-        try {
-            Files.deleteIfExists(getCachePath());
-        } catch (Exception ignored) {}
-    }
-
-    public static List<String> getHardcodedServers() {
-        return new ArrayList<>(StunDetector.getAllStunUrls());
-    }
-
-    //DNS发现
-    public static List<String> discoverFromDnsTxt(String domain) {
-        List<String> found = new ArrayList<>();
-        try {
-            Hashtable<String, String> env = new Hashtable<>();
-            env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.dns.DnsContextFactory");
-            InitialDirContext ctx = new InitialDirContext(env);
-            Attributes attrs = ctx.getAttributes("_stun._udp." + domain, new String[]{"TXT"});
-            Attribute txt = attrs.get("TXT");
-            if (txt != null) {
-                for (int i = 0; i < txt.size(); i++) {
-                    String parsed = parseStunTxtRecord(String.valueOf(txt.get(i)));
-                    if (parsed != null && !found.contains(parsed)) found.add(parsed);
-                }
-            }
-            ctx.close();
-        } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunCache] DNS TXT 查询失败: {}", e.getMessage());
-        }
-        return found;
-    }
-
-    //解析 "stun:host:port" 或 "stun=host" 为 stun:url
-    private static String parseStunTxtRecord(String raw) {
-        if (raw == null) return null;
-        String s = raw.trim();
-        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
-            s = s.substring(1, s.length() - 1).trim();
-        }
-        if (s.isEmpty()) return null;
-        int idx = s.indexOf(':');
-        int eq = s.indexOf('=');
-        String hostPart = null;
-        if (idx >= 0 && s.substring(0, idx).equalsIgnoreCase("stun")) {
-            hostPart = s.substring(idx + 1).trim();
-        } else if (eq >= 0 && s.substring(0, eq).equalsIgnoreCase("stun")) {
-            hostPart = s.substring(eq + 1).trim();
-        }
-        if (hostPart == null || hostPart.isEmpty()) return null;
-        return hostPart.startsWith("stun:") ? hostPart : "stun:" + hostPart;
-    }
-
-    //合并去重
-    public static List<String> getMergedStunServers() {
-        List<String> result = new ArrayList<>(getHardcodedServers());
-        try {
-            List<String> dns = discoverFromDnsTxt("voxlink.icu");
-            for (String s : dns) {
-                if (!result.contains(s)) result.add(s); //去重
-            }
-            if (!dns.isEmpty()) {
-                VoxLinkMod.LOGGER.info("[StunCache] DNS发现{}个STUN, 合并后共{}个", dns.size(), result.size());
-            }
-        } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunCache] DNS TXT 发现失败, 仅用硬编码列表: {}", e.getMessage());
-        }
-        return result;
-    }
 }
+

@@ -15,9 +15,9 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
     private static final int BTN_H = 20;
     private static final int MARGIN_X = 20;
     private static final int CANCEL_BTN_Y_OFFSET = 20;
-    private static final int UAC_HINT_Y_OFFSET = 44;
     private static final int COLOR_ERROR_RGB = 0xFF5555;
     private static final int COLOR_WARNING = 0xFFFFFF55;
+    private static final int UAC_HINT_Y_OFFSET = 44;
     private static final int COLOR_MUTED = 0xFFAAAAAA;
 
     protected CreatingRoomScreen(CreateRoomScreen parent) {
@@ -31,15 +31,7 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
         if (startTime == 0) startTime = System.currentTimeMillis();
         this.addRenderableWidget(Button.builder(
                 Component.translatable("voxlink.cancel"),
-                button -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    if (mc.player != null) {
-                        mc.player.sendSystemMessage(
-                                Component.translatable("voxlink.create_room.timeout").withStyle(s -> s.withColor(COLOR_ERROR_RGB)));
-                    }
-                    parent.onCreateTimeout();
-                    mc.gui.setScreen(parent);
-                }
+                button -> onCancel()
         ).bounds(this.width / 2 - BTN_W / 2, this.height / 2 + CANCEL_BTN_Y_OFFSET, BTN_W, BTN_H).build());
     }
 
@@ -50,8 +42,18 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
 
     @Override
     public void onClose() {
-        parent.onCreateTimeout();
-        Minecraft.getInstance().gui.setScreen(parent);
+        onCancel();
+    }
+
+    //debounce 用户主动取消 走cancelled分支 不走timeout
+    private void onCancel() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.sendSystemMessage(
+                    Component.translatable("voxlink.create_room.cancelled").withStyle(s -> s.withColor(COLOR_ERROR_RGB)));
+        }
+        parent.onCancelCreate();
+        mc.gui.setScreen(parent);
     }
 
     @Override
@@ -82,6 +84,8 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
             clipped = clipped + "...";
         }
         drawCenteredString(graphics, clipped, this.width / 2, this.height / 2, COLOR_WARNING);
-        drawCenteredString(graphics, Component.translatable("voxlink.create_room.uac_hint").getString(), this.width / 2, this.height / 2 + UAC_HINT_Y_OFFSET, COLOR_MUTED);
+        drawCenteredString(graphics,
+                Component.translatable("voxlink.create_room.uac_hint").getString(),
+                this.width / 2, this.height / 2 + UAC_HINT_Y_OFFSET, COLOR_MUTED);
     }
 }

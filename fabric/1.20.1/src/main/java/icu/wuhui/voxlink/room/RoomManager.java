@@ -14,7 +14,6 @@ import icu.wuhui.voxlink.network.SignalingClient;
 import icu.wuhui.voxlink.network.StunProbe;
 import icu.wuhui.voxlink.network.UPnPManager;
 import icu.wuhui.voxlink.network.TopologyClient;
-import icu.wuhui.voxlink.network.DataRouter;
 import icu.wuhui.voxlink.network.UdpHolePuncher;
 import icu.wuhui.voxlink.network.ReliableUdpTransport;
 import icu.wuhui.voxlink.terracotta.TerracottaManager;
@@ -38,7 +37,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public class RoomManager {
     private final SignalingClient signalingClient;
     private final TopologyClient topologyClient;
-    private final DataRouter dataRouter;
     private final ScheduledExecutorService scheduler;
     private final ConnectionManager connectionManager;
     final AtomicReference<RoomState> currentRoom = new AtomicReference<>(null);
@@ -71,7 +69,6 @@ public class RoomManager {
     public RoomManager(SignalingClient signalingClient, TopologyClient topologyClient) {
         this.signalingClient = signalingClient;
         this.topologyClient = topologyClient;
-        this.dataRouter = new DataRouter(topologyClient.getOverlayManager(), signalingClient);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(() -> {
                 try {
@@ -94,11 +91,6 @@ public class RoomManager {
         scheduler.shutdownNow();
     }
 
-    public void cancelPending() {
-        currentRoom.compareAndSet(PENDING, null);
-        cancelPendingCreate();
-    }
-
     private void cancelPendingCreate() {
         CompletableFuture<?> f = pendingCreateFuture;
         if (f != null && !f.isDone()) {
@@ -111,7 +103,7 @@ public class RoomManager {
             "NETWORK_ERROR", "CDN_ERROR", "RATE_LIMITED"
     );
 
-    private static final String GAME_VERSION = "1.20.1";
+    private static final String GAME_VERSION = icu.wuhui.voxlink.VoxLinkConstants.GAME_VERSION;
 
     public CompletableFuture<RoomInfo> createRoom(String name, String password, int maxPlayers, int hostPort, boolean visible, String authType, String category) {
         if (!currentRoom.compareAndSet(null, PENDING)) {
@@ -291,7 +283,6 @@ try {
 
             String hostId = "host_" + code;
             topologyClient.onRoomJoined(code, hostToken, true, hostId, 0);
-            dataRouter.setRoomContext(code, hostToken, true);
 
             try {
                 int bridgePort = P2PBridge.startHostBridge(ctx.port).get(5, java.util.concurrent.TimeUnit.SECONDS);
@@ -550,7 +541,6 @@ if (wasPending) {
                     startSignalPoll();
 
                     topologyClient.onRoomJoined(normalizedCode, clientToken, false, clientId, 0);
-                    dataRouter.setRoomContext(normalizedCode, clientToken, false);
 
                     return roomInfo;
                 }).orTimeout(JOIN_ROOM_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS).exceptionally(e -> {
@@ -1265,14 +1255,6 @@ if (wasPending) {
 
     public boolean isConnectionCycleActive() {
         return connectionManager.isConnectionCycleActive();
-    }
-
-    public RoomState getRoomState() {
-        return currentRoom.get();
-    }
-
-    public boolean compareAndSetRoomState(RoomState expect, RoomState update) {
-        return currentRoom.compareAndSet(expect, update);
     }
 
     private void handleConnected(String from, JsonObject data) {
