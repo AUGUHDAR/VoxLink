@@ -86,6 +86,8 @@ public class RoomManager {
     public void shutdown() {
         connectionManager.setConnectionCycleActive(false);
         ConnectionHelper.resetConnecting();
+        //debounce 重置ConnectionState 防止dev热加载下次建房UI读到stale状态
+        ConnectionState.reset();
         connectionManager.shutdown();
         stopScheduledTasks();
         scheduler.shutdownNow();
@@ -299,6 +301,12 @@ try {
                 String tpName = Minecraft.getInstance().getUser().getName();
                 TerracottaManager.createRoom(tpName)
                     .thenAccept(tc -> {
+                        //debounce 房间已离开 关闭后台Terracotta进程避免泄漏
+                        if (currentRoom.get() != state) {
+                            VoxLinkMod.LOGGER.info("Terracotta房间已离开,关闭后台进程");
+                            TerracottaManager.shutdown();
+                            return;
+                        }
                         roomInfo.setTerracottaCode(tc);
                         VoxLinkMod.LOGGER.info("陶瓦房间号: {}", tc);
                         Minecraft.getInstance().execute(() -> {
@@ -386,20 +394,19 @@ if (wasPending) {
         } else if (st != null) {
             currentRoom.compareAndSet(st, null);
         }
-        
+
         stopScheduledTasks();
         P2PBridge.disconnect();
-        
+
         if (VoxLinkMod.getConfig().isAutoUPnP()) {
             UPnPManager.closePort(hostPort);
             if (GeyserCompat.isGeyserLoaded()) {
                 UPnPManager.closeUdpPort(GeyserCompat.getBedrockPort());
             }
         }
-        if (VoxLinkMod.getConfig().isVoiceChatCompat()) {
-        }
-        if (GeyserCompat.isGeyserLoaded()) {
-        }
+        try {
+            TerracottaManager.shutdown();
+        } catch (Exception e) { VoxLinkMod.LOGGER.debug("cleanup terracotta error: {}", e.getMessage()); }
     }
 
     public CompletableFuture<RoomInfo> updateRoom(String code, String token, String name, String password, int maxPlayers, boolean visible, String authType, String category) {
@@ -562,6 +569,8 @@ if (wasPending) {
         ConnectionState.transitionTo(ConnectionState.DISCONNECTED, "用户主动离开");
         connectionManager.setStunProbeResult(null);
         connectionManager.getStunProbeFutureRef().set(null);
+        //debounce 兜底重置双P2P状态 防止stale状态污染下次连接
+        connectionManager.resetDualRaceState();
         RoomState state = currentRoom.getAndSet(null);
         if (state == null || state == PENDING) {
             cancelPendingCreate();
@@ -614,12 +623,15 @@ if (wasPending) {
         ConnectionHelper.resetConnecting();
         connectionManager.setStunProbeResult(null);
         connectionManager.getStunProbeFutureRef().set(null);
+        //debounce 兜底重置双P2P状态 与leaveRoom对称
+        connectionManager.resetDualRaceState();
         RoomState state = currentRoom.getAndSet(null);
         if (state == null || state == PENDING) {
             cancelPendingCreate();
             return;
         }
-
+        //debounce 与leaveRoom对称 清理UPnP/Terracotta/P2PBridge/topology
+        cleanupRoomResources();
         try {
             performLeave(state);
         } catch (Exception e) {
@@ -671,10 +683,6 @@ if (wasPending) {
                         UPnPManager.closeUdpPort(state.roomInfo.getBedrockPort());
                     }
                 }
-                if (VoxLinkMod.getConfig().isVoiceChatCompat()) {
-                }
-                if (state.roomInfo.getBedrockPort() > 0) {
-                }
             }
 
             P2PBridge.disconnect();
@@ -709,7 +717,13 @@ if (wasPending) {
     public RoomInfo setupTerracottaGuestRoom(String roomCode) {
         RoomInfo roomInfo = new RoomInfo(roomCode, "Terracotta", false, 20, "", false, 0, "unknown");
         RoomState state = new RoomState(roomInfo);
-        currentRoom.set(state);
+        //debounce 用getAndSet而不是set 若旧VoxLink主机状态存在则清理其UPnP/socket资源
+        RoomState old = currentRoom.getAndSet(state);
+        if (old != null && old != PENDING && old.roomInfo.isHost()) {
+            try { cleanupRoomResources(); } catch (Exception e) {
+                VoxLinkMod.LOGGER.debug("Terracotta接管清理旧资源失败: {}", e.getMessage());
+            }
+        }
         intentionalLeave = false;
         roomLostHandled.set(true);
         return roomInfo;
@@ -836,10 +850,6 @@ if (wasPending) {
                         UPnPManager.closeUdpPort(st.roomInfo.getBedrockPort());
                     }
                 }
-                if (VoxLinkMod.getConfig().isVoiceChatCompat()) {
-                }
-                if (st.roomInfo.getBedrockPort() > 0) {
-                }
             }
 
             P2PBridge.disconnect();
@@ -889,6 +899,12 @@ if (wasPending) {
             topologyClient.onRoomLeft();
             if (!intentionalLeave) {
                 notifyRoomLostActionBar(reason);
+                //debounce 兜底也调callback 防止玩家未察觉被踢下次建房报已在房间
+                if (roomLostCallback != null) {
+                    try { roomLostCallback.run(); } catch (Exception ex) {
+                        VoxLinkMod.LOGGER.debug("roomLostCallback异常(同步兜底): {}", ex.getMessage());
+                    }
+                }
             }
         }
     }
@@ -1261,7 +1277,6 @@ if (wasPending) {
         VoxLinkMod.LOGGER.info("对端已连接: {}", from);
         RoomState st = currentRoom.get();
         if (st != null && st != PENDING && st.roomInfo.isHost()) {
-            boolean guestOp = st.roomInfo.isGuestOp();
             scheduler.schedule(() -> {
                 try {
                     Minecraft mc = Minecraft.getInstance();
@@ -1271,13 +1286,15 @@ if (wasPending) {
                             var server = mc.getSingleplayerServer();
                             if (server == null) return;
                             String hostName = mc.getUser().getName();
+                            //debounce 延迟任务内重读guestOp 防止房主2s内切换设置导致执行错误命令
+                            boolean currentGuestOp = st.roomInfo.isGuestOp();
                             for (var player : server.getPlayerList().getPlayers()) {
                                 String name = player.getName().getString();
                                 if (name.equals(hostName)) continue;
-                                String cmd = guestOp ? "op " + name : "deop " + name;
+                                String cmd = currentGuestOp ? "op " + name : "deop " + name;
                                 server.getCommands().performPrefixedCommand(
                                     server.createCommandSourceStack(), cmd);
-                                VoxLinkMod.LOGGER.info("[RoomManager] {}访客: {}", guestOp ? "自动OP" : "自动DEOP", name);
+                                VoxLinkMod.LOGGER.info("[RoomManager] {}访客: {}", currentGuestOp ? "自动OP" : "自动DEOP", name);
                             }
                         } catch (Exception e) {
                             VoxLinkMod.LOGGER.warn("[RoomManager] 访客OP处理失败: {}", e.getMessage());

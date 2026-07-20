@@ -1,6 +1,5 @@
 package icu.wuhui.voxlink.mixin;
 
-import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.uuid.UUIDPolicyManager;
 import net.fabricmc.loader.api.FabricLoader;
 import org.spongepowered.asm.mixin.Mixin;
@@ -17,7 +16,8 @@ public class UUIDUtilMixin {
     private static void voxlink$onCreateOfflinePlayerUUID(String playerName, CallbackInfoReturnable<UUID> cir) {
         if (FabricLoader.getInstance().isModLoaded("mcwifipnp")) return;
         UUID fixedUuid = UUIDPolicyManager.hookEntry(playerName);
-        if (fixedUuid != null && VoxLinkMod.getRoomManager() != null && VoxLinkMod.getRoomManager().isInRoom()) {
+        //debounce 删isInRoom检查 让策略全局生效(后续接入UI让玩家管理)
+        if (fixedUuid != null) {
             cir.setReturnValue(fixedUuid);
         }
     }

@@ -26,12 +26,14 @@ public abstract class TitleScreenMixin extends Screen {
 
     @Inject(method = "init", at = @At("TAIL"), require = 0)
     private void onInit(CallbackInfo ci) {
-        int buttonWidth = Math.min(MAX_BTN_W, this.width / 4 - BTN_MARGIN);
+        //debounce 小窗口约束: 宽度下限20 + x不超过窗口右边界-按钮宽-边距 防止按钮溢出
+        int buttonWidth = Math.max(20, Math.min(MAX_BTN_W, this.width / 4 - BTN_MARGIN));
+        int x = Math.min(this.width / 2 + TITLE_BTN_OFFSET_X, this.width - buttonWidth - BTN_MARGIN);
         this.addRenderableWidget(
                 Button.builder(Component.translatable("voxlink.title"), button -> {
                     Minecraft.getInstance().setScreen(new VoxLinkScreen((Screen) (Object) this));
                 })
-                .bounds(this.width / 2 + TITLE_BTN_OFFSET_X, this.height / 4 + TITLE_BTN_Y_OFFSET, buttonWidth, BTN_H)
+                .bounds(x, this.height / 4 + TITLE_BTN_Y_OFFSET, buttonWidth, BTN_H)
                 .build()
         );
     }

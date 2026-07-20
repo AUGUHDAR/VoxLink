@@ -316,7 +316,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                 String tcText = Component.translatable("voxlink.chat.terracotta_code_label", "").getString().trim()
                         + " " + net.minecraft.ChatFormatting.AQUA.toString() + net.minecraft.ChatFormatting.BOLD.toString()
                         + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]";
-                drawCenteredString(graphics, tcText, centerX, TERRACOTTA_CODE_Y, COLOR_INFO);
+                drawCenteredClipped(graphics, tcText, centerX, TERRACOTTA_CODE_Y, COLOR_INFO, maxWidth);
                 int tcW = this.font.width(tcText);
                 codeClickAreas.add(new int[]{centerX - tcW / 2, TERRACOTTA_CODE_Y, tcW, CODE_CLICK_H});
                 codeClickTexts.add(tcCode);

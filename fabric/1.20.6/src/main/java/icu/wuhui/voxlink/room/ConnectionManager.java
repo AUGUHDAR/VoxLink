@@ -87,6 +87,13 @@ public class ConnectionManager {
     //debounce 双P2P时追踪VoxLink桥建立 等桥建好才算赢 语义对齐陶瓦guest-ok
     private volatile CompletableFuture<Void> dualVoxlinkBridgeFuture;
     private static final int DUAL_VOXLINK_BRIDGE_TIMEOUT_SEC = 60;
+    //debounce 双P2P竞速状态 集中管理胜负判定 避免类级标志与局部CAS冲突
+    private volatile boolean dualRaceActive = false;
+    private volatile boolean terracottaWon = false;
+    private volatile boolean voxlinkWon = false;
+    private volatile boolean voxlinkSideDisabled = false;
+    private volatile CompletableFuture<Void> dualResultRef;
+    private final java.util.concurrent.atomic.AtomicInteger dualFailedCount = new java.util.concurrent.atomic.AtomicInteger(0);
 
     private static final int MAX_CONNECTION_CYCLES = 8;
     private static final int FALLBACK_CYCLES = 3;
@@ -316,9 +323,11 @@ public class ConnectionManager {
     }
 
     public void stopAllConnectionWork() {
+        //debounce 重置hostPunching 防止scheduler shutdownNow后punchTimeout任务丢弃导致永久true
+        hostPunching = false;
+        lastPunchInfoId = "";
         for (UdpHolePuncher puncher : activeHolePunchers.values()) {
-            puncher.cancel();
-            puncher.close();
+            try { puncher.cancel(); puncher.close(); } catch (Exception ignored) {}
         }
         activeHolePunchers.clear();
         for (ReliableUdpTransport transport : activeUdpTransports.values()) {
@@ -669,6 +678,11 @@ public class ConnectionManager {
         RoomManager.RoomState state = roomManager.currentRoom.get();
         VoxLinkMod.LOGGER.info("[RoomManager] 收到holepunch_offer, state={}", state != null && state != RoomManager.PENDING ? "active" : "null/pending");
         if (state == null || state == RoomManager.PENDING || state.roomInfo.isHost()) return;
+        //debounce 双P2P模式 VoxLink侧已被杀或Terracotta已赢 不再重启VoxLink
+        if (voxlinkSideDisabled || terracottaWon) {
+            VoxLinkMod.LOGGER.info("[DualP2P] VoxLink侧已禁用或Terracotta已赢，忽略holepunch_offer");
+            return;
+        }
 
         if (ConnectionHelper.isConnecting()) {
             VoxLinkMod.LOGGER.info("[RoomManager] 已在连接中，忽略holepunch_offer");
@@ -2926,6 +2940,10 @@ return null;
     }
 
     public void connectViaBridge(RoomManager.RoomState state, ConnectionFallback.ConnectResult result) {
+        //debounce 双P2P模式 VoxLink建桥前先停Terracotta 避免隧道建好却没用
+        if (dualRaceActive) {
+            killAllConnectionAttempts("terracotta");
+        }
         killAllConnectionAttempts();
         P2PBridge.cancelPendingUdpTimeouts();
         for (ReliableUdpTransport transport : activeUdpTransports.values()) {
@@ -3202,6 +3220,7 @@ return null;
             clearRelayTracking();
             connectionWon.set(true);
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.connected_via"));
+            state.roomInfo.setUsingRelay(true);
             return;
         }
         String relayIp = data.has("relayIp") ? data.get("relayIp").getAsString() : null;
@@ -3243,6 +3262,7 @@ return null;
                     activeUdpTransports.put("relay_cone", transport);
                     transport.start();
                     state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.connected_via"));
+                    state.roomInfo.setUsingRelay(true);
                     startUdpPunchBridge(state, transport);
                     scheduler.schedule(() -> {
                         Minecraft mc = Minecraft.getInstance();
@@ -3378,6 +3398,14 @@ return null;
     public void showConnectFailedFinal(RoomManager.RoomState state) {
         clearRelayTracking();
         failedRelayPeers.clear();
+        //debounce 双P2P模式 VoxLink侧失败只记失败状态 不leaveRoom 不影响Terracotta
+        if (dualRaceActive && !terracottaWon) {
+            voxlinkSideDisabled = true;
+            if (dualResultRef != null && dualFailedCount.incrementAndGet() >= 2) {
+                dualResultRef.completeExceptionally(new RuntimeException("所有连接方式失败"));
+            }
+            return;
+        }
         if (connectionWon.get()) {
             VoxLinkMod.LOGGER.info("[Connection] 已连接，忽略showConnectFailedFinal");
             return;
@@ -3439,6 +3467,11 @@ return null;
             try { puncher.close(); } catch (Exception ignored) {}
         }
         activeHolePunchers.clear();
+        //debounce 统一清UDP池 避免被杀侧残留recv线程和端口
+        for (ReliableUdpTransport t : activeUdpTransports.values()) { try { t.close(); } catch (Exception ignored) {} }
+        activeUdpTransports.clear();
+        for (ReliableUdpTransport t : oldUdpTransports.values()) { try { t.close(); } catch (Exception ignored) {} }
+        oldUdpTransports.clear();
         hostPunching = false;
         lastPunchInfoId = "";
     }
@@ -3449,12 +3482,45 @@ return null;
         switch (reason) {
             case "voxlink" -> killAllConnectionAttempts();
             case "terracotta" -> {
-                try { TerracottaManager.setIdle(); }
-                catch (Exception e) { VoxLinkMod.LOGGER.warn("[DualP2P] 陶瓦 setIdle 失败: {}", e.getMessage()); }
+                //debounce 同步等setIdle完成 避免旧状态污染下一次join
+                try {
+                    TerracottaManager.setIdle().orTimeout(3, TimeUnit.SECONDS).join();
+                } catch (Exception e) {
+                    VoxLinkMod.LOGGER.warn("[DualP2P] 陶瓦 setIdle 超时: {}", e.getMessage());
+                }
+                TerracottaManager.clearLastState();
             }
             default -> killAllConnectionAttempts();
         }
         VoxLinkMod.LOGGER.info("[DualP2P] 终止 {} 侧连接尝试", reason);
+    }
+
+    //debounce 关屏/取消时杀两侧P2P 让资源立即释放
+    public void killDualRace() {
+        dualRaceActive = false;
+        voxlinkSideDisabled = true;
+        killAllConnectionAttempts("voxlink");
+        killAllConnectionAttempts("terracotta");
+        CompletableFuture<Void> bf = dualVoxlinkBridgeFuture;
+        if (bf != null && !bf.isDone()) {
+            bf.completeExceptionally(new RuntimeException("用户取消"));
+        }
+        dualVoxlinkBridgeFuture = null;
+        dualResultRef = null;
+        dualFailedCount.set(0);
+        terracottaWon = false;
+        voxlinkWon = false;
+    }
+
+    //debounce 双P2P成功后立即重置状态 防止stale状态污染下次连接
+    public void resetDualRaceState() {
+        dualRaceActive = false;
+        terracottaWon = false;
+        voxlinkWon = false;
+        voxlinkSideDisabled = false;
+        dualFailedCount.set(0);
+        dualResultRef = null;
+        dualVoxlinkBridgeFuture = null;
     }
 
     //debounce 通知双P2P的VoxLink桥建立结果 joiner桥建好/失败时调用
@@ -3496,8 +3562,14 @@ return null;
         statusCallback.accept("terracotta", "voxlink.attempting_join.joining");
         //CAS守卫
         java.util.concurrent.atomic.AtomicBoolean won = new java.util.concurrent.atomic.AtomicBoolean(false);
-        java.util.concurrent.atomic.AtomicInteger failed = new java.util.concurrent.atomic.AtomicInteger(0);
+        //debounce 用类字段记录dualResult和failed计数 让showConnectFailedFinal能感知双P2P
+        dualRaceActive = true;
+        terracottaWon = false;
+        voxlinkWon = false;
+        voxlinkSideDisabled = false;
+        dualFailedCount.set(0);
         CompletableFuture<Void> dualResult = new CompletableFuture<>();
+        dualResultRef = dualResult;
         //debounce VoxLink侧等到桥建立才算赢 和陶瓦guest-ok语义对齐
         dualVoxlinkBridgeFuture = new CompletableFuture<>();
         final CompletableFuture<Void> bridgeFuture = dualVoxlinkBridgeFuture;
@@ -3510,30 +3582,51 @@ return null;
                 dualVoxlinkBridgeFuture = null;
                 if (e == null) {
                     if (won.compareAndSet(false, true)) {
-                        killAllConnectionAttempts("terracotta");
-                        statusCallback.accept("voxlink", "voxlink.dual.p2p_established");
-                        statusCallback.accept("terracotta", "voxlink.dual.status_cancelled");
-                        dualResult.complete(null);
-                    }
+                            voxlinkWon = true;
+                            killAllConnectionAttempts("terracotta");
+                            statusCallback.accept("voxlink", "voxlink.dual.p2p_established");
+                            statusCallback.accept("terracotta", "voxlink.dual.status_cancelled");
+                            dualResult.complete(null);
+                            resetDualRaceState();
+                        }
                 } else if (!won.get()) {
                     statusCallback.accept("voxlink", "voxlink.dual.channel_failed");
-                    if (failed.incrementAndGet() >= 2) dualResult.completeExceptionally(e);
+                    //debounce VoxLink侧失败 设禁用标志 防止handleHolePunchOffer重启
+                    voxlinkSideDisabled = true;
+                    if (dualFailedCount.incrementAndGet() >= 2) dualResult.completeExceptionally(e);
                 }
             });
         TerracottaManager.joinRoom(roomCode, playerName)
             .whenComplete((connectUrl, e) -> {
                 if (e == null) {
                     if (won.compareAndSet(false, true)) {
+                        terracottaWon = true;
                         killAllConnectionAttempts("voxlink");
-                        //debounce 陶瓦guest-ok成功 用connectUrl连接MC
-                        connectTerracottaToMC(connectUrl, roomCode);
-                        statusCallback.accept("terracotta", "voxlink.dual.p2p_established");
-                        statusCallback.accept("voxlink", "voxlink.dual.status_cancelled");
-                        dualResult.complete(null);
+                        //debounce 立即complete bridgeFuture 让VoxLink链路同步收尾 不再等60s超时
+                        voxlinkSideDisabled = true;
+                        if (bridgeFuture != null && !bridgeFuture.isDone()) {
+                            bridgeFuture.completeExceptionally(new RuntimeException("Terracotta已赢 VoxLink放弃"));
+                        }
+                        try {
+                            //debounce 陶瓦guest-ok成功 用connectUrl连接MC
+                            connectTerracottaToMC(connectUrl, roomCode);
+                            statusCallback.accept("terracotta", "voxlink.dual.p2p_established");
+                            statusCallback.accept("voxlink", "voxlink.dual.status_cancelled");
+                            dualResult.complete(null);
+                            resetDualRaceState();
+                        } catch (Exception ex) {
+                            VoxLinkMod.LOGGER.error("[DualP2P] 陶瓦连接MC失败: {}", ex.getMessage());
+                            statusCallback.accept("terracotta", "voxlink.dual.channel_failed");
+                            dualResult.completeExceptionally(ex);
+                        }
                     }
                 } else if (!won.get()) {
+                    //debounce 提取错误详情透传到日志 便于调试
+                    Throwable cause = e;
+                    while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+                    VoxLinkMod.LOGGER.warn("[DualP2P] 陶瓦侧失败: {}", cause.getMessage());
                     statusCallback.accept("terracotta", "voxlink.dual.channel_failed");
-                    if (failed.incrementAndGet() >= 2) dualResult.completeExceptionally(e);
+                    if (dualFailedCount.incrementAndGet() >= 2) dualResult.completeExceptionally(e);
                 }
             });
         return dualResult;
@@ -3542,20 +3635,18 @@ return null;
     //debounce 解析陶瓦connectUrl端口并连接MC
     private void connectTerracottaToMC(String connectUrl, String roomCode) {
         if (connectUrl == null || connectUrl.isEmpty()) {
-            VoxLinkMod.LOGGER.warn("[DualP2P] 陶瓦connectUrl为空 无法连接MC");
-            return;
+            throw new RuntimeException("陶瓦connectUrl为空 无法连接MC");
         }
         int localPort = parsePortFromUrl(connectUrl);
         if (localPort <= 0) {
-            VoxLinkMod.LOGGER.warn("[DualP2P] 陶瓦connectUrl解析端口失败: {}", connectUrl);
-            return;
+            throw new RuntimeException("陶瓦connectUrl解析端口失败: " + connectUrl);
         }
         RoomInfo roomInfo = roomManager.getCurrentRoom();
         if (roomInfo == null) {
             roomInfo = roomManager.setupTerracottaGuestRoom(roomCode);
         }
-        //debounce 陶瓦guest-ok 桥已建 但MC还没真连上 显示连接中
-        ConnectionState.transitionTo(ConnectionState.CONNECTED, "陶瓦guest-ok port=" + localPort);
+        //debounce 推TRANSPORT_SETUP 等MC真连上后再推CONNECTED 避免握手失败时非法状态转换
+        ConnectionState.transitionTo(ConnectionState.TRANSPORT_SETUP, "陶瓦guest-ok port=" + localPort);
         roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connecting"));
         ConnectionHelper.connectToServer(localPort, roomInfo);
         VoxLinkMod.LOGGER.info("[DualP2P] 陶瓦连接MC port={}", localPort);
@@ -3563,11 +3654,14 @@ return null;
 
     private static int parsePortFromUrl(String url) {
         if (url == null) return -1;
-        int colonIdx = url.lastIndexOf(':');
-        if (colonIdx < 0) return -1;
         try {
-            return Integer.parseInt(url.substring(colonIdx + 1).trim());
-        } catch (NumberFormatException e) {
+            //debounce 用URI解析 兼容IPv6和无端口场景
+            java.net.URI u = java.net.URI.create(url.contains("://") ? url : "tcp://" + url);
+            int port = u.getPort();
+            if (port > 0) return port;
+            //debounce 无端口=MC默认端口 Terracotta 0.4.x行为
+            return 25565;
+        } catch (Exception e) {
             return -1;
         }
     }
@@ -3675,6 +3769,17 @@ return null;
     }
 
     public void shutdown() {
+        //debounce 取消挂起的connectionTimeoutFuture 防止scheduler关闭前最后时刻触发
+        if (connectionTimeoutFuture != null) {
+            connectionTimeoutFuture.cancel(false);
+            connectionTimeoutFuture = null;
+        }
+        //debounce 关闭cachedUdpArray 防止dev热加载累积socket泄漏
+        if (cachedUdpArray != null) {
+            try { cachedUdpArray.close(); } catch (Exception ignored) {}
+            cachedUdpArray = null;
+        }
+        stopAllConnectionWork();
         if (punchExecutor != null && !punchExecutor.isShutdown()) {
             punchExecutor.shutdown();
             try { punchExecutor.awaitTermination(AWAIT_TERM_SEC, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}

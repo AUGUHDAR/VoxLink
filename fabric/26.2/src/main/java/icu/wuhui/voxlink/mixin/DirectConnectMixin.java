@@ -61,6 +61,11 @@ public abstract class DirectConnectMixin extends Screen {
 
         rm.joinRoom(code, null)
                 .thenAccept(roomInfo -> mc.execute(() -> {
+                    //debounce 屏幕已切走 不再启动监控 取消加入
+                    if (!(mc.gui.screen() instanceof DirectJoinServerScreen)) {
+                        VoxLinkMod.getRoomManager().leaveRoom();
+                        return;
+                    }
                     if (mc.player != null) {
                         mc.player.sendSystemMessage(Component.translatable("voxlink.chat.joined_waiting_host"));
                     }
@@ -68,6 +73,7 @@ public abstract class DirectConnectMixin extends Screen {
                 }))
                 .exceptionally(e -> {
                     mc.execute(() -> {
+                        if (!(mc.gui.screen() instanceof DirectJoinServerScreen)) return;
                         Throwable cause = e;
                         while (cause.getCause() != null) cause = cause.getCause();
                         String msg = cause.getMessage();
@@ -114,8 +120,15 @@ public abstract class DirectConnectMixin extends Screen {
                 monitorTicks++;
                 var roomInfo = VoxLinkMod.getRoomManager().getCurrentRoom();
                 if (roomInfo == null) {
-                    if (monitorTicks < MAX_MONITOR_TICKS && !monitorDone.get()) {
-                        monitorFuture = monitorScheduler.schedule(() -> mc.execute(this), MONITOR_POLL_SEC, TimeUnit.SECONDS);
+                    //debounce 房间丢失 立即反馈失败 不要静默卡死
+                    if (monitorDone.compareAndSet(false, true)) {
+                        mc.execute(() -> {
+                            if (mc.player != null) {
+                                mc.player.sendSystemMessage(Component.translatable("voxlink.chat.connection_failed_detail",
+                                        Component.translatable("voxlink.connection.all_failed").getString()));
+                            }
+                            VoxLinkMod.getRoomManager().leaveRoom();
+                        });
                     }
                     return;
                 }

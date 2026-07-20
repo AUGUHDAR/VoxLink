@@ -23,8 +23,13 @@ public class VoxLinkClient implements ClientModInitializer {
     public void onInitializeClient() {
         ServerLifecycleEvents.SERVER_STARTING.register(server -> {
             if (server instanceof IntegratedServer && VoxLinkMod.getConfig().isOfflineMode()) {
-                server.setUsesAuthentication(false);
-                VoxLinkMod.LOGGER.info("离线模式已开启");
+                //debounce 仅在主持房间时关认证 单人世界未开LAN不受影响
+                RoomManager rmStart = VoxLinkMod.getRoomManager();
+                RoomInfo room = rmStart != null ? rmStart.getCurrentRoom() : null;
+                if (room != null && room.isHost()) {
+                    server.setUsesAuthentication(false);
+                    VoxLinkMod.LOGGER.info("主持房间离线模式已开启");
+                }
             }
         });
 
@@ -57,7 +62,6 @@ public class VoxLinkClient implements ClientModInitializer {
 
         PeerServer.refreshCache();
 
-        //优化: 启动即尝试UPnP预发现网关, 开房时无延迟
         if (VoxLinkMod.getConfig().isAutoUPnP()) {
             icu.wuhui.voxlink.network.UPnPManager.tryMapAtStartup();
         }
@@ -66,7 +70,10 @@ public class VoxLinkClient implements ClientModInitializer {
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> UpdateChecker.checkOnce());
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (ConnectionHelper.isConnecting() && !(client.screen instanceof net.minecraft.client.gui.screens.ConnectScreen)) {
+            //debounce AttemptingJoinScreen也驱动连接 不能在它存在时清connecting状态 否则切换屏幕瞬间状态丢失
+            if (ConnectionHelper.isConnecting()
+                    && !(client.screen instanceof net.minecraft.client.gui.screens.ConnectScreen)
+                    && !(client.screen instanceof icu.wuhui.voxlink.ui.AttemptingJoinScreen)) {
                 ConnectionHelper.resetConnecting();
             }
             RoomManager rmRef = VoxLinkMod.getRoomManager();
@@ -75,7 +82,8 @@ public class VoxLinkClient implements ClientModInitializer {
             if (room == null) return;
             if (client.player == null && client.getSingleplayerServer() == null && room.getLocalBridgePort() > 0
                     && !(client.screen instanceof net.minecraft.client.gui.screens.ConnectScreen)
-                    && !(client.screen instanceof icu.wuhui.voxlink.ui.AttemptingJoinScreen)) {
+                    && !(client.screen instanceof icu.wuhui.voxlink.ui.AttemptingJoinScreen)
+                    && !ConnectionHelper.isConnecting()) {
                 autoLeaveTicks++;
                 if (autoLeaveTicks >= AUTO_LEAVE_DELAY_TICKS) {
                     VoxLinkMod.LOGGER.info("MC退出世界，自动退房间({}tick后)", autoLeaveTicks);

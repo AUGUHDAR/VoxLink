@@ -16,6 +16,9 @@ import java.util.List;
 public abstract class VoxLinkScreenBase extends Screen {
     private final List<GuiEventListener> myWidgets = new ArrayList<>();
 
+    private static final int MARGIN_X = 20;
+    private static final int COLOR_TITLE = 0xFFFFFFFF;
+
     protected VoxLinkScreenBase(Component title) {
         super(title);
     }
@@ -78,11 +81,11 @@ public abstract class VoxLinkScreenBase extends Screen {
     }
 
     protected void drawCenteredClipped(GuiGraphics graphics, String text, int centerX, int y, int color) {
-        drawCenteredClipped(graphics, text, centerX, y, color, this.width - 20);
+        drawCenteredClipped(graphics, text, centerX, y, color, this.width - MARGIN_X);
     }
 
     protected void drawTitle(GuiGraphics graphics, int y) {
-        drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, 0xFFFFFFFF, this.width - 20);
+        drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, COLOR_TITLE, this.width - MARGIN_X);
     }
     protected void drawCenteredComponent(GuiGraphics graphics, Component component, int centerX, int y, int color) {
         int width = Minecraft.getInstance().font.width(component);

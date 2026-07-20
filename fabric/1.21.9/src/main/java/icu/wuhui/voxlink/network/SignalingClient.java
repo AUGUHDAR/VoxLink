@@ -156,7 +156,8 @@ public class SignalingClient {
                         else retry.complete(r);
                     });
                 }, 2, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (java.util.concurrent.RejectedExecutionException e) {
+            } catch (Exception e) {
+                //debounce 任何schedule异常都退化返回原响应 避免retry永挂
                 retry.complete(response);
             }
             return retry;
@@ -325,7 +326,8 @@ public class SignalingClient {
                         else retry.complete(r);
                     });
                 }, delay, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (java.util.concurrent.RejectedExecutionException e) {
+            } catch (Exception e) {
+                //debounce 任何schedule异常都退化返回原响应 避免retry永挂
                 retry.complete(response);
             }
             return retry;
@@ -347,7 +349,8 @@ public class SignalingClient {
                         else retry.complete(r);
                     });
                 }, delay, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (java.util.concurrent.RejectedExecutionException e) {
+            } catch (Exception e) {
+                //debounce 任何schedule异常都退化返回原响应 避免retry永挂
                 retry.complete(response);
             }
             return retry;

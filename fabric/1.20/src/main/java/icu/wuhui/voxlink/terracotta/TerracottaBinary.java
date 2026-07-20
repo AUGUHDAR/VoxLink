@@ -21,6 +21,11 @@ import java.util.function.Consumer;
 
 public final class TerracottaBinary {
     private static final String VERSION = "0.4.2";
+    //debounce 远端最新版本 网络拉取失败时兜底 初始与VERSION同值
+    private static final String LATEST_VERSION = "0.4.2";
+    //debounce 拉取陶瓦元数据的端点 失败容忍
+    private static final String META_URL = "https://terracotta.glavo.site/meta";
+    private static final int META_TIMEOUT_SEC = 8;
     private static final String GITHUB_URL = "https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION;
     private static final String GITEE_URL = "https://gitee.com/burningtnt/Terracotta/releases/download/v" + VERSION;
     private static final String[] MIRROR_BASES = {
@@ -181,12 +186,34 @@ public final class TerracottaBinary {
         try {
             Path binaryPath = CACHE_DIR.resolve(CURRENT.binaryName);
             if (!Files.exists(binaryPath)) return false;
-            return verifySha256(binaryPath, CURRENT.sha256);
+            //debounce 缓存(path,mtime,size,ok) 避免UI tick每250ms全文件SHA256浪费IO
+            long mtime = Files.getLastModifiedTime(binaryPath).toMillis();
+            long size = Files.size(binaryPath);
+            ReadyCache c = readyCache.get();
+            if (c != null && c.path.equals(binaryPath) && c.mtime == mtime && c.size == size) {
+                return c.ok;
+            }
+            boolean ok = verifySha256(binaryPath, CURRENT.sha256);
+            readyCache.set(new ReadyCache(binaryPath, mtime, size, ok));
+            return ok;
         } catch (Exception e) {
             LOGGER.warn("陶瓦校验异常, 当作未就绪: {}", e.getMessage());
             return false;
         }
     }
+
+    //debounce isReady缓存条目 mtime+size匹配才命中 文件变化自动失效
+    private static final class ReadyCache {
+        final Path path;
+        final long mtime;
+        final long size;
+        final boolean ok;
+        ReadyCache(Path p, long t, long s, boolean o) {
+            path = p; mtime = t; size = s; ok = o;
+        }
+    }
+    private static final java.util.concurrent.atomic.AtomicReference<ReadyCache> readyCache =
+        new java.util.concurrent.atomic.AtomicReference<>();
 
     private static final AtomicBoolean downloadingNow = new AtomicBoolean(false);
     public static CompletableFuture<Path> downloadAsync(Consumer<DownloadProgress> progressCallback) {
@@ -487,6 +514,8 @@ public final class TerracottaBinary {
         try (InputStream gis = new java.util.zip.GZIPInputStream(Files.newInputStream(archivePath))) {
             byte[] header = new byte[512];
             while (true) {
+                //debounce 大压缩包解压时响应取消 避免玩家点取消后卡死数秒
+                if (downloadCancelled) throw new IOException("下载已取消");
                 int read = readFully(gis, header, 512);
                 if (read == 0) break;
                 if (read < 512) throw new IOException("tar头部不完整 (incomplete tar header)");
@@ -598,6 +627,69 @@ public final class TerracottaBinary {
     }
 
     public static String getVersion() { return VERSION; }
+    public static String getLatestVersion() { return LATEST_VERSION; }
+
+    //debounce 从远端拉取最新版本号 失败返回LATEST_VERSION兜底 不抛异常
+    public static CompletableFuture<String> fetchLatestVersion() {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(5))
+                    .build();
+                HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(META_URL))
+                    .timeout(Duration.ofSeconds(META_TIMEOUT_SEC))
+                    .GET()
+                    .build();
+                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) {
+                    LOGGER.debug("陶瓦meta返回非200: {} 用兜底版本", resp.statusCode());
+                    return LATEST_VERSION;
+                }
+                com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
+                if (json.has("version") && !json.get("version").isJsonNull()) {
+                    return json.get("version").getAsString();
+                }
+                if (json.has("latest_version") && !json.get("latest_version").isJsonNull()) {
+                    return json.get("latest_version").getAsString();
+                }
+                return LATEST_VERSION;
+            } catch (Exception e) {
+                LOGGER.debug("拉取陶瓦最新版本失败 用兜底: {}", e.getMessage());
+                return LATEST_VERSION;
+            }
+        });
+    }
+
+    //debounce 本地版本是否过旧 失败按"不旧"处理不阻塞主流程
+    public static CompletableFuture<Boolean> isOutdated() {
+        return fetchLatestVersion().thenApply(latest -> {
+            if (latest == null || latest.isEmpty()) return false;
+            return !VERSION.equals(latest);
+        });
+    }
+
+    //debounce 安装后自检 二进制存在+SHA256匹配+Unix可执行权限
+    public static boolean verifyInstallation() {
+        if (CURRENT == null) return false;
+        if (CURRENT.android) return TerracottaAndroidBridge.isInitialized();
+        Path binaryPath = getBinaryPath();
+        if (binaryPath == null || !Files.exists(binaryPath)) return false;
+        if (CURRENT.sha256 == null) return false;
+        if (!verifySha256(binaryPath, CURRENT.sha256)) {
+            LOGGER.warn("陶瓦二进制SHA256校验失败");
+            return false;
+        }
+        //debounce Unix-like 系统检查可执行权限
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            if (!Files.isExecutable(binaryPath)) {
+                LOGGER.warn("陶瓦二进制无可执行权限: {}", binaryPath);
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static Path getCacheDir() { return CACHE_DIR; }
     public static Path getBinaryPath() {
         if (CURRENT == null || CURRENT.android || CURRENT.binaryName == null) return null;

@@ -73,7 +73,8 @@ public class UdpHolePuncher {
     private final AtomicBoolean completed = new AtomicBoolean(false);
     private volatile InetAddress remoteAddress;
     private volatile int remotePort;
-    private volatile Thread recvThreadRef;
+    //debounce 改List支持punchMultiSocket的多recvThread cancel时全部interrupt
+    private volatile java.util.List<Thread> recvThreadsRef = null;
     private volatile Thread sendThreadRef;
     private volatile ScheduledFuture<?> timeoutFuture;
 
@@ -187,7 +188,8 @@ public class UdpHolePuncher {
                                 if (wonFlag.compareAndSet(false, true) && completed.compareAndSet(false, true)) {
                                     holeOpen.set(true);
                                     punching.set(false);
-                                    socketTransferred = true;
+                                    //debounce 命中的是sp的socket 标记sp而非this 避免close误关
+                                    sp.socketTransferred = true;
                                     remoteAddress = packet.getAddress();
                                     remotePort = packet.getPort();
                                     LOGGER.info("[UdpHolePuncher] socket#{}收到PUNCH，打洞成功", sIdx);
@@ -200,7 +202,8 @@ public class UdpHolePuncher {
                                 if (wonFlag.compareAndSet(false, true) && completed.compareAndSet(false, true)) {
                                     holeOpen.set(true);
                                     punching.set(false);
-                                    socketTransferred = true;
+                                    //debounce 命中的是sp的socket 标记sp而非this 避免close误关
+                                    sp.socketTransferred = true;
                                     remoteAddress = packet.getAddress();
                                     remotePort = packet.getPort();
                                     LOGGER.info("[UdpHolePuncher] socket#{}收到ACK，打洞成功", sIdx);
@@ -220,9 +223,11 @@ public class UdpHolePuncher {
             }, "VoxLink-PunchRecv-" + si);
             rt.setDaemon(true);
             recvThreads.add(rt);
+            //debounce 启动前先发布 让cancel能拿到最新列表 避免漏interrupt
+            recvThreadsRef = recvThreads;
             rt.start();
         }
-        recvThreadRef = recvThreads.isEmpty() ? null : recvThreads.get(0);
+        recvThreadsRef = recvThreads.isEmpty() ? null : recvThreads;
 
         // 单发送线程: 每个socket发3次到目标端口
         final boolean skipFirewallCheck = socketGroup.size() <= 1;  // 单socket单端口=预测打洞, 无回包是正常的不是防火墙
@@ -398,7 +403,7 @@ public class UdpHolePuncher {
             }
         }, "VoxLink-PunchRecv");
         recvThread.setDaemon(true);
-        recvThreadRef = recvThread;
+        recvThreadsRef = java.util.Collections.singletonList(recvThread);
         recvThread.start();
 
         Thread sendThread = new Thread(() -> {
@@ -565,7 +570,7 @@ public class UdpHolePuncher {
             }
         }, "VoxLink-PunchRecv");
         recvThread.setDaemon(true);
-        recvThreadRef = recvThread;
+        recvThreadsRef = java.util.Collections.singletonList(recvThread);
         recvThread.start();
 
         Thread sendThread = new Thread(() -> {
@@ -697,9 +702,16 @@ public class UdpHolePuncher {
                                 punchersFinal.get(j).cancel();
                             }
                         }
+                    } else {
+                        //debounce 输家的socket未被transfer走 cancel不关 主动close防泄漏
+                        try { sock.close(); } catch (Exception ignored) {}
                     }
                 } else {
                     if (remaining.decrementAndGet() == 0 && !result.isDone()) {
+                        //debounce 失败路径也清punchers 避免socket泄漏
+                        for (UdpHolePuncher p : punchersFinal) {
+                            try { p.close(); } catch (Exception ignored) {}
+                        }
                         result.completeExceptionally(ex != null ? ex
                                 : new RuntimeException("EasySym对打全部失败"));
                     }
@@ -806,10 +818,26 @@ public class UdpHolePuncher {
             tf.cancel(false);
             timeoutFuture = null;
         }
+        //debounce 与close()对称 也清socketGroup 避免socket泄漏
+        java.util.List<UdpHolePuncher> group = socketGroup;
+        if (group != null) {
+            for (UdpHolePuncher sp : group) {
+                DatagramSocket s = sp.getSocket();
+                if (s != null && !s.isClosed() && !sp.socketTransferred) {
+                    s.close();
+                }
+            }
+            socketGroup = null;
+        }
         if (socket != null && !socket.isClosed() && !socketTransferred) {
             socket.close();
         }
-        if (recvThreadRef != null) recvThreadRef.interrupt();
+        java.util.List<Thread> rts = recvThreadsRef;
+        if (rts != null) {
+            for (Thread t : rts) {
+                if (t != null) t.interrupt();
+            }
+        }
         if (sendThreadRef != null) sendThreadRef.interrupt();
     }
 
@@ -825,7 +853,12 @@ public class UdpHolePuncher {
             tf.cancel(false);
             timeoutFuture = null;
         }
-        if (recvThreadRef != null) recvThreadRef.interrupt();
+        java.util.List<Thread> rts = recvThreadsRef;
+        if (rts != null) {
+            for (Thread t : rts) {
+                if (t != null) t.interrupt();
+            }
+        }
         if (sendThreadRef != null) sendThreadRef.interrupt();
         holeOpen.set(false);
         remoteReceived.set(false);
@@ -859,12 +892,16 @@ public class UdpHolePuncher {
     }
 
     public void waitForRecvThreadExit() {
-        Thread t = recvThreadRef;
-        if (t != null && t.isAlive()) {
-            try {
-                t.join(2000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        java.util.List<Thread> rts = recvThreadsRef;
+        if (rts != null) {
+            for (Thread t : rts) {
+                if (t != null && t.isAlive()) {
+                    try {
+                        t.join(2000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
             }
         }
         Thread s = sendThreadRef;
@@ -903,7 +940,12 @@ public class UdpHolePuncher {
         if (socket != null && !socket.isClosed() && !socketTransferred) {
             socket.close();
         }
-        if (recvThreadRef != null) recvThreadRef.interrupt();
+        java.util.List<Thread> rts = recvThreadsRef;
+        if (rts != null) {
+            for (Thread t : rts) {
+                if (t != null) t.interrupt();
+            }
+        }
         if (sendThreadRef != null) sendThreadRef.interrupt();
     }
 }
