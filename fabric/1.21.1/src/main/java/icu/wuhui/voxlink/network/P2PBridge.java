@@ -719,8 +719,10 @@ public class P2PBridge {
         } catch (IOException e) {
             if (running.get()) LOGGER.info("UDP->MC bridge closed: {}", e.getMessage());
         } finally {
-            //不关mcOut→不关mcSocket
+            //debounce 强制关mcSocket 防止bridgeMcToUdp阻塞read导致socket泄漏
             try { mcSocket.shutdownOutput(); } catch (IOException ignored) {}
+            try { mcSocket.close(); } catch (IOException ignored) {}
+            if (onClose != null) onClose.run();
         }
     }
 

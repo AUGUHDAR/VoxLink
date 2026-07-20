@@ -159,6 +159,16 @@ public class ReliableUdpTransport implements AutoCloseable {
                     break;
                 }
                 LOGGER.warn("[ReliableUdp] 接收错误: {}", e.getMessage());
+            } catch (Throwable t) {
+                //debounce 防RuntimeException静默杀死线程 sendBytes死等
+                LOGGER.error("[ReliableUdp] receiveLoop 异常死亡: {}", t.getMessage(), t);
+                running = false;
+                connected.set(false);
+                synchronized (recvLock) { recvLock.notifyAll(); }
+                synchronized (sendLock) { sendLock.notifyAll(); }
+                //debounce 异步触发close 不能在recvThread自身join self 否则死锁
+                try { scheduler.execute(this::close); } catch (Exception ignored) {}
+                break;
             }
         }
     }
@@ -216,13 +226,6 @@ public class ReliableUdpTransport implements AutoCloseable {
         byte[] payload = new byte[payloadLen];
         System.arraycopy(buf, HEADER_SIZE + PAYLOAD_LEN_SIZE, payload, 0, payloadLen);
         return payload;
-    }
-
-    private void deliverPayload(byte[] payload) {
-        synchronized (recvLock) {
-            inputStream.writeBuffer(payload);
-            recvLock.notifyAll();
-        }
     }
 
     private void handleFecXor(int groupId, byte[] buf, int packetLen) {
@@ -458,9 +461,15 @@ public class ReliableUdpTransport implements AutoCloseable {
             pos += chunkLen;
 
             synchronized (sendLock) {
+                int waitCount = 0;
                 while (running && connected.get() && seqDiff(nextSendSeq, oldestUnackedSeq) >= WINDOW_SIZE) {
                     try {
                         sendLock.wait(1000);
+                        waitCount++;
+                        //debounce receiveLoop死亡或对端无响应 sendBytes不再死等
+                        if (waitCount >= MAX_SILENT_RETRANSMIT_CYCLES) {
+                            throw new IOException("transport stuck: " + waitCount + "s no progress");
+                        }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         throw new IOException("Transport closed or interrupted");
@@ -535,12 +544,18 @@ public class ReliableUdpTransport implements AutoCloseable {
             }
         } catch (Exception ignored) {
         }
-        try {
-            scheduler.awaitTermination(2, TimeUnit.SECONDS);
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
+        //debounce 若close在retransmitCheck中被调用 当前线程就是scheduler线程
+        //awaitTermination会等自己结束 卡2秒 sendLock也卡住 整体清理被拖延
+        boolean inSchedulerThread = Thread.currentThread().getName().equals("VoxLink-Retransmit");
+        if (!inSchedulerThread) {
+            try {
+                scheduler.awaitTermination(2, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
         }
-        P2PBridge.cancelPendingUdpTimeouts();
+        //debounce 删除越权调用 UdpHolePuncher.cancel/close已自行cancel自己的timeoutFuture
+        //transport清空全局列表会拖累其他正在打洞的puncher
     }
 
     private static int readInt32(byte[] buf, int offset) {

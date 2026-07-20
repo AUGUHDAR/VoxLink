@@ -27,10 +27,11 @@ public class VoxLinkMod implements ModInitializer {
             .map(c -> c.getMetadata().getVersion().getFriendlyString())
             .orElse("1.0.0");
 
-    private static VoxLinkConfig config;
-    private static SignalingClient signalingClient;
-    private static RoomManager roomManager;
-    private static TopologyClient topologyClient;
+    //debounce 多线程读（ShutdownHook/Client线程） 主线程写 加volatile保证可见性
+    private static volatile VoxLinkConfig config;
+    private static volatile SignalingClient signalingClient;
+    private static volatile RoomManager roomManager;
+    private static volatile TopologyClient topologyClient;
 
     private static final AtomicBoolean shutdownDone = new AtomicBoolean(false);
     private static final int SHUTDOWN_DELAY_MS = 200;
@@ -39,7 +40,13 @@ public class VoxLinkMod implements ModInitializer {
         if (!shutdownDone.compareAndSet(false, true)) return;
         if (roomManager != null) {
             if (roomManager.isInRoom()) {
-                roomManager.leaveRoomSync();
+                //debounce leaveRoomSync包2s硬超时 防止ShutdownHook永久阻塞JVM退出
+                java.util.concurrent.Future<?> leaveFuture = java.util.concurrent.CompletableFuture.runAsync(roomManager::leaveRoomSync);
+                try {
+                    leaveFuture.get(2, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    LOGGER.warn("leaveRoomSync超时 强制继续shutdown: {}", e.getMessage());
+                }
                 try {
                     Thread.sleep(SHUTDOWN_DELAY_MS);
                 } catch (InterruptedException e) {
@@ -64,9 +71,15 @@ public class VoxLinkMod implements ModInitializer {
     @Override
     public void onInitialize() {
         config = VoxLinkConfig.load();
-        signalingClient = new SignalingClient(config);
+        //debounce SignalingClient构造失败不崩整个mod 客户端联机功能退化但不影响游戏
+        try {
+            signalingClient = new SignalingClient(config);
+        } catch (Exception e) {
+            LOGGER.error("SignalingClient初始化失败 联机功能不可用: {}", e.getMessage());
+            signalingClient = null;
+        }
 
-        if (FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
+        if (signalingClient != null && FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
             topologyClient = new TopologyClient(signalingClient);
             roomManager = new RoomManager(signalingClient, topologyClient);
         }

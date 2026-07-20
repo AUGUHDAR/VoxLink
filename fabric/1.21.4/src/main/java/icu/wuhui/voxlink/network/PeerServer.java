@@ -27,6 +27,8 @@ public class PeerServer {
     private static final Gson GSON = new Gson();
     private static HttpServer httpServer;
     private static int port = -1;
+    //debounce 保存executor引用 stop时关闭 避免反复启停累积线程
+    private static java.util.concurrent.ExecutorService peerExecutor = null;
     private static volatile String cachedGameVersion = "";
     private static volatile int cachedProtocolVersion = 0;
     private static volatile List<Map<String, String>> cachedMods = Collections.emptyList();
@@ -49,7 +51,8 @@ public class PeerServer {
         if (httpServer != null) return port;
         try {
             httpServer = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-            httpServer.setExecutor(newVirtualThreadExecutor());
+            peerExecutor = newVirtualThreadExecutor();
+            httpServer.setExecutor(peerExecutor);
             httpServer.createContext("/info", exchange -> {
                 String query = exchange.getRequestURI().getQuery();
                 String token = null;
@@ -96,6 +99,19 @@ public class PeerServer {
             httpServer.stop(1);
             httpServer = null;
             port = -1;
+        }
+        //debounce 关闭executor 避免反复启停累积虚拟线程
+        if (peerExecutor != null) {
+            peerExecutor.shutdown();
+            try {
+                if (!peerExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) {
+                    peerExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                peerExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+            peerExecutor = null;
         }
     }
 

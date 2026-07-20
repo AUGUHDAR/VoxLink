@@ -6,6 +6,7 @@ import icu.wuhui.voxlink.ui.CreateRoomScreen;
 import icu.wuhui.voxlink.ui.VoxLinkScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-@Mixin(targets = "net.minecraft.client.gui.screens.PauseScreen")
+@Mixin(PauseScreen.class)
 public abstract class PauseMenuMixin extends Screen {
 
     private static final int BTN_OFFSET_X = 102;
@@ -35,7 +36,15 @@ public abstract class PauseMenuMixin extends Screen {
 
         if (currentRoom != null) {
             this.addRenderableWidget(
-                    Button.builder(Component.translatable("voxlink.pause.room_management"), button -> mc.setScreen(new VoxLinkScreen((Screen)(Object)this)))
+                    Button.builder(Component.translatable("voxlink.pause.room_management"), button -> {
+                        //debounce 回调内重新检查currentRoom 防止init与click之间状态变化
+                        RoomInfo live = rm.getCurrentRoom();
+                        if (live == null) {
+                            mc.setScreen(new VoxLinkScreen((Screen)(Object)this));
+                            return;
+                        }
+                        mc.setScreen(new VoxLinkScreen((Screen)(Object)this));
+                    })
                     .bounds(this.width / 2 - BTN_OFFSET_X, this.height / 4 + PAUSE_BTN_Y_OFFSET, BTN_FULL_W, BTN_H)
                     .build()
             );

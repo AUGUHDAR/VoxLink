@@ -28,9 +28,13 @@ public final class ViaCompat {
                 var protoManager = api.getClass().getMethod("getProtocolManager").invoke(api);
                 var supported = protoManager.getClass().getMethod("getSupportedProtocolVersions").invoke(protoManager);
                 if (supported instanceof java.util.List<?> list && !list.isEmpty()) {
-                    var last = list.get(list.size() - 1);
-                    var version = last.getClass().getMethod("getVersion").invoke(last);
-                    if (version instanceof Integer) return (Integer) version;
+                    //debounce List不保证按版本号排序 取最大值而非最后一个
+                    int maxVersion = -1;
+                    for (var v : list) {
+                        var version = v.getClass().getMethod("getVersion").invoke(v);
+                        if (version instanceof Integer vi && vi > maxVersion) maxVersion = vi;
+                    }
+                    if (maxVersion > 0) return maxVersion;
                 }
                 return 0;
             } catch (NoSuchMethodException e) {
@@ -69,7 +73,8 @@ public final class ViaCompat {
             }
         } catch (Throwable e) {
             LOGGER.debug("获取玩家协议版本失败: {}", e.getMessage());
-            return 0;
+            //debounce 反射失败返回-1 与"未加载"的0区分 调用方可针对性处理
+            return -1;
         }
     }
 

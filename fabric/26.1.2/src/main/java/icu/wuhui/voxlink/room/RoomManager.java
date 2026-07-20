@@ -86,6 +86,8 @@ public class RoomManager {
     public void shutdown() {
         connectionManager.setConnectionCycleActive(false);
         ConnectionHelper.resetConnecting();
+        //debounce 重置ConnectionState 防止dev热加载下次建房UI读到stale状态
+        ConnectionState.reset();
         connectionManager.shutdown();
         stopScheduledTasks();
         scheduler.shutdownNow();
@@ -127,13 +129,11 @@ public class RoomManager {
 
                 if (VoxLinkMod.getConfig().isAutoUPnP()) {
                     UPnPManager.UPnPResult upnpResult = UPnPManager.openPort(hostPort, name);
-                    // 打洞靠UDP
                     UPnPManager.UPnPResult upnpUdpResult = UPnPManager.openUdpPort(hostPort, name + "-UDP");
                     if (upnpResult.success()) {
                         natType = "open";
                         effectivePort = upnpResult.externalPort();
                     } else if (upnpUdpResult.success()) {
-                        // UDP也行
                         natType = "open";
                         effectivePort = upnpUdpResult.externalPort();
                     } else if (upnpResult.available() || upnpUdpResult.available()) {
@@ -149,7 +149,6 @@ public class RoomManager {
                     }
                 }
                 if ("unknown".equals(natType) || "strict".equals(natType)) {
-                    //修复: 用probeAsync获取完整ProbeResult并保存, sendHolepunchOffer兜底能用NAT探测时的映射地址
                     try {
                         StunProbe.ProbeResult probeResult = StunProbe.probeAsync(StunDetector.getStunServerGroups()).join();
                         if (probeResult != null && probeResult.natType != null) {
@@ -183,7 +182,6 @@ public class RoomManager {
                     }, NAT_UPDATE_DELAY_SEC, TimeUnit.SECONDS);
                 } else {
                     state.roomInfo.setNatType(natType);
-                    // hostPort是final改不了
 try {
                         signalingClient.updateRoom(state.roomInfo.getCode(), state.roomInfo.getToken(),
                             state.roomInfo.getName(), null, state.roomInfo.getMaxPlayers(),
@@ -299,11 +297,16 @@ try {
                 VoxLinkMod.LOGGER.warn("主机桥启动异常: {}", e.getMessage());
             }
 
-            //异步启动陶瓦 host, 获取陶瓦房间号
             if (TerracottaManager.isBinaryReady()) {
                 String tpName = Minecraft.getInstance().getUser().getName();
                 TerracottaManager.createRoom(tpName)
                     .thenAccept(tc -> {
+                        //debounce 房间已离开 关闭后台Terracotta进程避免泄漏
+                        if (currentRoom.get() != state) {
+                            VoxLinkMod.LOGGER.info("Terracotta房间已离开,关闭后台进程");
+                            TerracottaManager.shutdown();
+                            return;
+                        }
                         roomInfo.setTerracottaCode(tc);
                         VoxLinkMod.LOGGER.info("陶瓦房间号: {}", tc);
                         Minecraft.getInstance().execute(() -> {
@@ -325,7 +328,6 @@ try {
                     });
             }
 
-            // 合并检测IPv4和IPv6，完成后统一提示一行
             java.util.concurrent.atomic.AtomicReference<Boolean> ipv4Result = new java.util.concurrent.atomic.AtomicReference<>(null);
             java.util.concurrent.atomic.AtomicReference<Boolean> ipv6Result = new java.util.concurrent.atomic.AtomicReference<>(null);
             int checkCount = 0;
@@ -386,27 +388,25 @@ try {
     private void cleanupCreateRoomResources(int hostPort) {
         RoomState st = currentRoom.get();
         boolean wasPending = (st == PENDING);
-        
-        // 清状态
+
 if (wasPending) {
             currentRoom.compareAndSet(PENDING, null);
         } else if (st != null) {
             currentRoom.compareAndSet(st, null);
         }
-        
+
         stopScheduledTasks();
         P2PBridge.disconnect();
-        
+
         if (VoxLinkMod.getConfig().isAutoUPnP()) {
             UPnPManager.closePort(hostPort);
             if (GeyserCompat.isGeyserLoaded()) {
                 UPnPManager.closeUdpPort(GeyserCompat.getBedrockPort());
             }
         }
-        if (VoxLinkMod.getConfig().isVoiceChatCompat()) {
-        }
-        if (GeyserCompat.isGeyserLoaded()) {
-        }
+        try {
+            TerracottaManager.shutdown();
+        } catch (Exception e) { VoxLinkMod.LOGGER.debug("cleanup terracotta error: {}", e.getMessage()); }
     }
 
     public CompletableFuture<RoomInfo> updateRoom(String code, String token, String name, String password, int maxPlayers, boolean visible, String authType, String category) {
@@ -569,6 +569,8 @@ if (wasPending) {
         ConnectionState.transitionTo(ConnectionState.DISCONNECTED, "用户主动离开");
         connectionManager.setStunProbeResult(null);
         connectionManager.getStunProbeFutureRef().set(null);
+        //debounce 兜底重置双P2P状态 防止stale状态污染下次连接
+        connectionManager.resetDualRaceState();
         RoomState state = currentRoom.getAndSet(null);
         if (state == null || state == PENDING) {
             cancelPendingCreate();
@@ -621,12 +623,15 @@ if (wasPending) {
         ConnectionHelper.resetConnecting();
         connectionManager.setStunProbeResult(null);
         connectionManager.getStunProbeFutureRef().set(null);
+        //debounce 兜底重置双P2P状态 与leaveRoom对称
+        connectionManager.resetDualRaceState();
         RoomState state = currentRoom.getAndSet(null);
         if (state == null || state == PENDING) {
             cancelPendingCreate();
             return;
         }
-
+        //debounce 与leaveRoom对称 清理UPnP/Terracotta/P2PBridge/topology
+        cleanupRoomResources();
         try {
             performLeave(state);
         } catch (Exception e) {
@@ -678,10 +683,6 @@ if (wasPending) {
                         UPnPManager.closeUdpPort(state.roomInfo.getBedrockPort());
                     }
                 }
-                if (VoxLinkMod.getConfig().isVoiceChatCompat()) {
-                }
-                if (state.roomInfo.getBedrockPort() > 0) {
-                }
             }
 
             P2PBridge.disconnect();
@@ -716,7 +717,13 @@ if (wasPending) {
     public RoomInfo setupTerracottaGuestRoom(String roomCode) {
         RoomInfo roomInfo = new RoomInfo(roomCode, "Terracotta", false, 20, "", false, 0, "unknown");
         RoomState state = new RoomState(roomInfo);
-        currentRoom.set(state);
+        //debounce 用getAndSet而不是set 若旧VoxLink主机状态存在则清理其UPnP/socket资源
+        RoomState old = currentRoom.getAndSet(state);
+        if (old != null && old != PENDING && old.roomInfo.isHost()) {
+            try { cleanupRoomResources(); } catch (Exception e) {
+                VoxLinkMod.LOGGER.debug("Terracotta接管清理旧资源失败: {}", e.getMessage());
+            }
+        }
         intentionalLeave = false;
         roomLostHandled.set(true);
         return roomInfo;
@@ -739,17 +746,14 @@ if (wasPending) {
         connectionManager.stopAllConnectionWork();
     }
 
-    // 审核状态跟踪: 避免重复通知
     private volatile String lastModerationStatus = "";
     private volatile String lastModeratedName = "";
 
     private synchronized void handleNameModerationUpdate(RoomState state, String status, String reason, String newName, boolean approved) {
         if (status == null || status.isEmpty()) return;
 
-        // 状态和名字都没变 → 跳过
         if (status.equals(lastModerationStatus) && newName != null && newName.equals(lastModeratedName)) return;
 
-        // rejected/unavailable 只通知一次, 不因名字不同重复
         if (status.equals(lastModerationStatus) && !"approved".equals(status)) return;
 
         lastModerationStatus = status;
@@ -809,7 +813,6 @@ if (wasPending) {
         ConnectionHelper.resetConnecting();
         roomLostReason = reason;
         stopScheduledTasks();
-        // 重置状态机到IDLE，避免卡在CONNECTED导致下次加入时非法转换
         ConnectionState.reset();
         final RoomState captured = currentRoom.get();
         try {
@@ -846,10 +849,6 @@ if (wasPending) {
                     if (st.roomInfo.getBedrockPort() > 0) {
                         UPnPManager.closeUdpPort(st.roomInfo.getBedrockPort());
                     }
-                }
-                if (VoxLinkMod.getConfig().isVoiceChatCompat()) {
-                }
-                if (st.roomInfo.getBedrockPort() > 0) {
                 }
             }
 
@@ -900,6 +899,12 @@ if (wasPending) {
             topologyClient.onRoomLeft();
             if (!intentionalLeave) {
                 notifyRoomLostActionBar(reason);
+                //debounce 兜底也调callback 防止玩家未察觉被踢下次建房报已在房间
+                if (roomLostCallback != null) {
+                    try { roomLostCallback.run(); } catch (Exception ex) {
+                        VoxLinkMod.LOGGER.debug("roomLostCallback异常(同步兜底): {}", ex.getMessage());
+                    }
+                }
             }
         }
     }
@@ -918,7 +923,6 @@ if (wasPending) {
             } else {
                 msg = Component.translatable("voxlink.room_lost.default");
             }
-            // 聊天栏提示，不用actionbar
             mc.player.sendSystemMessage(
                     Component.translatable("voxlink.chat.error_prefix").append(msg));
             mc.player.sendSystemMessage(
@@ -1057,7 +1061,6 @@ if (wasPending) {
                             } catch (Exception ignored) {}
                         }
 
-                        // 审核状态: 心跳回调中更新房间名和显示通知
                         if (response.data != null && response.data.has("nameModerationStatus")) {
                             try {
                                 String status = response.data.get("nameModerationStatus").getAsString();
@@ -1086,7 +1089,6 @@ if (wasPending) {
         signalPollTimestamp.set(System.currentTimeMillis() - 10000);
         RoomState state = currentRoom.get();
         if (state != null && !state.roomInfo.isHost()) {
-            //joiner打洞期200ms加速信号交换
             currentSignalPollInterval = INITIAL_SIGNAL_POLL_MS;
         } else {
             currentSignalPollInterval = VoxLinkMod.getConfig().getSignalPollInterval();
@@ -1095,7 +1097,6 @@ if (wasPending) {
     }
 
     private void scheduleSignalPoll() {
-        // 首次立即执行, 不干等一个间隔
         scheduler.execute(this::doSignalPoll);
         signalPollFuture = scheduler.scheduleAtFixedRate(this::doSignalPoll,
                 currentSignalPollInterval, currentSignalPollInterval, TimeUnit.MILLISECONDS);
@@ -1264,8 +1265,6 @@ if (wasPending) {
         }
     }
 
-    // Connection delegation - all connection/punch logic moved to ConnectionManager
-
     public ConnectionManager getConnectionManager() {
         return connectionManager;
     }
@@ -1278,7 +1277,6 @@ if (wasPending) {
         VoxLinkMod.LOGGER.info("对端已连接: {}", from);
         RoomState st = currentRoom.get();
         if (st != null && st != PENDING && st.roomInfo.isHost()) {
-            boolean guestOp = st.roomInfo.isGuestOp();
             scheduler.schedule(() -> {
                 try {
                     Minecraft mc = Minecraft.getInstance();
@@ -1288,22 +1286,24 @@ if (wasPending) {
                             var server = mc.getSingleplayerServer();
                             if (server == null) return;
                             String hostName = mc.getUser().getName();
+                            //debounce 延迟任务内重读guestOp 防止房主2s内切换设置导致执行错误命令
+                            boolean currentGuestOp = st.roomInfo.isGuestOp();
                             for (var player : server.getPlayerList().getPlayers()) {
                                 String name = player.getName().getString();
                                 if (name.equals(hostName)) continue;
-                                String cmd = guestOp ? "op " + name : "deop " + name;
+                                String cmd = currentGuestOp ? "op " + name : "deop " + name;
                                 server.getCommands().performPrefixedCommand(
                                     server.createCommandSourceStack(), cmd);
-                                VoxLinkMod.LOGGER.info("[RoomManager] {}访客: {}", guestOp ? "自动OP" : "自动DEOP", name);
+                                VoxLinkMod.LOGGER.info("[RoomManager] {}访客: {}", currentGuestOp ? "自动OP" : "自动DEOP", name);
                             }
                         } catch (Exception e) {
                             VoxLinkMod.LOGGER.warn("[RoomManager] 访客OP处理失败: {}", e.getMessage());
                         }
                     });
                 } catch (Exception e) {
-                    VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected异常: {}", e.getMessage());
-                }
-            }, NAT_UPDATE_DELAY_SEC, TimeUnit.SECONDS);
+                        VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected异常: {}", e.getMessage());
+                    }
+                }, NAT_UPDATE_DELAY_SEC, TimeUnit.SECONDS);
         }
     }
 
@@ -1345,7 +1345,6 @@ if (wasPending) {
         }
     }
 
-    // 合并提示: IPv4/IPv6不通，点击[IPv4]/[IPv6]复制IP
     private void warnPortBlockedCombined(Boolean ipv4Ok, Boolean ipv6Ok, String ipv4, String ipv6) {
         boolean v4Blocked = ipv4Ok != null && !ipv4Ok;
         boolean v6Blocked = ipv6Ok != null && !ipv6Ok;

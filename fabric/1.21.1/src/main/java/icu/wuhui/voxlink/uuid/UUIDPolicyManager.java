@@ -56,47 +56,53 @@ public class UUIDPolicyManager {
         if ("online".equals(policy)) {
             UUID cached = uuidCache.get(playerName);
             if (cached != null) return cached;
-            fetchOfficialUUIDAsync(playerName);
-            return null;
+            //debounce 同步阻塞+3s超时 保证首次拿到UUID避免后续切换不稳定
+            return fetchOfficialUUIDSync(playerName);
         }
 
         return null;
     }
 
-    private static void fetchOfficialUUIDAsync(String playerName) {
+    //debounce 上次fetch时间 60s内同一玩家不重复请求Mojang 防止速率限制
+    private static final Map<String, Long> lastFetchTime = new ConcurrentHashMap<>();
+    private static final long FETCH_COOLDOWN_MS = 60000;
+
+    private static UUID fetchOfficialUUIDSync(String playerName) {
+        long now = System.currentTimeMillis();
+        Long last = lastFetchTime.get(playerName);
+        if (last != null && now - last < FETCH_COOLDOWN_MS) {
+            //debounce 冷却期内 用缓存（可能为null）
+            return uuidCache.get(playerName);
+        }
+        lastFetchTime.put(playerName, now);
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://api.mojang.com/users/profiles/minecraft/" + java.net.URLEncoder.encode(playerName, StandardCharsets.UTF_8)))
                     .timeout(HTTP_REQUEST_TIMEOUT)
                     .GET()
                     .build();
-
-            HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    .thenAccept(response -> {
-                        if (response.statusCode() == 200) {
-                            try {
-                                Type type = new TypeToken<Map<String, String>>() {}.getType();
-                                Map<String, String> data = GSON.fromJson(response.body(), type);
-                                String id = data.get("id");
-                                if (id != null && id.length() == HEX_UUID_LENGTH) {
-                                    String formatted = id.substring(0, 8) + "-" + id.substring(8, 12) + "-" +
-                                            id.substring(12, 16) + "-" + id.substring(16, 20) + "-" + id.substring(20);
-                                    UUID uuid = UUID.fromString(formatted);
-                                    uuidCache.put(playerName, uuid);
-                                    LOGGER.debug("缓存了{}的官方UUID", playerName);
-                                }
-                            } catch (Exception e) {
-                                LOGGER.debug("Mojang响应解析失败({}): {}", playerName, e.getMessage());
-                            }
-                        }
-                    })
-                    .exceptionally(e -> {
-                        LOGGER.debug("获取{}的官方UUID失败: {}", playerName, e.getMessage());
-                        return null;
-                    });
+            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                try {
+                    Type type = new TypeToken<Map<String, String>>() {}.getType();
+                    Map<String, String> data = GSON.fromJson(response.body(), type);
+                    String id = data.get("id");
+                    if (id != null && id.length() == HEX_UUID_LENGTH) {
+                        String formatted = id.substring(0, 8) + "-" + id.substring(8, 12) + "-" +
+                                id.substring(12, 16) + "-" + id.substring(16, 20) + "-" + id.substring(20);
+                        UUID uuid = UUID.fromString(formatted);
+                        uuidCache.put(playerName, uuid);
+                        LOGGER.debug("缓存了{}的官方UUID", playerName);
+                        return uuid;
+                    }
+                } catch (Exception e) {
+                    LOGGER.debug("Mojang响应解析失败({}): {}", playerName, e.getMessage());
+                }
+            }
         } catch (Exception e) {
-            LOGGER.debug("启动UUID查询失败 {}: {}", playerName, e.getMessage());
+            LOGGER.debug("获取{}的官方UUID失败: {}", playerName, e.getMessage());
         }
+        return null;
     }
 
     public static void setPolicy(String playerName, String policy) {

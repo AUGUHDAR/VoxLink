@@ -2,6 +2,7 @@ package icu.wuhui.voxlink.room;
 
 import net.minecraft.network.chat.Component;
 
+import java.net.InetSocketAddress;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class RoomInfo {
@@ -15,8 +16,8 @@ public class RoomInfo {
     private volatile String natType;
     private volatile String hostIp;
     private volatile String hostIpv6;
-    private volatile String hostMappedIp;
-    private volatile int hostMappedPort;
+    //debounce 合并为不可变快照 防止ip/port分裂读取导致打洞包发往错误目标
+    private volatile InetSocketAddress hostMappedAddress = null;
     private volatile boolean hostSymmetric;
     private volatile boolean hostEasySym;
     private volatile int hostMappedPortDelta = 0;
@@ -32,6 +33,8 @@ public class RoomInfo {
     private volatile int peerPort;
     private volatile String clientType = "mod";
     private volatile Component connectionMode = Component.empty();
+    //debounce 显式标记当前是否走中继 避免UI层字符串匹配翻译文本
+    private volatile boolean usingRelay = false;
     private volatile boolean connectionFailed = false;
     private volatile int localBridgePort = 0;
     private volatile int hostConnectPort = 0;
@@ -116,12 +119,20 @@ public class RoomInfo {
     public void setHostIp(String hostIp) { this.hostIp = hostIp; }
     public String getHostIpv6() { return hostIpv6; }
     public void setHostIpv6(String hostIpv6) { this.hostIpv6 = hostIpv6; }
-    public String getHostMappedIp() { synchronized (this) { return hostMappedIp; } }
-    public int getHostMappedPort() { synchronized (this) { return hostMappedPort; } }
+    public String getHostMappedIp() {
+        InetSocketAddress a = hostMappedAddress;
+        return a != null ? a.getHostString() : null;
+    }
+    public int getHostMappedPort() {
+        InetSocketAddress a = hostMappedAddress;
+        return a != null ? a.getPort() : 0;
+    }
+    public InetSocketAddress getHostMappedAddress() { return hostMappedAddress; }
     public void setHostMappedAddress(String hostMappedIp, int hostMappedPort) {
-        synchronized (this) {
-            this.hostMappedIp = hostMappedIp;
-            this.hostMappedPort = hostMappedPort;
+        if (hostMappedIp == null || hostMappedIp.isEmpty()) {
+            this.hostMappedAddress = null;
+        } else {
+            this.hostMappedAddress = new InetSocketAddress(hostMappedIp, hostMappedPort);
         }
     }
     public boolean isHostSymmetric() { return hostSymmetric; }
@@ -157,11 +168,15 @@ public class RoomInfo {
     public Component getConnectionMode() { return connectionMode; }
     public void setConnectionMode(Component connectionMode) {
         this.connectionMode = connectionMode;
+        this.usingRelay = false;
     }
     public void setConnectionMode(Component connectionMode, boolean failed) {
         this.connectionMode = connectionMode;
         this.connectionFailed = failed;
+        this.usingRelay = false;
     }
+    public boolean isUsingRelay() { return usingRelay; }
+    public void setUsingRelay(boolean usingRelay) { this.usingRelay = usingRelay; }
     public int getLocalBridgePort() { return localBridgePort; }
     public void setLocalBridgePort(int localBridgePort) { this.localBridgePort = localBridgePort; }
     public int getHostConnectPort() { return hostConnectPort; }
