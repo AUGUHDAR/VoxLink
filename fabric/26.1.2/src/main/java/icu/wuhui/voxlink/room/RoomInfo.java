@@ -45,7 +45,8 @@ public class RoomInfo {
     private volatile boolean sameCgnat = false;
     private volatile boolean guestOp = false;
     private volatile String gameType = "survival";
-    private volatile boolean allowCheats = false;
+    //debounce 房主OP=allowCheats publishServer时传参 控制房主是否有OP
+    private volatile boolean hostOp = false;
     private volatile String hostLocalIp = null;
     private volatile String joinerLocalIp = null;
     private volatile String myMappedIp = null;
@@ -54,6 +55,9 @@ public class RoomInfo {
 
     private final java.util.concurrent.ConcurrentHashMap<String, PeerInfo> peerMap = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile boolean connectionAttemptFailed = false;
+    //debounce host能力快照(joiner视角) 老版本host无声明则legacy零能力 走纯直连
+    private volatile int hostProtocolVersion = 0;
+    private volatile java.util.Set<String> hostCapabilities = java.util.Collections.emptySet();
 
     public static class PeerInfo {
         public final String clientId;
@@ -61,6 +65,9 @@ public class RoomInfo {
         public volatile boolean relayEnabled = true;
         public volatile String mappedIp;
         public volatile int mappedPort;
+        //debounce 协议版本协商 0=老版本无能力声明 7=1.0.7+支持relay/ice_restart/continuous_retry
+        public volatile int protocolVersion = 0;
+        public volatile java.util.Set<String> capabilities = java.util.Collections.emptySet();
         public PeerInfo(String clientId) { this.clientId = clientId; }
     }
 
@@ -70,12 +77,34 @@ public class RoomInfo {
         if (mappedIp != null) info.mappedIp = mappedIp;
         if (mappedPort > 0) info.mappedPort = mappedPort;
     }
+
+    //debounce 协议协商重载: host学习新joiner能力时调用 不覆盖已存在的字段
+    public void addOrUpdatePeer(String clientId, String natType, String mappedIp, int mappedPort,
+                                 int protocolVersion, java.util.Set<String> capabilities) {
+        PeerInfo info = peerMap.computeIfAbsent(clientId, id -> new PeerInfo(id));
+        if (natType != null) info.natType = natType;
+        if (mappedIp != null) info.mappedIp = mappedIp;
+        if (mappedPort > 0) info.mappedPort = mappedPort;
+        if (protocolVersion > 0) info.protocolVersion = protocolVersion;
+        if (capabilities != null && !capabilities.isEmpty()) info.capabilities = capabilities;
+    }
+
     public PeerInfo getPeer(String clientId) { return peerMap.get(clientId); }
     public void removePeer(String clientId) { peerMap.remove(clientId); }
     public java.util.Collection<PeerInfo> getPeers() { return peerMap.values(); }
     public int getPeerCount() { return peerMap.size(); }
     public boolean isConnectionAttemptFailed() { return connectionAttemptFailed; }
     public void setConnectionAttemptFailed(boolean v) { this.connectionAttemptFailed = v; }
+
+    //debounce host能力存取(joiner视角) joinRoom响应中解析后设置 老版本host视为legacy零能力
+    public int getHostProtocolVersion() { return hostProtocolVersion; }
+    public java.util.Set<String> getHostCapabilities() { return hostCapabilities; }
+    public void setHostCapabilities(int protocolVersion, java.util.Set<String> capabilities) {
+        this.hostProtocolVersion = protocolVersion;
+        this.hostCapabilities = capabilities != null ? capabilities : java.util.Collections.emptySet();
+    }
+    public boolean isHostLegacy() { return hostProtocolVersion == 0 || hostCapabilities.isEmpty(); }
+    public boolean hostSupportsRelay() { return hostCapabilities.contains(icu.wuhui.voxlink.network.ProtocolNegotiator.CAP_RELAY); }
 
     public enum PortStatus {
         UNKNOWN(Component.translatable("voxlink.port_status.unknown")),
@@ -204,8 +233,8 @@ public class RoomInfo {
     public void setGuestOp(boolean guestOp) { this.guestOp = guestOp; }
     public String getGameType() { return gameType; }
     public void setGameType(String gameType) { this.gameType = gameType; }
-    public boolean isAllowCheats() { return allowCheats; }
-    public void setAllowCheats(boolean allowCheats) { this.allowCheats = allowCheats; }
+    public boolean isHostOp() { return hostOp; }
+    public void setHostOp(boolean hostOp) { this.hostOp = hostOp; }
     public String getHostLocalIp() { return hostLocalIp; }
     public void setHostLocalIp(String hostLocalIp) { this.hostLocalIp = hostLocalIp; }
     public String getJoinerLocalIp() { return joinerLocalIp; }

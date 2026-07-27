@@ -105,7 +105,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             "survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"
     );
 
-    private static final String GAME_VERSION = "26.1.1";
+    private static final String GAME_VERSION = icu.wuhui.voxlink.VoxLinkConstants.GAME_VERSION;
 
     protected enum SortMode {
         PLAYERS_DESC(Component.translatable("voxlink.sort.players_desc")), PLAYERS_ASC(Component.translatable("voxlink.sort.players_asc")),
@@ -411,6 +411,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                 .filter(r -> !r.hasPassword)
                 .filter(r -> selectedCategory.equals("all") || r.category.equals(selectedCategory))
                 .filter(r -> query.isEmpty() || r.name.toLowerCase().contains(query) || r.code.toLowerCase().contains(query))
+                .filter(r -> sortMode != SortMode.VERSION_SAME || GAME_VERSION.equals(r.gameVersion))
                 .sorted(getComparator(myProtocol))
                 .toList();
         scrollOffset = 0;

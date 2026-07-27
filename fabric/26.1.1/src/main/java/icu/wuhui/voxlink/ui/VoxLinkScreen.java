@@ -1,6 +1,8 @@
 package icu.wuhui.voxlink.ui;
 
 import icu.wuhui.voxlink.VoxLinkMod;
+import icu.wuhui.voxlink.network.PunchProfile;
+import icu.wuhui.voxlink.room.ConnectionState;
 import icu.wuhui.voxlink.room.RoomInfo;
 import icu.wuhui.voxlink.terracotta.TerracottaBinary;
 import icu.wuhui.voxlink.terracotta.TerracottaManager;
@@ -120,8 +122,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
         int configY = relayY - BTN_H - GAP - hintSpace;
 
         boolean platformSupported = TerracottaBinary.isPlatformSupported();
-        //安卓不下载 .so (依赖启动器), 桌面端未就绪时显示下载按钮
-        boolean showDownload = platformSupported && !TerracottaBinary.isAndroid() && !TerracottaManager.isBinaryReady();
+        boolean showDownload = platformSupported && !TerracottaManager.isBinaryReady();
         boolean isDownloading = TerracottaManager.isDownloading();
         int downloadY = configY - BTN_H - GAP;
 
@@ -331,6 +332,20 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                 }
                 if (connMode != null && !connMode.getString().isEmpty()) {
                     drawCenteredClipped(graphics, connMode.getString(), centerX, modeY, COLOR_GRAY, maxWidth);
+                    //debounce 阶段六: 可观测性 连接详情行 显示状态+持续时间+档位+NAT 帮助玩家了解连接进度
+                    ConnectionState cs = ConnectionState.getCurrent();
+                    if (cs != ConnectionState.CONNECTED && cs != ConnectionState.IDLE && cs != ConnectionState.FAILED) {
+                        StringBuilder detail = new StringBuilder();
+                        detail.append(cs.displayName).append(" ").append(ConnectionState.getStateDurationMs() / 1000).append("s");
+                        if (PunchProfile.isAggressive()) {
+                            detail.append(" | AGGRESSIVE");
+                        }
+                        String natType = currentRoom.getNatType();
+                        if (natType != null && (natType.contains("symmetric") || natType.contains("sym"))) {
+                            detail.append(" | ").append(natType);
+                        }
+                        drawCenteredClipped(graphics, detail.toString(), centerX, modeY + 11, COLOR_MUTED, maxWidth);
+                    }
                 }
             }
         } else {
@@ -356,17 +371,6 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             drawCenteredClipped(graphics,
                     Component.translatable("voxlink.terracotta.unsupported_platform").getString(),
                     centerX, CODE_Y, COLOR_ORANGE, maxWidth);
-        } else if (TerracottaBinary.isAndroid()) {
-            //安卓: 检测启动器集成状态
-            if (TerracottaManager.isBinaryReady()) {
-                drawCenteredClipped(graphics,
-                        Component.translatable("voxlink.terracotta.android_ready").getString(),
-                        centerX, CODE_Y, COLOR_SUCCESS, maxWidth);
-            } else {
-                drawCenteredClipped(graphics,
-                        Component.translatable("voxlink.terracotta.android_need_launcher").getString(),
-                        centerX, CODE_Y, COLOR_ORANGE, maxWidth);
-            }
         }
     }
 

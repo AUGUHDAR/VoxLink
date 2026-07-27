@@ -33,6 +33,8 @@ public class ReliableUdpTransport implements AutoCloseable {
     private static final byte TYPE_DISCONNECT = 0x07;
     private static final byte TYPE_KEEPALIVE = 0x08;
     private static final byte TYPE_FEC_XOR = 0x09;
+    //debounce 阶段三: ICE Restart信号 通知对端连接已断请重新打洞 老版本收到会忽略(unknown type)
+    private static final byte TYPE_RESTART = 0x0A;
     private static final int FEC_GROUP_SIZE = 4;
 
     private static final int HEADER_SIZE = 11;
@@ -58,6 +60,9 @@ public class ReliableUdpTransport implements AutoCloseable {
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile long lastRecvTime = System.currentTimeMillis();
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    //debounce 阶段三: ICE Restart回调 + 防重入标志 上层注册后传输层断开时触发重新打洞
+    private final AtomicBoolean iceRestartTriggered = new AtomicBoolean(false);
+    private volatile Runnable onIceRestartRequested;
 
     private volatile int nextSendSeq = 0;
     private volatile int oldestUnackedSeq = 0;
@@ -131,6 +136,34 @@ public class ReliableUdpTransport implements AutoCloseable {
         return connected.get() && running;
     }
 
+    //debounce 阶段三: 上层注册回调 传输层断开时触发ICE Restart(重新STUN+打洞)
+    public void setOnIceRestartRequested(Runnable r) {
+        this.onIceRestartRequested = r;
+    }
+
+    //debounce 阶段三: 触发ICE Restart回调 原子去重避免重复触发
+    private void triggerIceRestart() {
+        if (!iceRestartTriggered.compareAndSet(false, true)) return;
+        Runnable r = onIceRestartRequested;
+        if (r != null) {
+            try { r.run(); } catch (Exception e) {
+                LOGGER.warn("[ReliableUdp] ICE Restart回调异常: {}", e.getMessage());
+            }
+        }
+    }
+
+    //debounce 阶段三: 发送RESTART信号通知对端 老版本收到会忽略(走default case)
+    private void sendRestart() {
+        try {
+            byte[] data = new byte[HEADER_SIZE];
+            System.arraycopy(MAGIC, 0, data, 0, 2);
+            data[2] = TYPE_RESTART;
+            writeInt32(data, 3, 0);
+            writeInt32(data, 7, 0);
+            socket.send(new DatagramPacket(data, data.length, remoteAddress));
+        } catch (IOException ignored) {}
+    }
+
     private void receiveLoop() {
         byte[] buf = new byte[MAX_PAYLOAD + HEADER_SIZE + PAYLOAD_LEN_SIZE + EXTRA_HEADER_BYTES];
         DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -150,6 +183,12 @@ public class ReliableUdpTransport implements AutoCloseable {
                     case TYPE_DISCONNECT -> handleDisconnect();
                     case TYPE_KEEPALIVE -> lastRecvTime = System.currentTimeMillis();
                     case TYPE_FEC_XOR -> handleFecXor(readInt32(buf, 3), buf, packet.getLength());
+                    //debounce 阶段三: 收到对端RESTART信号 触发回调上层重新打洞
+                    case TYPE_RESTART -> {
+                        lastRecvTime = System.currentTimeMillis();
+                        LOGGER.info("[ReliableUdp] 收到对端RESTART信号, 触发ICE Restart");
+                        triggerIceRestart();
+                    }
                 }
             } catch (SocketTimeoutException e) {
                 // continue
@@ -418,6 +457,9 @@ public class ReliableUdpTransport implements AutoCloseable {
         if (!running) return;
         if (System.currentTimeMillis() - lastRecvTime > KEEPALIVE_TIMEOUT_S * 1000L) {
             LOGGER.warn("[ReliableUdp] {}秒没收到数据，连接死了", KEEPALIVE_TIMEOUT_S);
+            //debounce 阶段三: 连接死掉前通知对端重启 + 触发本端ICE Restart回调
+            sendRestart();
+            triggerIceRestart();
             close();
             return;
         }
@@ -425,6 +467,9 @@ public class ReliableUdpTransport implements AutoCloseable {
         if (!pendingAcks.isEmpty() && System.currentTimeMillis() - lastRecvTime > MAX_SILENT_RETRANSMIT_CYCLES * RETRANSMIT_TIMEOUT_MS) {
             LOGGER.warn("[ReliableUdp] {}ms没收到任何包，{}个包pending，对端大概挂了",
                     MAX_SILENT_RETRANSMIT_CYCLES * RETRANSMIT_TIMEOUT_MS, pendingAcks.size());
+            //debounce 阶段三: 同上 通知对端 + 触发回调
+            sendRestart();
+            triggerIceRestart();
             close();
             return;
         }
@@ -461,14 +506,23 @@ public class ReliableUdpTransport implements AutoCloseable {
             pos += chunkLen;
 
             synchronized (sendLock) {
-                int waitCount = 0;
+                long stuckStartMs = -1L;
+                int lastUnacked = oldestUnackedSeq;
                 while (running && connected.get() && seqDiff(nextSendSeq, oldestUnackedSeq) >= WINDOW_SIZE) {
                     try {
+                        if (stuckStartMs < 0L) {
+                            stuckStartMs = System.currentTimeMillis();
+                            lastUnacked = oldestUnackedSeq;
+                        } else if (oldestUnackedSeq != lastUnacked) {
+                            //窗口滑动重置计时
+                            stuckStartMs = System.currentTimeMillis();
+                            lastUnacked = oldestUnackedSeq;
+                        }
                         sendLock.wait(1000);
-                        waitCount++;
-                        //debounce receiveLoop死亡或对端无响应 sendBytes不再死等
-                        if (waitCount >= MAX_SILENT_RETRANSMIT_CYCLES) {
-                            throw new IOException("transport stuck: " + waitCount + "s no progress");
+                        long stuckMs = System.currentTimeMillis() - stuckStartMs;
+                        //debounce 真实时间判定 避免notify频繁唤醒误判
+                        if (stuckMs >= MAX_SILENT_RETRANSMIT_CYCLES * 1000L) {
+                            throw new IOException("transport stuck: " + (stuckMs / 1000L) + "s no progress");
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

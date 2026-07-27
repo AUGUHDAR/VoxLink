@@ -244,6 +244,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                             Component.translatable("voxlink.chat.room_settings_updated").withStyle(Style.EMPTY.withBold(true)),
                             false
                     );
+                    //debounce 不显示明文房间号
                     mc.player.displayClientMessage(
                             Component.translatable("voxlink.chat.room_code_label")
                                     .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()

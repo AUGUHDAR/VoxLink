@@ -8,15 +8,24 @@ public final class GeyserCompat {
     private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-geyser");
     private static final int DEFAULT_BEDROCK_PORT = 19132;
     private static volatile Integer bedrockPort = null;
+    //debounce isGeyserLoaded缓存 避免每次调用都走FabricLoader
+    private static volatile Boolean cachedLoaded = null;
 
     private GeyserCompat() {}
 
     public static boolean isGeyserLoaded() {
-        return FabricLoader.getInstance().isModLoaded("geyser-fabric")
+        Boolean cached = cachedLoaded;
+        if (cached != null) return cached;
+        boolean loaded = FabricLoader.getInstance().isModLoaded("geyser-fabric")
                 || FabricLoader.getInstance().isModLoaded("geyser");
+        cachedLoaded = loaded;
+        return loaded;
     }
 
     public static int getBedrockPort() {
+        //debounce 缓存命中直接返回 避免重复反射调用
+        Integer cached = bedrockPort;
+        if (cached != null) return cached;
         if (!isGeyserLoaded()) return -1;
         try {
             var geyserApiClass = Class.forName("org.geysermc.geyser.api.GeyserApi");
@@ -44,7 +53,8 @@ public final class GeyserCompat {
             bedrockPort = port > 0 ? port : DEFAULT_BEDROCK_PORT;
             return bedrockPort;
         } catch (Throwable e) {
-            LOGGER.warn("读Geyser基岩端口失败，用默认{}: {}", DEFAULT_BEDROCK_PORT, e.getMessage());
+            //debounce 反射失败打印堆栈 便于排查Geyser API变化
+            LOGGER.warn("读Geyser基岩端口失败，用默认{}: {}", DEFAULT_BEDROCK_PORT, e.toString(), e);
             return DEFAULT_BEDROCK_PORT;
         }
     }

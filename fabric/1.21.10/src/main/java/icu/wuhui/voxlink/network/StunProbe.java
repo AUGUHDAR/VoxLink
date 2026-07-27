@@ -372,8 +372,9 @@ public class StunProbe {
     private static final int DISCOVER_TIMEOUT_MS = 800;  //优化: 2s太长, race模式下800ms足够, 失败靠多STUN竞速兜底
     private static final int DUAL_STUN_TIMEOUT_MS = 800; //优化: 1.5s→800ms, 8并发竞速下800ms内必有响应
     private static final int STUN_DEFAULT_PORT = 3478;
-    private static final int EASY_SYM_PORT_DELTA_THRESHOLD = 15;
-    private static final int EASY_SYM_PORT_DELTA_FALLBACK = 100; //兜底100
+    //对齐 EasyTier stun.rs: max_port_diff<100 判 EasySym (国内运营商端口递增常20-50, 阈值15会误判HardSym)
+    private static final int EASY_SYM_PORT_DELTA_THRESHOLD = 100;
+    private static final int EASY_SYM_PORT_DELTA_FALLBACK = 200; //兜底200
     private static final int ATTR_CHANGE_REQUEST = 0x0003; //RFC5780
     private static final int CHANGE_IP_FLAG = 0x0004;
     private static final int CHANGE_PORT_FLAG = 0x0002;
@@ -796,11 +797,17 @@ public class StunProbe {
         // 修复1: 用同一socket发第3个STUN服务器, 避免新建socket致basePort基准失真
         // 旧逻辑新建extraSocket采样, 新socket本身触发NAT分配新端口, basePort来自旧socket, diff失真
         // 新逻辑: 同一socket(已发过first/second)再发third, 对称NAT会分配第3个端口, 比对差值判定方向
-        if (reachable.size() < 3) {
-            VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: 可达STUN不足3个({}), 跳过第三次采样", reachable.size());
+        // 对齐 EasyTier: 任何情况下都做 extra_bind_test; reachable<3 时复用第1个服务器再发一次
+        StunServerResult third;
+        if (reachable.size() >= 3) {
+            third = reachable.get(2);
+        } else if (reachable.size() >= 1) {
+            third = reachable.get(0);  // 复用第1个服务器, 同socket再发一次仍可触发NAT分配新端口
+            VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: 可达STUN仅{}, 复用{}:{}做第3次采样", reachable.size(), third.host, third.port);
+        } else {
+            VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: 无可用STUN, 跳过第三次采样");
             return null;
         }
-        StunServerResult third = reachable.get(2);
         try {
             socket.setSoTimeout(SYM_DETECT_TIMEOUT_MS);  // 短超时避免拖太久
             InetAddress thirdAddr = InetAddress.getByName(third.host);

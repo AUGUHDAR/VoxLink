@@ -25,12 +25,13 @@ public final class TerracottaClient {
         .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SEC))
         .build();
     //debounce HTTP专用线程 避免重试sleep阻塞调用方
-    private static final ExecutorService HTTP_EXECUTOR = Executors.newCachedThreadPool(r -> {
+    //debounce 固定4线程 防止并发HTTP请求过多导致线程爆炸
+    private static final ExecutorService HTTP_EXECUTOR = Executors.newFixedThreadPool(4, r -> {
         Thread t = new Thread(r, "terracotta-http");
         t.setDaemon(true);
         return t;
     });
-    //debounce 5xx退避重试 10/50/200ms 共3次 对齐HMCL retry(5)简化
+    //debounce 5xx退避重试 10/50/200ms 共3次
     private static final int HTTP_MAX_RETRIES = 3;
     private static final long[] HTTP_BACKOFF_MS = {10, 50, 200};
 
@@ -107,16 +108,43 @@ public final class TerracottaClient {
 
     //获取状态
     public static CompletableFuture<JsonObject> getState(int port) {
+        if (isJniMode(port)) return getStateJni();
         return get(port, "/state").thenApply(s -> JsonParser.parseString(s).getAsJsonObject());
+    }
+
+    //debounce JNI模式getState 直接调bridge
+    private static CompletableFuture<JsonObject> getStateJni() {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Class<?> bridge = Class.forName("icu.wuhui.voxlink.terracotta.Android.TerracottaAndroidBridge");
+                String json = (String) bridge.getMethod("getState").invoke(null);
+                return JsonParser.parseString(json).getAsJsonObject();
+            } catch (Throwable t) {
+                throw new RuntimeException("JNI getState失败: " + t.getMessage(), t);
+            }
+        }, HTTP_EXECUTOR);
     }
 
     //重置为等待状态
     public static CompletableFuture<Void> setIdle(int port) {
-        return get(port, "/state/idle").thenRun(() -> {});
+        if (isJniMode(port)) return setIdleJni();
+        return get(port, "/state/ide").thenRun(() -> {});
     }
 
-    //创建房间 (host scanning) 带节点列表参数 对齐HMCL
+    private static CompletableFuture<Void> setIdleJni() {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                Class<?> bridge = Class.forName("icu.wuhui.voxlink.terracotta.Android.TerracottaAndroidBridge");
+                bridge.getMethod("setWaiting").invoke(null);
+            } catch (Throwable t) {
+                throw new RuntimeException("JNI setWaiting失败: " + t.getMessage(), t);
+            }
+        }, HTTP_EXECUTOR);
+    }
+
+    //创建房间 (host scanning) 带节点列表参数
     public static CompletableFuture<Void> startHost(int port, String playerName, List<java.net.URI> publicNodes) {
+        if (isJniMode(port)) return startHostJni(playerName);
         StringBuilder path = new StringBuilder("/state/scanning");
         boolean first = true;
         if (playerName != null && !playerName.isEmpty()) {
@@ -133,13 +161,26 @@ public final class TerracottaClient {
         return get(port, path.toString()).thenRun(() -> {});
     }
 
+    //debounce JNI模式setScanning room传null让陶瓦生成新房间
+    private static CompletableFuture<Void> startHostJni(String playerName) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                Class<?> bridge = Class.forName("icu.wuhui.voxlink.terracotta.Android.TerracottaAndroidBridge");
+                bridge.getMethod("setScanning", String.class, String.class).invoke(null, null, playerName);
+            } catch (Throwable t) {
+                throw new RuntimeException("JNI setScanning失败: " + t.getMessage(), t);
+            }
+        }, HTTP_EXECUTOR);
+    }
+
     //debounce 兼容旧调用 不带节点列表
     public static CompletableFuture<Void> startHost(int port, String playerName) {
         return startHost(port, playerName, null);
     }
 
-    //加入房间 (guest) 带节点列表参数 对齐HMCL
+    //加入房间 (guest) 带节点列表参数
     public static CompletableFuture<Boolean> joinRoom(int port, String roomCode, String playerName, List<java.net.URI> publicNodes) {
+        if (isJniMode(port)) return joinRoomJni(roomCode, playerName);
         StringBuilder path = new StringBuilder("/state/guesting?room=");
         path.append(java.net.URLEncoder.encode(roomCode, java.nio.charset.StandardCharsets.UTF_8));
         if (playerName != null && !playerName.isEmpty()) {
@@ -154,6 +195,20 @@ public final class TerracottaClient {
         return get(port, path.toString()).thenApply(resp -> true);
     }
 
+    //debounce JNI模式setGuesting
+    private static CompletableFuture<Boolean> joinRoomJni(String roomCode, String playerName) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Class<?> bridge = Class.forName("icu.wuhui.voxlink.terracotta.Android.TerracottaAndroidBridge");
+                Boolean ok = (Boolean) bridge.getMethod("setGuesting", String.class, String.class)
+                        .invoke(null, roomCode, playerName);
+                return ok != null && ok;
+            } catch (Throwable t) {
+                throw new RuntimeException("JNI setGuesting失败: " + t.getMessage(), t);
+            }
+        }, HTTP_EXECUTOR);
+    }
+
     //debounce 兼容旧调用 不带节点列表
     public static CompletableFuture<Boolean> joinRoom(int port, String roomCode, String playerName) {
         return joinRoom(port, roomCode, playerName, null);
@@ -161,7 +216,13 @@ public final class TerracottaClient {
 
     //关闭 Terracotta
     public static CompletableFuture<Void> panic(int port) {
+        if (isJniMode(port)) return setIdleJni();
         return get(port, "/panic?peaceful=true").thenRun(() -> {});
+    }
+
+    //debounce JNI模式判断 端口=-1标识Android JNI
+    private static boolean isJniMode(int port) {
+        return port == -1;
     }
 
     //解析状态字符串

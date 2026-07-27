@@ -13,9 +13,9 @@ import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 
-import java.lang.ref.WeakReference;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -28,8 +28,11 @@ public final class ConnectionHelper {
     private static final java.util.concurrent.atomic.AtomicBoolean connecting = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     //debounce 记录发起startConnecting前的player引用 用于判断真正切换到新连接
-    private static volatile WeakReference<LocalPlayer> prevPlayerRef = null;
+    //改强引用 WeakReference会被GC回收导致误判 cur==prev 短路返回true
+    private static volatile LocalPlayer prevPlayerStrong = null;
     private static volatile long connectInitiatedAt = 0;
+    //debounce 30s超时任务改字段 clearConnectInitiated能取消 避免旧任务污染新连接
+    private static volatile ScheduledFuture<?> resetTask = null;
 
     private static final ScheduledExecutorService RESET_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "VoxLink-ConnReset");
@@ -58,10 +61,7 @@ public final class ConnectionHelper {
         LocalPlayer cur = mc.player;
         if (cur == null) return false;
         //如果发起前player非null 必须等player引用变化才算新连接
-        if (prevPlayerRef != null) {
-            LocalPlayer prev = prevPlayerRef.get();
-            if (prev != null && cur == prev) return false;
-        }
+        if (prevPlayerStrong != null && cur == prevPlayerStrong) return false;
         return true;
     }
 
@@ -74,10 +74,14 @@ public final class ConnectionHelper {
         return false;
     }
 
-    //debounce 连接已完成 进入世界后清除发起状态
+    //debounce 连接已完成 进入世界后清除发起状态 同时重置connecting避免CAS挡后续连接
     public static void clearConnectInitiated() {
         connectInitiatedAt = 0;
-        prevPlayerRef = null;
+        prevPlayerStrong = null;
+        connecting.set(false);
+        //debounce 取消挂起的resetTask 避免旧任务把新连接的connecting误置false
+        ScheduledFuture<?> t = resetTask;
+        if (t != null) { t.cancel(false); resetTask = null; }
     }
 
     public static void connectToServer(int localPort, RoomInfo roomInfo) {
@@ -88,19 +92,19 @@ public final class ConnectionHelper {
                     VoxLinkMod.LOGGER.warn("[ConnectionHelper] 已经在连接了，忽略重复调用");
                     return;
                 }
-                ScheduledFuture<?> resetTask = null;
                 try {
                     //记录发起前的player引用 用于后续真实连接判定
-                    prevPlayerRef = new WeakReference<>(mc.player);
-                    connectInitiatedAt = System.currentTimeMillis();
+                    prevPlayerStrong = mc.player;
+                    final long myStartAt = System.currentTimeMillis();
+                    connectInitiatedAt = myStartAt;
                     roomInfo.setLocalBridgePort(localPort);
                     String addr = ViaCompat.buildViaAddress("127.0.0.1", localPort, roomInfo.getServerProtocolVersion());
                     ServerData serverData = createServerData(roomInfo.getName(), addr);
                     invokeStartConnecting(mc.screen, mc, addr, serverData);
 
-                    //防卡住
+                    //防卡住 owner校验防旧任务污染新连接
                     resetTask = RESET_SCHEDULER.schedule(() -> {
-                        if (connecting.get()) {
+                        if (connecting.get() && connectInitiatedAt == myStartAt) {
                             VoxLinkMod.LOGGER.info("[ConnectionHelper] 30秒超时，自动重置connecting标志");
                             connecting.set(false);
                         }
@@ -112,7 +116,6 @@ public final class ConnectionHelper {
                     String mode = roomInfo.getConnectionMode().getString();
                     sendError(mc, Component.translatable("voxlink.chat.connection_failed_detail", mode == null || mode.isEmpty() ? Component.translatable("voxlink.connection.cannot_establish").getString() : mode).getString());
                     VoxLinkMod.getRoomManager().leaveRoom();
-                    if (resetTask != null) resetTask.cancel(false);
                 }
             } else {
                 connecting.set(false);
@@ -124,24 +127,14 @@ public final class ConnectionHelper {
         });
     }
 
-    //跨版本反射构造ServerData, 兼容1.20~26.x构造签名变化
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    //1.20/1.20.1构造为(String,String,boolean)无Type内部类
     private static ServerData createServerData(String name, String ip) throws Exception {
-        Class<?> typeClass = Class.forName("net.minecraft.client.multiplayer.ServerData$Type");
-        Object otherType = Enum.valueOf((Class<? extends Enum>) typeClass, "OTHER");
         Constructor<?>[] ctors = ServerData.class.getDeclaredConstructors();
         for (Constructor<?> c : ctors) {
             Class<?>[] p = c.getParameterTypes();
-            if (p.length >= 3 && p[0] == String.class && p[1] == String.class && typeClass.isAssignableFrom(p[2])) {
-                Object[] args = new Object[p.length];
-                args[0] = name; args[1] = ip; args[2] = otherType;
-                for (int i = 3; i < p.length; i++) {
-                    args[i] = p[i] == boolean.class ? false : null;
-                }
+            if (p.length == 3 && p[0] == String.class && p[1] == String.class && p[2] == boolean.class) {
                 c.setAccessible(true);
-                try {
-                    return (ServerData) c.newInstance(args);
-                } catch (Exception ignored) {}
+                return (ServerData) c.newInstance(name, ip, false);
             }
         }
         throw new RuntimeException("ServerData 构造函数未找到");
@@ -151,7 +144,8 @@ public final class ConnectionHelper {
     private static void invokeStartConnecting(Screen parent, Minecraft mc, String addr, ServerData serverData) throws Exception {
         ServerAddress serverAddress = ServerAddress.parseString(addr);
         for (Method m : ConnectScreen.class.getDeclaredMethods()) {
-            if (!"startConnecting".equals(m.getName())) continue;
+            //方法名生产环境为notch/intermediary 改用静态修饰+参数类型匹配
+            if (!Modifier.isStatic(m.getModifiers())) continue;
             Class<?>[] p = m.getParameterTypes();
             if (p.length < 4) continue;
             if (p[0] != Screen.class || p[1] != Minecraft.class) continue;
