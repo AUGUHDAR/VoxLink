@@ -28,7 +28,10 @@ public final class TerracottaBinary {
     private static final int META_TIMEOUT_SEC = 8;
     private static final String GITHUB_URL = "https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION;
     private static final String GITEE_URL = "https://gitee.com/burningtnt/Terracotta/releases/download/v" + VERSION;
+    // 国内镜像 cnb.cool / alist.8mi.tech 提升下载成功率
     private static final String[] MIRROR_BASES = {
+        "https://cnb.cool/HMCL-Terracotta/Terracotta/-/releases/download/v" + VERSION,
+        "https://alist.8mi.tech/d/mirror/HMCL-Terracotta/Auto/v" + VERSION,
         "https://ghproxy.net/https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION,
         "https://mirror.ghproxy.com/https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION,
     };
@@ -69,10 +72,18 @@ public final class TerracottaBinary {
         new PlatformInfo("macos", "aarch64", "terracotta-" + VERSION + "-macos-arm64-pkg.tar.gz",
             "14a6cfa98e841c33b552f2291b0637461f37813c0bb3d29c6b56a59cb5e6714a",
             "terracotta-" + VERSION + "-macos-arm64", false),
-        new PlatformInfo("android", "aarch64", null, null, null, true),
-        new PlatformInfo("android", "armv7", null, null, null, true),
-        new PlatformInfo("android", "x86", null, null, null, true),
-        new PlatformInfo("android", "x86_64", null, null, null, true),
+        new PlatformInfo("android", "aarch64", "terracotta-" + VERSION + "-android-arm64v8a.so",
+            "fc426710de5f53ae5b6350fdffe1012082992dac5b9d93ea5e86c0e56af5567a",
+            "terracotta-" + VERSION + "-android-arm64v8a.so", true),
+        new PlatformInfo("android", "armv7", "terracotta-" + VERSION + "-android-armv7.so",
+            "a777504e66bff55df4774d953598e33211a05b782fff4a5fd2a5dba254474239",
+            "terracotta-" + VERSION + "-android-armv7.so", true),
+        new PlatformInfo("android", "x86", "terracotta-" + VERSION + "-android-x86.so",
+            "45df60fe08e9d37ac1eab720eb494405162ff911b1b8d54ec3342c041e691722",
+            "terracotta-" + VERSION + "-android-x86.so", true),
+        new PlatformInfo("android", "x86_64", "terracotta-" + VERSION + "-android-x86_64.so",
+            "93f248637a966c8d3bb84d06ed027ad9ba7347615b3bab92e7d38b8764d023e4",
+            "terracotta-" + VERSION + "-android-x86_64.so", true),
     };
 
     private static volatile boolean downloadPaused = false;
@@ -143,10 +154,20 @@ public final class TerracottaBinary {
             String arch = System.getProperty("os.arch", "").toLowerCase();
 
             boolean isAndroid = false;
+            //debounce 多重检测Android: classpath + 系统属性 + 文件特征
             try {
                 Class.forName("android.os.Build");
                 isAndroid = true;
-            } catch (ClassNotFoundException ignored) {}
+            } catch (ClassNotFoundException ignored) {
+                String vendor = System.getProperty("java.vendor", "").toLowerCase();
+                String vmVendor = System.getProperty("java.vm.vendor", "").toLowerCase();
+                String specVendor = System.getProperty("java.specification.vendor", "").toLowerCase();
+                if (vendor.contains("android") || vmVendor.contains("android") || specVendor.contains("android")) {
+                    isAndroid = true;
+                } else if (Files.exists(Paths.get("/system/build.prop"))) {
+                    isAndroid = true;
+                }
+            }
 
             String osNorm;
             String archNorm;
@@ -180,9 +201,6 @@ public final class TerracottaBinary {
 
     public static boolean isReady() {
         if (CURRENT == null) return false;
-        if (CURRENT.android) {
-            return TerracottaAndroidBridge.isInitialized();
-        }
         try {
             Path binaryPath = CACHE_DIR.resolve(CURRENT.binaryName);
             if (!Files.exists(binaryPath)) return false;
@@ -198,6 +216,23 @@ public final class TerracottaBinary {
             return ok;
         } catch (Exception e) {
             LOGGER.warn("陶瓦校验异常, 当作未就绪: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    //debounce Android加载.so到进程 PC端空实现
+    public static boolean ensureLoaded() {
+        if (!isReady()) return false;
+        if (CURRENT == null || !CURRENT.android) return true;
+        try {
+            Class<?> bridge = Class.forName("icu.wuhui.voxlink.terracotta.Android.TerracottaAndroidBridge");
+            Boolean loaded = (Boolean) bridge.getMethod("isLibraryLoaded").invoke(null);
+            if (loaded != null && loaded) return true;
+            Path binaryPath = CACHE_DIR.resolve(CURRENT.binaryName);
+            bridge.getMethod("loadLibrary", String.class).invoke(null, binaryPath.toAbsolutePath().toString());
+            return true;
+        } catch (Throwable t) {
+            LOGGER.warn("陶瓦 .so 加载失败: {}", t.getMessage());
             return false;
         }
     }
@@ -218,11 +253,8 @@ public final class TerracottaBinary {
     private static final AtomicBoolean downloadingNow = new AtomicBoolean(false);
     public static CompletableFuture<Path> downloadAsync(Consumer<DownloadProgress> progressCallback) {
         CompletableFuture<Path> future = new CompletableFuture<>();
-        if (CURRENT == null || CURRENT.android) {
-            future.completeExceptionally(new IOException(
-                CURRENT != null && CURRENT.android
-                    ? "安卓依赖启动器集成陶瓦, 无需下载"
-                    : "当前平台不支持陶瓦"));
+        if (CURRENT == null) {
+            future.completeExceptionally(new IOException("当前平台不支持陶瓦"));
             return future;
         }
         if (!downloadingNow.compareAndSet(false, true)) {
@@ -237,6 +269,70 @@ public final class TerracottaBinary {
                     return;
                 }
                 Path binaryPath = CACHE_DIR.resolve(CURRENT.binaryName);
+                //debounce Android .so直接下载即用 PC走tar.gz解压
+                if (CURRENT.android) {
+                    Path archivePath = CACHE_DIR.resolve(CURRENT.filename + ".downloading");
+                    java.util.List<String> urls = raceMirrors(CURRENT.filename);
+                    LOGGER.info("[download] 镜像竞速排序: {}", urls);
+                    Exception lastError = null;
+                    for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                        if (Thread.currentThread().isInterrupted() || downloadCancelled) break;
+                        for (String url : urls) {
+                            if (Thread.currentThread().isInterrupted() || downloadCancelled) break;
+                            try {
+                                downloadOne(url, archivePath, progressCallback);
+                                if (downloadCancelled) {
+                                    Files.deleteIfExists(archivePath);
+                                    future.completeExceptionally(new IOException("下载已取消"));
+                                    return;
+                                }
+                                if (progressCallback != null) {
+                                    progressCallback.accept(new DownloadProgress(0, 0, 100, 0, false, false, null, "verifying"));
+                                }
+                                if (!verifySha256(archivePath, CURRENT.sha256)) {
+                                    throw new IOException("SHA256 校验失败");
+                                }
+                                Files.move(archivePath, binaryPath, StandardCopyOption.REPLACE_EXISTING);
+                                if (progressCallback != null) {
+                                    progressCallback.accept(new DownloadProgress(0, 0, 100, 0, true, false, null));
+                                }
+                                future.complete(binaryPath);
+                                return;
+                            } catch (Exception e) {
+                                if (e instanceof InterruptedException) {
+                                    Thread.currentThread().interrupt();
+                                    future.completeExceptionally(new IOException("下载被中断", e));
+                                    return;
+                                }
+                                if (downloadCancelled) {
+                                    try { Files.deleteIfExists(archivePath); } catch (IOException ignored) {}
+                                    future.completeExceptionally(new IOException("下载已取消"));
+                                    return;
+                                }
+                                lastError = e;
+                                LOGGER.warn("下载失败 (尝试 {}/{}): {} - {}", attempt + 1, MAX_RETRIES, url, e.getMessage());
+                            }
+                        }
+                        if (attempt < MAX_RETRIES - 1 && !downloadCancelled) {
+                            try { Thread.sleep(RETRY_DELAY_MS); } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                future.completeExceptionally(new IOException("下载被中断", ie));
+                                return;
+                            }
+                        }
+                    }
+                    if (downloadCancelled) {
+                        future.completeExceptionally(new IOException("下载已取消"));
+                        return;
+                    }
+                    if (progressCallback != null) {
+                        progressCallback.accept(new DownloadProgress(0, 0, -1, 0, false, true,
+                            lastError != null ? lastError.getMessage() : "未知错误"));
+                    }
+                    future.completeExceptionally(new IOException("陶瓦下载失败 (重试" + MAX_RETRIES + "次): "
+                        + (lastError != null ? lastError.getMessage() : "未知错误"), lastError));
+                    return;
+                }
                 Path archivePath = CACHE_DIR.resolve(CURRENT.filename + ".downloading");
 
                 //debounce 镜像竞速: 并发HEAD探测 GitHub/Gitee/ghproxy 谁先通用谁
@@ -672,7 +768,6 @@ public final class TerracottaBinary {
     //debounce 安装后自检 二进制存在+SHA256匹配+Unix可执行权限
     public static boolean verifyInstallation() {
         if (CURRENT == null) return false;
-        if (CURRENT.android) return TerracottaAndroidBridge.isInitialized();
         Path binaryPath = getBinaryPath();
         if (binaryPath == null || !Files.exists(binaryPath)) return false;
         if (CURRENT.sha256 == null) return false;
@@ -680,8 +775,8 @@ public final class TerracottaBinary {
             LOGGER.warn("陶瓦二进制SHA256校验失败");
             return false;
         }
-        //debounce Unix-like 系统检查可执行权限
-        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
+        //debounce Android走JNI加载.so不检查可执行权限 PC端Unix检查
+        if (!CURRENT.android && !System.getProperty("os.name", "").toLowerCase().contains("win")) {
             if (!Files.isExecutable(binaryPath)) {
                 LOGGER.warn("陶瓦二进制无可执行权限: {}", binaryPath);
                 return false;
@@ -692,11 +787,10 @@ public final class TerracottaBinary {
 
     public static Path getCacheDir() { return CACHE_DIR; }
     public static Path getBinaryPath() {
-        if (CURRENT == null || CURRENT.android || CURRENT.binaryName == null) return null;
+        if (CURRENT == null || CURRENT.binaryName == null) return null;
         return CACHE_DIR.resolve(CURRENT.binaryName);
     }
     public static boolean isPlatformSupported() { return CURRENT != null; }
-    public static boolean isAndroid() { return CURRENT != null && CURRENT.android; }
 
     private static Path getPendingFile() { return CACHE_DIR.resolve(".download_pending"); }
     public static boolean isDownloadPending() {

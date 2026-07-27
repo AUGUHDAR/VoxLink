@@ -20,6 +20,9 @@ public class SignalingClient {
     private static final Gson GSON = new Gson();
     private static final int DEFAULT_RETRY_AFTER_SECONDS = 2;
     private static final int LOG_BODY_MAX_LEN = 500;
+    //debounce 心跳专用短超时+1次重试 容忍瞬断不让用户立刻掉房间
+    private static final int HEARTBEAT_TIMEOUT_MS = 8000;
+    private static final int HEARTBEAT_RETRY_DELAY_SEC = 2;
 
     private static final String RPC_PATH = "/rpc.php";
 
@@ -136,6 +139,13 @@ public class SignalingClient {
         if (hostIpv6 != null && !hostIpv6.isEmpty()) {
             body.addProperty("hostIpv6", hostIpv6);
         }
+        //debounce 协议协商: host声明自己的能力 服务端存储并在joinRoom响应中返回给后续joiner
+        body.addProperty("clientProtocolVersion", icu.wuhui.voxlink.network.ProtocolNegotiator.PROTOCOL_VERSION_7);
+        com.google.gson.JsonArray capsArr = new com.google.gson.JsonArray();
+        for (String cap : icu.wuhui.voxlink.network.ProtocolNegotiator.CURRENT_CAPABILITIES) {
+            capsArr.add(cap);
+        }
+        body.add("clientCapabilities", capsArr);
         body.addProperty("action", "create_room");
     return postCreateRoom(buildPath("create_room"), body);
 }
@@ -180,6 +190,16 @@ public class SignalingClient {
         return postNoRetry(buildPath("update_room"), body);
     }
 
+    //debounce 单独上传陶瓦房间号 不覆盖其他字段 host拿到陶瓦号后调用
+    public CompletableFuture<ApiResponse> updateTerracottaCode(String code, String token, String terracottaCode) {
+        JsonObject body = new JsonObject();
+        body.addProperty("code", code != null ? code : "");
+        body.addProperty("token", token != null ? token : "");
+        body.addProperty("terracottaCode", terracottaCode != null ? terracottaCode : "");
+        body.addProperty("action", "update_room");
+        return postNoRetry(buildPath("update_room"), body);
+    }
+
     public CompletableFuture<ApiResponse> joinRoom(String code, String password) {
         JsonObject body = new JsonObject();
         body.addProperty("code", code != null ? code.toUpperCase() : "");
@@ -187,6 +207,13 @@ public class SignalingClient {
             body.addProperty("password", password);
         }
         body.addProperty("action", "join_room");
+        //debounce 协议版本协商: 声明本客户端能力 服务端透传给host 老版本客户端不发这些字段
+        body.addProperty("clientProtocolVersion", icu.wuhui.voxlink.network.ProtocolNegotiator.PROTOCOL_VERSION_7);
+        com.google.gson.JsonArray capsArr = new com.google.gson.JsonArray();
+        for (String cap : icu.wuhui.voxlink.network.ProtocolNegotiator.CURRENT_CAPABILITIES) {
+            capsArr.add(cap);
+        }
+        body.add("clientCapabilities", capsArr);
         return post(buildPath("join_room"), body);
     }
 
@@ -224,7 +251,25 @@ public class SignalingClient {
         body.addProperty("overlayPort", overlayPort);
         body.addProperty("currentInterval", VoxLinkMod.getConfig().getHeartbeatInterval());
         body.addProperty("action", "heartbeat");
-        return postNoRetry(buildPath("heartbeat"), body);
+        //debounce 心跳用8s短超时+1次重试 瞬断2s后重试 避免单次失败立刻计数
+        return postOnce(buildPath("heartbeat"), body, HEARTBEAT_TIMEOUT_MS).thenCompose(response -> {
+            if (response.success || !TRANSIENT_ERRORS.contains(response.error)) {
+                return CompletableFuture.completedFuture(response);
+            }
+            CompletableFuture<ApiResponse> retry = new CompletableFuture<>();
+            try {
+                scheduler.schedule(() -> {
+                    postOnce(buildPath("heartbeat"), body, HEARTBEAT_TIMEOUT_MS).whenComplete((r, ex) -> {
+                        if (ex != null) retry.completeExceptionally(ex);
+                        else retry.complete(r);
+                    });
+                }, HEARTBEAT_RETRY_DELAY_SEC, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) {
+                //debounce schedule异常退化返回原响应 避免retry永挂
+                retry.complete(response);
+            }
+            return retry;
+        });
     }
 
     public CompletableFuture<ApiResponse> sendSignal(String code, String token, boolean isHost, String type, JsonObject data) {
@@ -554,7 +599,8 @@ public class SignalingClient {
                 boolean success = json.has("success") && json.get("success").getAsBoolean();
                 String error = json.has("error") ? json.get("error").getAsString() : null;
                 String message = json.has("message") ? json.get("message").getAsString() : null;
-                JsonObject data = json.has("data") ? json.getAsJsonObject("data") : null;
+                //debounce data可能是空数组[]或非对象类型 此时按null处理避免ClassCastException
+                JsonObject data = (json.has("data") && json.get("data").isJsonObject()) ? json.getAsJsonObject("data") : null;
                 int position = json.has("position") ? json.get("position").getAsInt() : -1;
                 int retryAfter = json.has("retryAfter") ? json.get("retryAfter").getAsInt() : 0;
                 return new ApiResponse(success, error, message, data, position, retryAfter);

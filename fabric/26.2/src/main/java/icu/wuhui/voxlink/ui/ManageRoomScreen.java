@@ -239,18 +239,16 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                 roomInfo.setAuthType(authType.name());
 
                 if (mc.player != null) {
-                        String code = roomInfo.getCode();
-                        mc.player.sendSystemMessage(
-                                Component.translatable("voxlink.chat.room_settings_updated").withStyle(Style.EMPTY.withBold(true))
-                        );
-                        //debounce 不显示明文房间号
-                        mc.player.sendSystemMessage(
-                                Component.translatable("voxlink.chat.room_code_label")
-                                        .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
-                                                        + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
-                                                .withStyle(ChatCompat.styleWithCopy(code,
-                                                        Component.translatable("voxlink.chat.click_to_copy"))))
-                        );
+                    String code = roomInfo.getCode();
+                    mc.player.sendSystemMessage(
+                            Component.translatable("voxlink.chat.room_settings_updated").withStyle(Style.EMPTY.withBold(true)));
+                    //debounce 不显示明文房间号
+                    mc.player.sendSystemMessage(
+                            Component.translatable("voxlink.chat.room_code_label")
+                                    .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
+                                                    + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
+                                            .withStyle(ChatCompat.styleWithCopy(code,
+                                                    Component.translatable("voxlink.chat.click_to_copy")))));
                     String hostIp = roomInfo.getHostIp();
                     int hostPort = roomInfo.getHostPort();
                     String hostIpv6 = roomInfo.getHostIpv6();

@@ -20,6 +20,27 @@ loom {
     }
 }
 
+//debounce Android stub 仅PC编译用 不打包进jar
+sourceSets {
+    stubs {
+        java {
+            srcDir 'src/stubs/java'
+        }
+    }
+    main {
+        compileClasspath += sourceSets.stubs.output
+    }
+}
+
+//debounce stubs编译不打包进jar 只为main提供android.*符号
+compileStubsJava {
+    options.release = Integer.parseInt(project.release_bytecode)
+}
+compileJava.dependsOn compileStubsJava
+jar {
+    exclude 'android/**'
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     mappings loom.officialMojangMappings()

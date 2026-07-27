@@ -1,5 +1,6 @@
 package icu.wuhui.voxlink;
 
+import icu.wuhui.voxlink.command.LanCommandRegistry;
 import icu.wuhui.voxlink.config.VoxLinkConfig;
 import icu.wuhui.voxlink.network.P2PBridge;
 import icu.wuhui.voxlink.network.PeerServer;
@@ -53,19 +54,21 @@ public class VoxLinkMod implements ModInitializer {
                     Thread.currentThread().interrupt();
                 }
             }
-            roomManager.shutdown();
+            try { roomManager.shutdown(); } catch (Exception e) { LOGGER.warn("roomManager.shutdown异常: {}", e.getMessage()); }
         }
-        if (topologyClient != null) topologyClient.onRoomLeft();
-        if (signalingClient != null) {
-            signalingClient.shutdown();
-        }
-        P2PBridge.disconnect();
-        PeerServer.stop();
-        icu.wuhui.voxlink.network.StunProbe.shutdown();
-        icu.wuhui.voxlink.network.ConnectionFallback.shutdown();
-        icu.wuhui.voxlink.network.UdpHolePuncher.shutdown();
-        icu.wuhui.voxlink.network.TopologyClient.shutdown();
-        icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown();
+        try { if (topologyClient != null) topologyClient.onRoomLeft(); } catch (Exception e) { LOGGER.warn("topologyClient.onRoomLeft异常: {}", e.getMessage()); }
+        try {
+            if (signalingClient != null) {
+                signalingClient.shutdown();
+            }
+        } catch (Exception e) { LOGGER.warn("signalingClient.shutdown异常: {}", e.getMessage()); }
+        try { P2PBridge.disconnect(); } catch (Exception e) { LOGGER.warn("P2PBridge.disconnect异常: {}", e.getMessage()); }
+        try { PeerServer.stop(); } catch (Exception e) { LOGGER.warn("PeerServer.stop异常: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.StunProbe.shutdown(); } catch (Exception e) { LOGGER.warn("StunProbe.shutdown异常: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.ConnectionFallback.shutdown(); } catch (Exception e) { LOGGER.warn("ConnectionFallback.shutdown异常: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.UdpHolePuncher.shutdown(); } catch (Exception e) { LOGGER.warn("UdpHolePuncher.shutdown异常: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.TopologyClient.shutdown(); } catch (Exception e) { LOGGER.warn("TopologyClient.shutdown异常: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); } catch (Exception e) { LOGGER.warn("TerracottaManager.shutdown异常: {}", e.getMessage()); }
     }
 
     @Override
@@ -99,6 +102,8 @@ public class VoxLinkMod implements ModInitializer {
                         return 1;
                     }))
             );
+            //debounce 房主管理访客命令 LAN模式下host始终可用 不依赖MC的OP权限检查
+            LanCommandRegistry.register(dispatcher);
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
@@ -114,6 +119,9 @@ public class VoxLinkMod implements ModInitializer {
             if (roomManager != null && roomManager.isInRoom()) {
                 roomManager.leaveRoom();
             }
+            //debounce 兜底杀陶瓦 防止退出世界后残留
+            try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
+            catch (Exception e) { LOGGER.warn("退出世界时停止陶瓦失败: {}", e.getMessage()); }
         });
 
         Runtime.getRuntime().addShutdownHook(new Thread(VoxLinkMod::doShutdown, "VoxLink-ShutdownHook"));

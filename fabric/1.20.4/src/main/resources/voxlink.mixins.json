@@ -11,7 +11,8 @@
         "DirectConnectMixin"
     ],
     "mixins": [
-        "UUIDUtilMixin"
+        "UUIDUtilMixin",
+        "CommandNodeAccessor"
     ],
     "injectors": {
         "defaultRequire": 0

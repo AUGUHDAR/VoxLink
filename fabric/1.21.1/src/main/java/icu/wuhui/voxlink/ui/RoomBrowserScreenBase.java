@@ -410,6 +410,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                 .filter(r -> !r.hasPassword)
                 .filter(r -> selectedCategory.equals("all") || r.category.equals(selectedCategory))
                 .filter(r -> query.isEmpty() || r.name.toLowerCase().contains(query) || r.code.toLowerCase().contains(query))
+                .filter(r -> sortMode != SortMode.VERSION_SAME || GAME_VERSION.equals(r.gameVersion))
                 .sorted(getComparator(myProtocol))
                 .toList();
         scrollOffset = 0;

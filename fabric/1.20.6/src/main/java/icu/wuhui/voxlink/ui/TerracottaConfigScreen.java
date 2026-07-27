@@ -17,6 +17,7 @@ import java.nio.file.Path;
 public class TerracottaConfigScreen extends VoxLinkScreenBase {
     private final Screen parent;
     private Button redownloadBtn;
+    private Button deleteBinaryBtn;
     private Button pauseResumeBtn;
     private Button cancelBtn;
     private String statusMessage = "";
@@ -59,16 +60,23 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
                         });
         addRenderableWidget(updateCheckToggle);
 
-        CycleButton<Boolean> parallelToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isParallelP2P())
-                .create(centerX - BTN_W / 2, y + BTN_H + GAP, BTN_W, BTN_H,
-                        Component.translatable("voxlink.terracotta.parallel_p2p"),
-                        (btn, val) -> {
-                            VoxLinkMod.getConfig().setParallelP2P(val);
-                            VoxLinkMod.getConfig().save();
-                        });
+        boolean currentParallel = VoxLinkMod.getConfig().isParallelP2P();
+        Button parallelToggle = Button.builder(
+                Component.translatable("voxlink.terracotta.toggle",
+                        Component.translatable(currentParallel
+                                ? "voxlink.terracotta.on" : "voxlink.terracotta.off")),
+                button -> {
+                    boolean newVal = !VoxLinkMod.getConfig().isParallelP2P();
+                    VoxLinkMod.getConfig().setParallelP2P(newVal);
+                    VoxLinkMod.getConfig().save();
+                    button.setMessage(Component.translatable("voxlink.terracotta.toggle",
+                            Component.translatable(newVal
+                                    ? "voxlink.terracotta.on" : "voxlink.terracotta.off")));
+                })
+                .bounds(centerX - BTN_W / 2, y + BTN_H + GAP, BTN_W, BTN_H).build();
         addRenderableWidget(parallelToggle);
 
-        Button deleteBinaryBtn = Button.builder(
+        deleteBinaryBtn = Button.builder(
                 Component.translatable("voxlink.terracotta.delete_binary"),
                 button -> deleteBinary()
         ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 2, BTN_W, BTN_H).build();
@@ -183,6 +191,9 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
         if (!TerracottaManager.isDownloading() && redownloadBtn != null && !redownloadBtn.active) {
             redownloadBtn.active = true;
             redownloadBtn.setMessage(buildRedownloadLabel());
+            if (deleteBinaryBtn != null) {
+                deleteBinaryBtn.active = true;
+            }
             if (TerracottaManager.isBinaryReady() && !TerracottaManager.isDownloadFailed()) {
                 statusMessage = Component.translatable("voxlink.terracotta.download_success").getString();
                 statusColor = COLOR_SUCCESS;
@@ -236,11 +247,19 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
     private void startRedownload() {
         if (TerracottaManager.isDownloading()) return;
         try {
+            TerracottaManager.shutdown();
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("重下载前停止陶瓦失败: {}", e.getMessage());
+        }
+        try {
             Files.deleteIfExists(TerracottaBinary.getBinaryPath());
         } catch (IOException ignored) {}
         if (redownloadBtn != null) {
             redownloadBtn.active = false;
             redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.connecting"));
+        }
+        if (deleteBinaryBtn != null) {
+            deleteBinaryBtn.active = false;
         }
         TerracottaManager.startDownload(progress -> {
             Minecraft.getInstance().execute(() -> {
@@ -248,6 +267,9 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
                     if (redownloadBtn != null) {
                         redownloadBtn.active = true;
                         redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.download_failed"));
+                    }
+                    if (deleteBinaryBtn != null) {
+                        deleteBinaryBtn.active = true;
                     }
                 }
             });

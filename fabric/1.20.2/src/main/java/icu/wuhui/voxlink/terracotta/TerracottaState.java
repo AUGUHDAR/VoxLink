@@ -2,7 +2,7 @@ package icu.wuhui.voxlink.terracotta;
 
 import com.google.gson.JsonObject;
 
-//debounce 陶瓦状态机 对齐HMCL设计 简化版 普通抽象类避免23版本sealed兼容性差异
+//debounce 陶瓦状态机 简化版 普通抽象类避免23版本sealed兼容性差异
 public abstract class TerracottaState {
 
     //debounce 状态名取自Terracotta /state响应的state字段 单调index防旧响应覆盖新状态
@@ -96,7 +96,7 @@ public abstract class TerracottaState {
 
     //Terracotta报告的可恢复异常
     public static final class Exception extends Ready {
-        public String type;
+        public String type = "UNKNOWN";
         @Override public String name() { return "exception"; }
         @Override public String toString() { return "Exception[type=" + type + ",index=" + index + "]"; }
     }
@@ -111,7 +111,7 @@ public abstract class TerracottaState {
         @Override public String toString() { return "Fatal[" + type + "]"; }
     }
 
-    //从JsonObject解析为具体Ready子类 对齐HMCL parseState
+    //从JsonObject解析为具体Ready子类
     public static Ready parseFromState(JsonObject json, int port) {
         if (json == null) {
             Waiting w = new Waiting();
@@ -160,7 +160,7 @@ public abstract class TerracottaState {
                 break;
             case "exception":
                 Exception e = new Exception();
-                e.type = json.has("type") && !json.get("type").isJsonNull()
+                e.type = json.has("type") && !json.get("type").isJsonNull() && json.get("type").isJsonPrimitive()
                     ? json.get("type").getAsString() : "UNKNOWN";
                 state = e;
                 break;

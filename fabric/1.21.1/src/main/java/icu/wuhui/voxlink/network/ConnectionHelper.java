@@ -15,6 +15,7 @@ import net.minecraft.network.chat.Component;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -126,11 +127,11 @@ public final class ConnectionHelper {
         });
     }
 
-    //跨版本反射构造ServerData, 兼容1.20~26.x构造签名变化
+    //类字面量由loom重映射到intermediary 生产环境可用
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static ServerData createServerData(String name, String ip) throws Exception {
-        Class<?> typeClass = Class.forName("net.minecraft.client.multiplayer.ServerData$Type");
-        Object otherType = Enum.valueOf((Class<? extends Enum>) typeClass, "OTHER");
+        Class<?> typeClass = ServerData.Type.class;
+        Object otherType = ServerData.Type.OTHER;
         Constructor<?>[] ctors = ServerData.class.getDeclaredConstructors();
         for (Constructor<?> c : ctors) {
             Class<?>[] p = c.getParameterTypes();
@@ -153,7 +154,8 @@ public final class ConnectionHelper {
     private static void invokeStartConnecting(Screen parent, Minecraft mc, String addr, ServerData serverData) throws Exception {
         ServerAddress serverAddress = ServerAddress.parseString(addr);
         for (Method m : ConnectScreen.class.getDeclaredMethods()) {
-            if (!"startConnecting".equals(m.getName())) continue;
+            //方法名生产环境为notch/intermediary 改用静态修饰+参数类型匹配
+            if (!Modifier.isStatic(m.getModifiers())) continue;
             Class<?>[] p = m.getParameterTypes();
             if (p.length < 4) continue;
             if (p[0] != Screen.class || p[1] != Minecraft.class) continue;

@@ -40,15 +40,36 @@ public final class TerracottaManager {
     private static final Object POLL_LOCK = new Object();
     //debounce 连续拉取失败计数
     private static volatile int stateFailCount = 0;
+    //debounce recover后第一次index守卫跳过 进程重启后index归零 防止旧current.index拒绝新next
+    private static volatile boolean skipNextIndexGuard = false;
 
     private static final AtomicBoolean downloading = new AtomicBoolean(false);
     private static volatile boolean downloadFailed = false;
     private static volatile TerracottaBinary.DownloadProgress lastProgress = null;
     private static final int MAX_DOWNLOAD_ATTEMPTS = 60;
     private static volatile ExecutorService downloadExecutor = null;
+    //debounce 下载完成future startDualP2P等待用
+    private static volatile CompletableFuture<Boolean> downloadCompletion = null;
 
     //debounce UI状态回调 让AttemptingJoinScreen看到中间态(HostScanning/GuestConnecting等)
     private static volatile Consumer<TerracottaState> uiStateCallback = null;
+
+    //debounce 一次性等待上下文 替代waitForState独立轮询 listener模式
+    //updateState检测到目标态/Fatal/Exception时由notifyPendingWait完成future
+    private static final AtomicReference<WaitContext> pendingWait = new AtomicReference<>(null);
+
+    private static final class WaitContext {
+        final CompletableFuture<String> future;
+        final java.util.function.Predicate<TerracottaState> predicate;
+        final java.util.function.Supplier<String> supplier;
+        WaitContext(CompletableFuture<String> future,
+                    java.util.function.Predicate<TerracottaState> predicate,
+                    java.util.function.Supplier<String> supplier) {
+            this.future = future;
+            this.predicate = predicate;
+            this.supplier = supplier;
+        }
+    }
 
     private TerracottaManager() {}
 
@@ -60,14 +81,6 @@ public final class TerracottaManager {
             LOGGER.info("当前平台不支持陶瓦, 跳过");
             return;
         }
-        if (TerracottaBinary.isAndroid()) {
-            if (TerracottaAndroidBridge.isLibraryPresent()) {
-                LOGGER.info("安卓检测到陶瓦库, 等待启动器初始化");
-            } else {
-                LOGGER.info("安卓未检测到陶瓦库, 请使用支持陶瓦的启动器 (FCL/HMCL)");
-            }
-            return;
-        }
         if (TerracottaBinary.isReady()) return;
         if (!TerracottaBinary.isDownloadPending()) return;
         LOGGER.info("检测到未完成的陶瓦下载, 自动恢复");
@@ -77,11 +90,11 @@ public final class TerracottaManager {
     private static void startBackgroundDownload(Consumer<TerracottaBinary.DownloadProgress> uiCallback) {
         if (!downloading.compareAndSet(false, true)) return;
         if (!TerracottaBinary.isPlatformSupported()) { downloading.set(false); return; }
-        if (TerracottaBinary.isAndroid()) { downloading.set(false); return; }
         downloadFailed = false;
         lastProgress = null;
         TerracottaBinary.resetDownloadFlags();
         TerracottaBinary.markDownloadPending();
+        downloadCompletion = new CompletableFuture<>();
         synchronized (TerracottaManager.class) {
             if (downloadExecutor == null || downloadExecutor.isShutdown()) {
                 downloadExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -140,8 +153,24 @@ public final class TerracottaManager {
             } finally {
                 TerracottaBinary.resetDownloadFlags();
                 downloading.set(false);
+                CompletableFuture<Boolean> dc = downloadCompletion;
+                if (dc != null && !dc.isDone()) {
+                    dc.complete(TerracottaBinary.isReady());
+                }
             }
         });
+    }
+
+    //debounce 等待下载完成 startDualP2P在下载进行中时调用
+    public static CompletableFuture<Boolean> waitForDownload() {
+        if (!downloading.get()) {
+            return CompletableFuture.completedFuture(TerracottaBinary.isReady());
+        }
+        CompletableFuture<Boolean> dc = downloadCompletion;
+        if (dc == null) {
+            return CompletableFuture.completedFuture(TerracottaBinary.isReady());
+        }
+        return dc;
     }
 
     public static void pauseDownload() { TerracottaBinary.pauseDownload(); }
@@ -158,20 +187,7 @@ public final class TerracottaManager {
             return CompletableFuture.completedFuture(port);
         }
 
-        if (TerracottaAndroidBridge.isAndroid()) {
-            if (TerracottaAndroidBridge.isInitialized()) {
-                initialized = true;
-                startPollingAndroid();
-                LOGGER.info("安卓陶瓦已由启动器初始化, 使用反射调用");
-                return CompletableFuture.completedFuture(0);
-            } else {
-                LOGGER.warn("安卓陶瓦未初始化, 请在启动器中启用陶瓦");
-                return CompletableFuture.failedFuture(new TerracottaNotReadyException(
-                    "安卓陶瓦未初始化, 请使用支持陶瓦的启动器 (FCL/HMCL) 并在其中启用陶瓦"));
-            }
-        }
-
-        //debounce 桌面端预检 二进制不存在/校验失败直接降级 避免拉起进程才发现
+        //debounce 预检 二进制不存在/校验失败直接降级 避免拉起进程才发现
         if (!TerracottaBinary.verifyInstallation()) {
             LOGGER.warn("陶瓦安装自检失败, 降级到 VoxLink P2P");
             return CompletableFuture.failedFuture(new TerracottaNotReadyException("陶瓦安装自检失败"));
@@ -193,10 +209,35 @@ public final class TerracottaManager {
                 //debounce 进入Launching状态 端口已知后切Unknown
                 TerracottaState.Unknown unknown = new TerracottaState.Unknown();
                 unknown.port = p;
-                stateRef.compareAndSet(stateRef.get(), unknown);
+                //debounce fix: 用set替代compareAndSet(stateRef.get(), unknown) 后者存在TOCTOU竞态
+                stateRef.set(unknown);
                 startPolling();
                 return TerracottaClient.getMeta(p).thenApply(meta -> p);
             });
+    }
+
+    //debounce 状态预检+initialize Fatal可恢复先recover 非Waiting的Ready先setIdle 避免带旧状态发请求
+    private static CompletableFuture<Integer> ensureReady() {
+        TerracottaState cur = stateRef.get();
+        if (cur instanceof TerracottaState.Fatal && ((TerracottaState.Fatal) cur).isRecoverable()) {
+            LOGGER.info("陶瓦处于可恢复Fatal, 开新会话前先recover");
+            return recover();
+        }
+        if (cur instanceof TerracottaState.Ready && !(cur instanceof TerracottaState.Waiting)) {
+            LOGGER.info("陶瓦处于{} 开新会话前先setIdle清理", cur);
+            return setIdle().exceptionally(e -> {
+                    LOGGER.warn("setIdle失败 继续尝试: {}", e.getMessage());
+                    return null;
+                }).thenCompose(v -> {
+                    //debounce 清旧Ready状态防waitForState预检失败(Exception残留)或index守卫拒绝
+                    TerracottaState.Unknown unknown = new TerracottaState.Unknown();
+                    unknown.port = port;
+                    stateRef.set(unknown);
+                    lastStateJson = null;
+                    return initialize();
+                });
+        }
+        return initialize();
     }
 
     //debounce recover 可恢复Fatal时重新拉起进程1次
@@ -207,40 +248,19 @@ public final class TerracottaManager {
             return CompletableFuture.failedFuture(new RuntimeException("不可恢复的致命错误: " + current));
         }
         LOGGER.info("陶瓦进入可恢复Fatal 尝试recover");
+        //debounce 失败pending wait 避免recover后旧wait残留
+        failPendingWait("陶瓦recover取消等待");
         //debounce 重置epoch+lastState 让recover前未完成的poll响应自动失效
         stateEpoch.incrementAndGet();
         clearLastState();
+        //debounce 进程重启后index归零 跳过下一次index守卫 避免旧current.index拒绝新next
+        skipNextIndexGuard = true;
         //debounce 重置状态机 进程残留先stop
         TerracottaProcess.stop();
         stateRef.set(TerracottaState.Launching.INSTANCE);
         initialized = false;
         port = 0;
         return initialize();
-    }
-
-    private static void startPollingAndroid() {
-        synchronized (POLL_LOCK) {
-            if (scheduler == null || scheduler.isShutdown()) {
-                scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-                    Thread t = new Thread(r, "terracotta-android-poll");
-                    t.setDaemon(true);
-                    return t;
-                });
-            }
-            if (pollTask != null) pollTask.cancel(false);
-            pollTask = scheduler.scheduleAtFixedRate(() -> {
-            try {
-                String stateJson = TerracottaAndroidBridge.getState();
-                if (stateJson != null && !stateJson.isEmpty()) {
-                    JsonObject json = com.google.gson.JsonParser.parseString(stateJson).getAsJsonObject();
-                    //debounce 安卓侧也用当前epoch 防止新epoch守卫拒绝状态更新
-                    updateState(json, stateEpoch.get());
-                }
-            } catch (Exception e) {
-                LOGGER.warn("安卓状态轮询异常: {}", e.getMessage());
-            }
-        }, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-        }
     }
 
     private static void startPolling() {
@@ -254,7 +274,12 @@ public final class TerracottaManager {
             }
             if (pollTask != null) pollTask.cancel(false);
             pollTask = scheduler.scheduleAtFixedRate(() -> {
-                if (port <= 0 || !TerracottaProcess.isAlive()) return;
+                if (port <= 0 || !TerracottaProcess.isAlive()) {
+                    //debounce 进程死了 立即失败pending wait 不空等到超时
+                    String errLine = TerracottaProcess.getLastErrorLine();
+                    failPendingWait("陶瓦进程意外退出" + (errLine != null ? ": " + errLine : ""));
+                    return;
+                }
                 final long epoch = stateEpoch.get();
                 try {
                     TerracottaClient.getState(port)
@@ -270,6 +295,7 @@ public final class TerracottaManager {
                                 TerracottaState.Fatal fatal = new TerracottaState.Fatal(TerracottaState.Fatal.Type.TERRACOTTA);
                                 if (stateRef.compareAndSet(prev, fatal)) {
                                     LOGGER.warn("陶瓦状态拉取连续失败{}次 切Fatal(TERRACOTTA): {}", stateFailCount, e.getMessage());
+                                    notifyPendingWait(fatal);
                                 }
                                 stateFailCount = 0;
                             } else {
@@ -296,11 +322,17 @@ public final class TerracottaManager {
             if (currentPort == 0) currentPort = port;
         }
         TerracottaState.Ready next = TerracottaState.parseFromState(json, currentPort);
-        //debounce index单调守卫 旧响应不覆盖新状态 对齐HMCL
+        //debounce index单调守卫 旧响应不覆盖新状态
         if (current instanceof TerracottaState.Ready) {
             int currentIndex = ((TerracottaState.Ready) current).index;
             if (next.index <= currentIndex && next.index >= 0) {
-                return;
+                //debounce recover后第一次index守卫跳过 进程重启后index归零
+                if (skipNextIndexGuard) {
+                    skipNextIndexGuard = false;
+                    LOGGER.info("陶瓦recover后跳过index守卫: current={}, next={}", currentIndex, next.index);
+                } else {
+                    return;
+                }
             }
         }
         if (stateRef.compareAndSet(current, next)) {
@@ -309,6 +341,8 @@ public final class TerracottaManager {
             if (!current.name().equals(next.name())) {
                 LOGGER.info("陶瓦状态: {} -> {}", current, next);
             }
+            //debounce 通知pending wait 单listener模式替代双轮询
+            notifyPendingWait(next);
             //debounce 推中间态到UI 调用方负责切主线程
             Consumer<TerracottaState> cb = uiStateCallback;
             if (cb != null && isUiRelevantState(next)) {
@@ -329,18 +363,48 @@ public final class TerracottaManager {
             || state instanceof TerracottaState.Fatal;
     }
 
+    //debounce 由updateState调用 检测目标态/Fatal/Exception完成pending wait future
+    private static void notifyPendingWait(TerracottaState state) {
+        WaitContext ctx = pendingWait.get();
+        if (ctx == null || ctx.future.isDone()) return;
+        if (state instanceof TerracottaState.Fatal) {
+            ctx.future.completeExceptionally(new RuntimeException("陶瓦进入致命状态: " + state));
+            clearPendingWait(ctx);
+            return;
+        }
+        if (state instanceof TerracottaState.Exception) {
+            ctx.future.completeExceptionally(new RuntimeException("陶瓦进入异常状态: " + ((TerracottaState.Exception) state).type));
+            clearPendingWait(ctx);
+            return;
+        }
+        if (ctx.predicate.test(state)) {
+            String result = ctx.supplier.get();
+            if (result != null && !result.isEmpty()) {
+                ctx.future.complete(result);
+                clearPendingWait(ctx);
+            }
+        }
+    }
+
+    //debounce 进程死亡/手动取消时直接失败pending wait
+    private static void failPendingWait(String reason) {
+        WaitContext ctx = pendingWait.get();
+        if (ctx == null || ctx.future.isDone()) return;
+        ctx.future.completeExceptionally(new RuntimeException(reason));
+        clearPendingWait(ctx);
+    }
+
+    //debounce CAS清理 避免清掉新注册的wait
+    private static void clearPendingWait(WaitContext expected) {
+        if (expected != null) pendingWait.compareAndSet(expected, null);
+    }
+
     public static CompletableFuture<String> createRoom(String playerName) {
         if (!TerracottaBinary.isReady()) {
             return CompletableFuture.failedFuture(new TerracottaNotReadyException("陶瓦二进制未就绪, 降级到 VoxLink P2P"));
         }
-        if (TerracottaAndroidBridge.isAndroid()) {
-            return initialize().thenCompose(v -> {
-                TerracottaAndroidBridge.setScanning(null, playerName);
-                return waitForRoomCode(ROOM_CODE_TIMEOUT_SEC);
-            });
-        }
-        //debounce 总是先initialize 确保进程活着 注入节点列表让中国大陆用户用CN节点
-        return initialize().thenCompose(p ->
+        //debounce ensureReady预检状态+initialize 注入节点列表让中国大陆用户用CN节点
+        return ensureReady().thenCompose(p ->
             TerracottaNodeList.fetchForChina().thenCompose(nodes -> {
                 LOGGER.info("陶瓦host注入节点列表: {} 个", nodes.size());
                 return TerracottaClient.startHost(p, playerName, nodes)
@@ -349,116 +413,82 @@ public final class TerracottaManager {
     }
 
     private static CompletableFuture<String> waitForRoomCode(int timeoutSec) {
-        //debounce 清除上次残留状态+递增epoch 防止立即返回旧房间号
-        stateRef.set(new TerracottaState.Unknown());
-        lastStateJson = null;
-        final long myEpoch = stateEpoch.incrementAndGet();
-        CompletableFuture<String> future = new CompletableFuture<>();
-        long deadline = System.currentTimeMillis() + (long) timeoutSec * 1000L;
-        ScheduledFuture<?>[] poll = new ScheduledFuture<?>[1];
-        synchronized (POLL_LOCK) {
-            poll[0] = scheduler.scheduleAtFixedRate(() -> {
-                try {
-                    if (future.isDone()) { poll[0].cancel(false); return; }
-                    //debounce 进程崩了立即失败 不空等到超时
-                    if (!TerracottaProcess.isAlive()) {
-                        poll[0].cancel(false);
-                        String errLine = TerracottaProcess.getLastErrorLine();
-                        future.completeExceptionally(new RuntimeException("陶瓦进程意外退出" + (errLine != null ? ": " + errLine : "")));
-                        return;
-                    }
-                    //debounce Fatal直接失败
-                    TerracottaState cur = stateRef.get();
-                    if (cur instanceof TerracottaState.Fatal) {
-                        poll[0].cancel(false);
-                        future.completeExceptionally(new RuntimeException("陶瓦进入致命状态: " + cur));
-                        return;
-                    }
-                    if (isHostOk() && lastStateEpoch == myEpoch) {
-                        String code = getRoomCode();
-                        if (code != null && !code.isEmpty()) {
-                            poll[0].cancel(false);
-                            future.complete(code);
-                            return;
-                        }
-                    }
-                    if (isException()) {
-                        poll[0].cancel(false);
-                        future.completeExceptionally(new RuntimeException("陶瓦进入异常状态: " + getExceptionType()));
-                    }
-                    if (System.currentTimeMillis() > deadline) {
-                        poll[0].cancel(false);
-                        future.completeExceptionally(new RuntimeException("等待陶瓦房间号超时 最后状态: " + cur));
-                    }
-                } catch (Exception e) {
-                    poll[0].cancel(false);
-                    future.completeExceptionally(e);
-                }
-            }, POLL_INTERVAL_MS, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-        }
-        return future.orTimeout(timeoutSec + TIMEOUT_MARGIN_SEC, TimeUnit.SECONDS);
+        //debounce 抽共用waitForState host侧等待HostOK 取roomCode
+        return waitForState(
+            state -> state instanceof TerracottaState.HostOK,
+            TerracottaManager::getRoomCode,
+            timeoutSec,
+            "房间号");
     }
 
     public static CompletableFuture<String> waitForGuestOk(int timeoutSec) {
-        //debounce 清除上次残留状态+递增epoch 防止立即返回旧connectUrl
-        stateRef.set(new TerracottaState.Unknown());
+        //debounce 抽共用waitForState guest侧等待GuestOK 取connectUrl
+        return waitForState(
+            state -> state instanceof TerracottaState.GuestOK,
+            TerracottaManager::getConnectUrl,
+            timeoutSec,
+            "连接");
+    }
+
+    //debounce listener模式 由updateState在状态变更时通知
+    //不再起独立轮询任务 单一startPolling是状态更新唯一来源
+    private static CompletableFuture<String> waitForState(
+            java.util.function.Predicate<TerracottaState> successPred,
+            java.util.function.Supplier<String> resultSupplier,
+            int timeoutSec,
+            String actionName) {
+        //debounce 递增epoch+设lastStateEpoch=myEpoch 拒绝旧epoch的poll 避免旧状态污染
         lastStateJson = null;
         final long myEpoch = stateEpoch.incrementAndGet();
-        CompletableFuture<String> future = new CompletableFuture<>();
-        long deadline = System.currentTimeMillis() + (long) timeoutSec * 1000L;
-        ScheduledFuture<?>[] poll = new ScheduledFuture<?>[1];
-        synchronized (POLL_LOCK) {
-            poll[0] = scheduler.scheduleAtFixedRate(() -> {
-                try {
-                    if (future.isDone()) { poll[0].cancel(false); return; }
-                    //debounce 进程崩了立即失败 不空等到超时
-                    if (!TerracottaProcess.isAlive()) {
-                        poll[0].cancel(false);
-                        String errLine = TerracottaProcess.getLastErrorLine();
-                        future.completeExceptionally(new RuntimeException("陶瓦进程意外退出" + (errLine != null ? ": " + errLine : "")));
-                        return;
-                    }
-                    TerracottaState cur = stateRef.get();
-                    if (cur instanceof TerracottaState.Fatal) {
-                        poll[0].cancel(false);
-                        future.completeExceptionally(new RuntimeException("陶瓦进入致命状态: " + cur));
-                        return;
-                    }
-                    if (isGuestOk() && lastStateEpoch == myEpoch) {
-                        poll[0].cancel(false);
-                        future.complete(getConnectUrl());
-                        return;
-                    }
-                    if (isException()) {
-                        poll[0].cancel(false);
-                        future.completeExceptionally(new RuntimeException("陶瓦进入异常状态: " + getExceptionType()));
-                    }
-                    if (System.currentTimeMillis() > deadline) {
-                        poll[0].cancel(false);
-                        future.completeExceptionally(new RuntimeException("等待陶瓦连接超时 最后状态: " + cur));
-                    }
-                } catch (Exception e) {
-                    poll[0].cancel(false);
-                    future.completeExceptionally(e);
-                }
-            }, POLL_INTERVAL_MS, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        lastStateEpoch = myEpoch;
+        //debounce 预检Fatal/Exception 立即失败不等poll
+        TerracottaState cur = stateRef.get();
+        if (cur instanceof TerracottaState.Fatal) {
+            return CompletableFuture.failedFuture(new RuntimeException("陶瓦进入致命状态: " + cur));
         }
-        return future.orTimeout(timeoutSec + TIMEOUT_MARGIN_SEC, TimeUnit.SECONDS);
+        if (cur instanceof TerracottaState.Exception) {
+            return CompletableFuture.failedFuture(new RuntimeException("陶瓦进入异常状态: " + getExceptionType()));
+        }
+        //debounce 取消前一个pending wait(理论上不会并发 防御性清理)
+        WaitContext prev = pendingWait.getAndSet(null);
+        if (prev != null && !prev.future.isDone()) {
+            prev.future.cancel(true);
+        }
+        CompletableFuture<String> future = new CompletableFuture<>();
+        final WaitContext ctx = new WaitContext(future, successPred, resultSupplier);
+        pendingWait.set(ctx);
+        //debounce 注册后重检状态 防止注册前状态已变更导致notifyPendingWait漏通知 30s白等
+        //complete/completeExceptionally幂等 已完成则no-op clearPendingWait用CAS也安全
+        TerracottaState latest = stateRef.get();
+        if (latest instanceof TerracottaState.Fatal) {
+            ctx.future.completeExceptionally(new RuntimeException("陶瓦进入致命状态: " + latest));
+            clearPendingWait(ctx);
+        } else if (latest instanceof TerracottaState.Exception) {
+            ctx.future.completeExceptionally(new RuntimeException("陶瓦进入异常状态: " + ((TerracottaState.Exception) latest).type));
+            clearPendingWait(ctx);
+        } else if (successPred.test(latest)) {
+            String result = resultSupplier.get();
+            if (result != null && !result.isEmpty()) {
+                ctx.future.complete(result);
+                clearPendingWait(ctx);
+            }
+        }
+        //debounce 超时+清理 timeout由orTimeout驱动 进程死/Fatal由notifyPendingWait/failPendingWait驱动
+        return future.orTimeout(timeoutSec + TIMEOUT_MARGIN_SEC, TimeUnit.SECONDS)
+            .whenComplete((r, e) -> {
+                if (e != null && e instanceof java.util.concurrent.TimeoutException) {
+                    LOGGER.warn("等待陶瓦{}超时 最后状态: {}", actionName, stateRef.get());
+                }
+                clearPendingWait(ctx);
+            });
     }
 
     public static CompletableFuture<String> joinRoom(String roomCode, String playerName) {
         if (!TerracottaBinary.isReady()) {
             return CompletableFuture.failedFuture(new TerracottaNotReadyException("陶瓦二进制未就绪, 降级到 VoxLink P2P"));
         }
-        if (TerracottaAndroidBridge.isAndroid()) {
-            //debounce 安卓等待guest-ok
-            return initialize().thenCompose(v -> {
-                TerracottaAndroidBridge.setGuesting(roomCode, playerName);
-                return waitForGuestOk(ROOM_CODE_TIMEOUT_SEC);
-            });
-        }
-        //debounce 总是先initialize 确保进程活着 注入节点列表 让HTTP状态码自然传播
-        return initialize().thenCompose(p ->
+        //debounce ensureReady预检状态+initialize 注入节点列表 让HTTP状态码自然传播
+        return ensureReady().thenCompose(p ->
             TerracottaNodeList.fetchForChina().thenCompose(nodes -> {
                 LOGGER.info("陶瓦guest注入节点列表: {} 个", nodes.size());
                 return TerracottaClient.joinRoom(p, roomCode, playerName, nodes)
@@ -479,21 +509,18 @@ public final class TerracottaManager {
     }
 
     public static CompletableFuture<Void> setIdle() {
-        if (TerracottaAndroidBridge.isAndroid()) {
-            if (!TerracottaAndroidBridge.setWaiting()) {
-                return CompletableFuture.failedFuture(new RuntimeException("安卓陶瓦 setWaiting 失败"));
-            }
-            return CompletableFuture.completedFuture(null);
-        }
         if (port <= 0) return CompletableFuture.completedFuture(null);
         return TerracottaClient.setIdle(port);
     }
 
     //debounce 清旧状态+epoch 防止下次poll立即返回旧结果
     public static void clearLastState() {
+        //debounce 失败pending wait ConnectionManager终止陶瓦侧时调用
+        failPendingWait("clearLastState取消等待");
         stateRef.set(new TerracottaState.Unknown());
         lastStateJson = null;
-        lastStateEpoch = -1;
+        //debounce 用当前epoch而非-1 拒绝旧epoch的in-flight poll 防止旧状态污染
+        lastStateEpoch = stateEpoch.get();
         stateFailCount = 0;
     }
 
@@ -528,11 +555,11 @@ public final class TerracottaManager {
         return stateRef.get() instanceof TerracottaState.Exception;
     }
 
-    //debounce 异常类型 让UI区分
+    //debounce 异常类型 对齐1.0.6 返回String 让UI走Component.translatable
     public static String getExceptionType() {
         TerracottaState state = stateRef.get();
         if (state instanceof TerracottaState.Exception) return ((TerracottaState.Exception) state).type;
-        return null;
+        return "UNKNOWN";
     }
 
     public static boolean isFatal() {
@@ -540,7 +567,6 @@ public final class TerracottaManager {
     }
 
     public static boolean isReady() {
-        if (TerracottaAndroidBridge.isInitialized()) return true;
         return initialized && port > 0 && TerracottaProcess.isAlive();
     }
 
@@ -587,6 +613,10 @@ public final class TerracottaManager {
         stateRef.set(TerracottaState.Bootstrap.INSTANCE);
         lastStateJson = null;
         stateFailCount = 0;
+        skipNextIndexGuard = false;
         uiStateCallback = null;
+        //debounce 清理pending wait
+        failPendingWait("shutdown取消等待");
+        pendingWait.set(null);
     }
 }

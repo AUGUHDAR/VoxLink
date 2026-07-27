@@ -18,9 +18,59 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-//1.21.x 专属: 原生输入 API
 public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     private static final int KEY_ENTER = 257;
+    private static final int COLOR_WHITE = 0xFFFFFFFF;
+    private static final int COLOR_MUTED = 0xFFAAAAAA;
+    private static final int COLOR_ERROR = 0xFFFF5555;
+    private static final int COLOR_WARNING = 0xFFFFFF55;
+    private static final int COLOR_SUCCESS = 0xFF55FF55;
+    private static final int COLOR_TEXT_LIGHT = 0xFFCCCCCC;
+    private static final int COLOR_TEXT_DIM = 0xFF888888;
+    private static final int COLOR_NO_ROOMS_HINT = 0xFF666666;
+    private static final int COLOR_CAT_BADGE_BG = 0x44333333;
+    private static final int COLOR_CAT_BADGE_TEXT = 0xFF999999;
+    private static final int COLOR_BG_SELECTED = 0xDD122E8A;
+    private static final int COLOR_BG_HOVER = 0xDD555555;
+    private static final int COLOR_BG_NORMAL = 0xDD333333;
+    private static final int COLOR_PAGE_BTN_DISABLED_BG = 0x44888888;
+    private static final int COLOR_PAGE_BTN_HOVER = 0xDD666666;
+    private static final int COLOR_PAGE_BTN_NORMAL = 0xDD444444;
+
+    private static final int SEARCH_Y = 8;
+    private static final int SEARCH_H = 18;
+    private static final int ELEMENT_GAP = 8;
+    private static final int TOP_BTN_Y = 6;
+    private static final int TOP_BTN_H = 20;
+    private static final int REFRESH_BTN_W = 60;
+    private static final int BOTTOM_MARGIN = 24;
+    private static final int PAGE_INPUT_W = 32;
+    private static final int PAGE_BTN_H = 14;
+    private static final int CAT_Y = 32;
+    private static final int MIN_CAT_BTN_W = 38;
+    private static final int BTN_H = 18;
+    private static final int SCROLL_SPEED = 20;
+    private static final int LIST_BOTTOM_MARGIN = 52;
+    private static final int CARD_TEXT_X = 6;
+    private static final int CARD_TRUNC_DIV = 6;
+    private static final int CARD_TEXT_Y = 5;
+    private static final int CARD_CODE_Y = 11;
+    private static final int CARD_PLAYERS_Y = 22;
+    private static final int CAT_BADGE_W_PAD = 4;
+    private static final int CAT_BADGE_MARGIN = 3;
+    private static final int CAT_BADGE_TEXT_Y = 4;
+    private static final int CAT_BADGE_BOTTOM_Y = 13;
+    private static final int NO_ROOMS_Y_OFFSET = 30;
+    private static final int NO_ROOMS_HINT_Y_OFFSET = 44;
+    private static final int PAGE_BAR_Y_MARGIN = 46;
+    private static final int PAGE_BTN_W = 16;
+    private static final int PAGE_BTN_GAP = 2;
+    private static final int GRID_Y_CUSTOM = 74;
+    private static final int GRID_Y_DEFAULT = 54;
+    private static final int COL_DIVISOR = 160;
+    private static final int CARD_H = 48;
+    private static final int GAP_DIVISOR = 80;
+
     protected final Screen parent;
 
     protected List<RoomEntry> allRooms = new ArrayList<>();
@@ -32,7 +82,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     protected Button joinBtn;
     protected int selectedIdx = -1;
     protected String statusMsg = "";
-    protected int statusColor = 0xFFAAAAAA;
+    protected int statusColor = COLOR_MUTED;
     protected boolean initialFetchDone = false;
     protected int currentPage = 1;
     protected int totalRooms = 0;
@@ -55,7 +105,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             "survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"
     );
 
-    private static final String GAME_VERSION = "1.21.11";
+    private static final String GAME_VERSION = icu.wuhui.voxlink.VoxLinkConstants.GAME_VERSION;
 
     protected enum SortMode {
         PLAYERS_DESC(Component.translatable("voxlink.sort.players_desc")), PLAYERS_ASC(Component.translatable("voxlink.sort.players_asc")),
@@ -84,32 +134,32 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         int w = this.width;
         int pad = Math.max(8, w / 40);
 
-        searchField = new EditBox(Minecraft.getInstance().font, pad, 8, w / 3, 18, Component.translatable("voxlink.search"));
+        searchField = new EditBox(Minecraft.getInstance().font, pad, SEARCH_Y, w / 3, SEARCH_H, Component.translatable("voxlink.search"));
         searchField.setHint(Component.translatable("voxlink.browser.search_hint"));
         searchField.setResponder(q -> { savedSearch = q; applyFilter(); });
         searchField.setValue(savedSearch);
         this.addRenderableWidget(searchField);
 
-        int sortX = w / 3 + pad + 8;
+        int sortX = w / 3 + pad + ELEMENT_GAP;
         this.addRenderableWidget(Button.builder(Component.translatable("voxlink.browser.sort", sortMode.label), b -> {
             sortMode = SortMode.values()[(sortMode.ordinal() + 1) % SortMode.values().length];
             b.setMessage(Component.translatable("voxlink.browser.sort", sortMode.label));
             applyFilter();
-        }).bounds(sortX, 6, w / 5, 20).build());
+        }).bounds(sortX, TOP_BTN_Y, w / 5, TOP_BTN_H).build());
 
         this.addRenderableWidget(Button.builder(Component.translatable("voxlink.refresh"), b -> fetchRooms())
-                .bounds(w - pad - 60, 6, 60, 20).build());
+                .bounds(w - pad - REFRESH_BTN_W, TOP_BTN_Y, REFRESH_BTN_W, TOP_BTN_H).build());
 
         joinBtn = Button.builder(Component.translatable("voxlink.join_room"), b -> joinSelected())
-                .bounds(w / 2 - 10, this.height - 24, 100, 20).build();
+                .bounds(w / 2 - 10, this.height - BOTTOM_MARGIN, 100, 20).build();
         joinBtn.active = false;
         this.addRenderableWidget(joinBtn);
 
         this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), b ->
                 Minecraft.getInstance().setScreen(parent))
-                .bounds(w / 2 - 130, this.height - 24, 100, 20).build());
+                .bounds(w / 2 - 130, this.height - BOTTOM_MARGIN, 100, 20).build());
 
-        pageInput = new EditBox(Minecraft.getInstance().font, -100, -100, 32, 14, Component.literal(""));
+        pageInput = new EditBox(Minecraft.getInstance().font, -100, -100, PAGE_INPUT_W, PAGE_BTN_H, Component.literal(""));
         pageInput.setMaxLength(4);
         pageInput.setVisible(false);
         pageInput.setResponder(t -> {});
@@ -150,7 +200,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     protected void rebuildCategoryButtons() {
         int w = this.width;
         int pad = Math.max(8, w / 40);
-        int catY = 32;
+        int catY = CAT_Y;
 
         for (Button btn : categoryButtons) {
             this.removeWidget(btn);
@@ -178,7 +228,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         }
 
         int totalDef = defaultKeys.size();
-        int defW = Math.max(38, (w - pad * 2 - (totalDef - 1) * 2) / totalDef);
+        int defW = Math.max(MIN_CAT_BTN_W, (w - pad * 2 - (totalDef - 1) * 2) / totalDef);
         int defStartX = (w - totalDef * (defW + 2)) / 2;
         for (int i = 0; i < totalDef; i++) {
             final String cat = defaultKeys.get(i);
@@ -194,7 +244,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                 selectedCategory = cat;
                 fetchRooms();
                 rebuildCategoryButtons();
-            }).bounds(defStartX + i * (defW + 2), catY, defW, 18).build();
+            }).bounds(defStartX + i * (defW + 2), catY, defW, BTN_H).build();
             categoryButtons.add(btn);
             this.addRenderableWidget(btn);
         }
@@ -227,7 +277,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                         selectedCategory = cat;
                         fetchRooms();
                         rebuildCategoryButtons();
-                    }).bounds(itemStartX + i * (itemW + 2), customRowY, itemW, 18).build();
+                    }).bounds(itemStartX + i * (itemW + 2), customRowY, itemW, BTN_H).build();
                     customTagRowButtons.add(btn);
                     this.addRenderableWidget(btn);
                 }
@@ -240,7 +290,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                         customTagStartIndex = (customTagStartIndex + step) % total;
                         customTagShowCount = step;
                         rebuildCategoryButtons();
-                    }).bounds(itemStartX + btnIdx * (itemW + 2), customRowY, itemW, 18).build();
+                    }).bounds(itemStartX + btnIdx * (itemW + 2), customRowY, itemW, BTN_H).build();
                     this.addRenderableWidget(shuffleCustomBtn);
                     btnIdx++;
                 }
@@ -249,7 +299,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                     showMoreCustomBtn = Button.builder(Component.translatable("voxlink.show_more"), b -> {
                         customTagShowCount += 10;
                         rebuildCategoryButtons();
-                    }).bounds(itemStartX + btnIdx * (itemW + 2), customRowY, itemW, 18).build();
+                    }).bounds(itemStartX + btnIdx * (itemW + 2), customRowY, itemW, BTN_H).build();
                     this.addRenderableWidget(showMoreCustomBtn);
                 }
             }
@@ -283,7 +333,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             allRooms.clear();
             scrollOffset = 0;
             statusMsg = Component.translatable("voxlink.browser.loading").getString();
-            statusColor = 0xFFFFFF55;
+            statusColor = COLOR_WARNING;
         }
         String category = "all".equals(selectedCategory) ? null : selectedCategory;
         final int finalPage = page;
@@ -297,7 +347,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                             if (!apiResponse.success || apiResponse.data == null) {
                                 if (clear) {
                                     statusMsg = ChatFormatting.RED.toString() + Component.translatable("voxlink.browser.load_failed").getString();
-                                    statusColor = 0xFFFF5555;
+                                    statusColor = COLOR_ERROR;
                                 }
                                 return;
                             }
@@ -333,7 +383,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                             fetchP2PDetails();
                         } catch (Exception ex) {
                             statusMsg = Component.translatable("voxlink.browser.load_rooms_failed").getString();
-                            statusColor = 0xFFFF5555;
+                            statusColor = COLOR_ERROR;
                         }
                     });
                 })
@@ -341,7 +391,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                     Minecraft.getInstance().execute(() -> {
                         loadingMore = false;
                         statusMsg = Component.translatable("voxlink.error.network_error").getString();
-                        statusColor = 0xFFFF5555;
+                        statusColor = COLOR_ERROR;
                     });
                     return null;
                 });
@@ -350,7 +400,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     protected void fetchP2PDetails() {
         applyFilter();
         statusMsg = allRooms.size() + " " + Component.translatable("voxlink.browser.rooms_count").getString();
-        statusColor = 0xFF55FF55;
+        statusColor = COLOR_SUCCESS;
     }
 
     protected void applyFilter() {
@@ -361,6 +411,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                 .filter(r -> !r.hasPassword)
                 .filter(r -> selectedCategory.equals("all") || r.category.equals(selectedCategory))
                 .filter(r -> query.isEmpty() || r.name.toLowerCase().contains(query) || r.code.toLowerCase().contains(query))
+                .filter(r -> sortMode != SortMode.VERSION_SAME || GAME_VERSION.equals(r.gameVersion))
                 .sorted(getComparator(myProtocol))
                 .toList();
         scrollOffset = 0;
@@ -437,7 +488,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         int cardH = getCardHeight();
         int gap = getGap();
         int maxScroll = Math.max(0, totalRows * (cardH + gap) - (this.height - 36 - getGridY()));
-        int newOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) scrollY * 20));
+        int newOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) scrollY * SCROLL_SPEED));
         scrollOffset = newOffset;
         if (newOffset >= maxScroll - 50 && allRooms.size() < totalRooms) {
             fetchMoreRooms();
@@ -475,7 +526,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         int gap = getGap();
         int gridX = getGridStartX(cols, cardW, gap);
         int gridY = getGridY();
-        int bottom = this.height - 52;
+        int bottom = this.height - LIST_BOTTOM_MARGIN;
 
         for (int i = 0; i < displayedRooms.size(); i++) {
             int col = i % cols;
@@ -488,7 +539,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             boolean sel = i == selectedIdx;
             boolean hover = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH;
 
-            int bg = sel ? 0xDD122E8A : (hover ? 0xDD555555 : 0xDD333333);
+            int bg = sel ? COLOR_BG_SELECTED : (hover ? COLOR_BG_HOVER : COLOR_BG_NORMAL);
             graphics.fill(x, y, x + cardW, y + cardH, bg);
 
             String roomName = r.name;
@@ -496,22 +547,22 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                 roomName = Component.translatable("voxlink.room.name_not_approved").getString();
             }
 
-            int textX = x + 6;
-            int textY = y + 5;
+            int textX = x + CARD_TEXT_X;
+            int textY = y + CARD_TEXT_Y;
 
-            drawString(graphics, truncate(roomName, cardW / 6), textX, textY, 0xFFFFFFFF);
-            drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + 11, 0xFFAAAAAA);
-            drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + 22, 0xFFCCCCCC);
+            drawString(graphics, truncate(roomName, cardW / CARD_TRUNC_DIV), textX, textY, COLOR_WHITE);
+            drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + CARD_CODE_Y, COLOR_MUTED);
+            drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + CARD_PLAYERS_Y, COLOR_TEXT_LIGHT);
 
             String catLabel = getCategoryLabel(r.category);
-            int catW = fontWidth(catLabel) + 4;
-            graphics.fill(x + cardW - catW - 3, y + 3, x + cardW - 3, y + 13, 0x44333333);
-            drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + 4, 0xFF999999);
+            int catW = fontWidth(catLabel) + CAT_BADGE_W_PAD;
+            graphics.fill(x + cardW - catW - CAT_BADGE_MARGIN, y + CAT_BADGE_MARGIN, x + cardW - CAT_BADGE_MARGIN, y + CAT_BADGE_BOTTOM_Y, COLOR_CAT_BADGE_BG);
+            drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + CAT_BADGE_TEXT_Y, COLOR_CAT_BADGE_TEXT);
         }
 
         if (displayedRooms.isEmpty()) {
-            drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + 30, 0xFF888888);
-            drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms_hint").getString(), this.width / 2, gridY + 44, 0xFF666666);
+            drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + NO_ROOMS_Y_OFFSET, COLOR_TEXT_DIM);
+            drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms_hint").getString(), this.width / 2, gridY + NO_ROOMS_HINT_Y_OFFSET, COLOR_NO_ROOMS_HINT);
         }
 
         if (!statusMsg.isEmpty()) {
@@ -533,8 +584,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         pageClickAreas.clear();
         int tp = totalPages();
         if (tp <= 1) return;
-        int py = this.height - 46;
-        int bw = 16, bh = 14, gp = 2, iw = 32;
+        int py = this.height - PAGE_BAR_Y_MARGIN;
+        int bw = PAGE_BTN_W, bh = PAGE_BTN_H, gp = PAGE_BTN_GAP, iw = PAGE_INPUT_W;
         boolean showInput = tp > 6;
         int totalW = showInput ? (bw + gp) * 2 + bw * 3 + gp * 3 + iw + gp + bw + gp + bw
                                : (bw + gp) * 2 + bw * tp + gp * (tp - 1);
@@ -563,8 +614,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     protected void updatePageInput() {
         int tp = totalPages();
         if (tp > 6) {
-            int py = this.height - 46;
-            int bw = 16, gp = 2, iw = 32;
+            int py = this.height - PAGE_BAR_Y_MARGIN;
+            int bw = PAGE_BTN_W, gp = PAGE_BTN_GAP, iw = PAGE_INPUT_W;
             int totalW = (bw + gp) * 2 + bw * 3 + gp * 3 + iw + gp + bw + gp + bw;
             int startX = (this.width - totalW) / 2;
             int inputX = startX + bw + gp + (bw + gp) * 3;
@@ -578,9 +629,9 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     protected void drawPageBtn(GuiGraphics graphics, int mx, int my, int x, int y, int w, int h, String label, boolean enabled, int page, int currentPage) {
         boolean active = enabled && page == currentPage;
         boolean hover = enabled && mx >= x && mx < x + w && my >= y && my < y + h;
-        int bg = !enabled ? 0x44888888 : (active ? 0xDD122E8A : (hover ? 0xDD666666 : 0xDD444444));
+        int bg = !enabled ? COLOR_PAGE_BTN_DISABLED_BG : (active ? COLOR_BG_SELECTED : (hover ? COLOR_PAGE_BTN_HOVER : COLOR_PAGE_BTN_NORMAL));
         graphics.fill(x, y, x + w, y + h, bg);
-        int tc = !enabled ? 0xFF888888 : (active ? 0xFFFFFFFF : 0xFFCCCCCC);
+        int tc = !enabled ? COLOR_TEXT_DIM : (active ? COLOR_WHITE : COLOR_TEXT_LIGHT);
         int labelWidth = fontWidth(label);
         drawString(graphics, label, x + w / 2 - labelWidth / 2, y + 3, tc);
         if (enabled) pageClickAreas.add(new int[]{x, y, w, h, page});
@@ -594,7 +645,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected int getGridY() {
-        return isCustomRowVisible() ? 74 : 54;
+        return isCustomRowVisible() ? GRID_Y_CUSTOM : GRID_Y_DEFAULT;
     }
 
     protected boolean isCustomRowVisible() {
@@ -603,7 +654,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected int getColumns() {
-        return Math.max(2, Math.min(5, this.width / 160));
+        return Math.max(2, Math.min(5, this.width / COL_DIVISOR));
     }
 
     protected int getCardWidth(int cols) {
@@ -612,11 +663,11 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected int getCardHeight() {
-        return 48;
+        return CARD_H;
     }
 
     protected int getGap() {
-        return Math.max(4, this.width / 80);
+        return Math.max(4, this.width / GAP_DIVISOR);
     }
 
     protected int getGridStartX(int cols, int cardW, int gap) {

@@ -309,6 +309,19 @@ try {
                         }
                         roomInfo.setTerracottaCode(tc);
                         VoxLinkMod.LOGGER.info("陶瓦房间号: {}", tc);
+                        //debounce 上传陶瓦房间号到服务器 joiner从joinRoom响应获取
+                        signalingClient.updateTerracottaCode(roomInfo.getCode(), roomInfo.getToken(), tc)
+                                .thenAccept(r -> {
+                                    if (r.success) {
+                                        VoxLinkMod.LOGGER.info("陶瓦房间号已上传服务器");
+                                    } else {
+                                        VoxLinkMod.LOGGER.warn("陶瓦房间号上传失败: {}", r.error);
+                                    }
+                                })
+                                .exceptionally(e -> {
+                                    VoxLinkMod.LOGGER.warn("陶瓦房间号上传异常: {}", e.getMessage());
+                                    return null;
+                                });
                         Minecraft.getInstance().execute(() -> {
                             Minecraft mc = Minecraft.getInstance();
                             if (mc.player != null) {
@@ -451,6 +464,10 @@ if (wasPending) {
             return CompletableFuture.failedFuture(new IllegalStateException(Component.translatable("voxlink.error.already_in_room_or_pending").getString()));
         }
 
+        //debounce 先杀残留陶瓦 防止上次退出残留导致加入失败
+        try { TerracottaManager.shutdown(); }
+        catch (Exception e) { VoxLinkMod.LOGGER.warn("加入前停止陶瓦失败: {}", e.getMessage()); }
+
         if (code == null || code.isBlank()) {
             currentRoom.compareAndSet(PENDING, null);
             return CompletableFuture.failedFuture(new IllegalArgumentException(Component.translatable("voxlink.error.room_not_found").getString()));
@@ -534,6 +551,31 @@ if (wasPending) {
                     if (roomData.has("peerPort") && !roomData.get("peerPort").isJsonNull()) {
                         roomInfo.setPeerPort(roomData.get("peerPort").getAsInt());
                     }
+                    //debounce 解析host上传的陶瓦房间号 供startDualP2P陶瓦侧使用
+                    if (roomData.has("terracottaCode") && !roomData.get("terracottaCode").isJsonNull()) {
+                        String tc = roomData.get("terracottaCode").getAsString();
+                        if (tc != null && !tc.isEmpty()) {
+                            roomInfo.setTerracottaCode(tc);
+                            VoxLinkMod.LOGGER.info("[joinRoom] 获取到陶瓦房间号: {}", tc);
+                        }
+                    }
+
+                    //debounce 协议协商: 解析host能力 老版本host无声明则视为legacy零能力
+                    int hostProto = roomData.has("hostProtocolVersion") && !roomData.get("hostProtocolVersion").isJsonNull()
+                            ? roomData.get("hostProtocolVersion").getAsInt() : 0;
+                    java.util.Set<String> hostCaps = java.util.Collections.emptySet();
+                    if (roomData.has("hostCapabilities") && roomData.get("hostCapabilities").isJsonArray()) {
+                        hostCaps = new java.util.HashSet<>();
+                        for (var c : roomData.getAsJsonArray("hostCapabilities")) {
+                            if (!c.isJsonNull()) hostCaps.add(c.getAsString());
+                        }
+                    }
+                    roomInfo.setHostCapabilities(hostProto, hostCaps);
+                    if (hostProto > 0) {
+                        VoxLinkMod.LOGGER.info("[joinRoom] host能力: v{} caps={}", hostProto, hostCaps);
+                    } else {
+                        VoxLinkMod.LOGGER.info("[joinRoom] host为老版本(legacy) 走纯直连模式");
+                    }
 
                     RoomState state = new RoomState(roomInfo);
                     if (!currentRoom.compareAndSet(PENDING, state)) {
@@ -571,6 +613,10 @@ if (wasPending) {
         connectionManager.getStunProbeFutureRef().set(null);
         //debounce 兜底重置双P2P状态 防止stale状态污染下次连接
         connectionManager.resetDualRaceState();
+        //debounce 阶段四: 重置持续重试状态 为下次连接准备
+        connectionManager.resetContinuousRetryState();
+        //debounce 阶段三: 重置ICE Restart状态 为下次连接准备
+        connectionManager.resetIceRestartState();
         RoomState state = currentRoom.getAndSet(null);
         if (state == null || state == PENDING) {
             cancelPendingCreate();
@@ -625,6 +671,10 @@ if (wasPending) {
         connectionManager.getStunProbeFutureRef().set(null);
         //debounce 兜底重置双P2P状态 与leaveRoom对称
         connectionManager.resetDualRaceState();
+        //debounce 阶段四: 与leaveRoom对称 重置持续重试状态
+        connectionManager.resetContinuousRetryState();
+        //debounce 阶段三: 与leaveRoom对称 重置ICE Restart状态
+        connectionManager.resetIceRestartState();
         RoomState state = currentRoom.getAndSet(null);
         if (state == null || state == PENDING) {
             cancelPendingCreate();
@@ -1235,6 +1285,10 @@ if (wasPending) {
             case "relay_declined" -> connectionManager.handleRelayDeclined(from, data);
             case "relay_setup" -> connectionManager.handleRelaySetup(from, data);
             case "relay_notify" -> connectionManager.handleRelayNotify(from, data);
+            //debounce 阶段四: 对端取消连接 立即终止持续重试 老版本不发此信号
+            case "cancel_connection" -> connectionManager.handleCancelConnection(from, data);
+            //debounce 阶段三: 对端请求ICE Restart 重新打洞 老版本不发此信号
+            case "ice_restart" -> connectionManager.handleIceRestart(from, data);
 
             case "room_name_approved" -> {
                 RoomState st = currentRoom.get();
@@ -1277,33 +1331,58 @@ if (wasPending) {
         VoxLinkMod.LOGGER.info("对端已连接: {}", from);
         RoomState st = currentRoom.get();
         if (st != null && st != PENDING && st.roomInfo.isHost()) {
+            //debounce 对端已连接 停所有打洞(备用路径 桥建立时已停)
+            connectionManager.stopAllPunchingAfterHostBridge();
+            //debounce 2s等访客进世界 再执行op/deop 并3s后重试验证状态
             scheduler.schedule(() -> {
                 try {
                     Minecraft mc = Minecraft.getInstance();
                     if (mc == null) return;
-                    mc.execute(() -> {
-                        try {
-                            var server = mc.getSingleplayerServer();
-                            if (server == null) return;
-                            String hostName = mc.getUser().getName();
-                            //debounce 延迟任务内重读guestOp 防止房主2s内切换设置导致执行错误命令
-                            boolean currentGuestOp = st.roomInfo.isGuestOp();
-                            for (var player : server.getPlayerList().getPlayers()) {
-                                String name = player.getName().getString();
-                                if (name.equals(hostName)) continue;
-                                String cmd = currentGuestOp ? "op " + name : "deop " + name;
-                                server.getCommands().performPrefixedCommand(
-                                    server.createCommandSourceStack(), cmd);
-                                VoxLinkMod.LOGGER.info("[RoomManager] {}访客: {}", currentGuestOp ? "自动OP" : "自动DEOP", name);
-                            }
-                        } catch (Exception e) {
-                            VoxLinkMod.LOGGER.warn("[RoomManager] 访客OP处理失败: {}", e.getMessage());
-                        }
-                    });
+                    mc.execute(() -> applyGuestOpPolicy(st, mc, false));
                 } catch (Exception e) {
-                        VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected异常: {}", e.getMessage());
-                    }
-                }, NAT_UPDATE_DELAY_SEC, TimeUnit.SECONDS);
+                    VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected异常: {}", e.getMessage());
+                }
+            }, NAT_UPDATE_DELAY_SEC, TimeUnit.SECONDS);
+            //debounce 5s后重试 防止单次deop未生效(allowCheats=true时访客默认有OP需强制deop)
+            scheduler.schedule(() -> {
+                try {
+                    Minecraft mc = Minecraft.getInstance();
+                    if (mc == null) return;
+                    mc.execute(() -> applyGuestOpPolicy(st, mc, true));
+                } catch (Exception e) {
+                    VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected重试异常: {}", e.getMessage());
+                }
+            }, NAT_UPDATE_DELAY_SEC + 3, TimeUnit.SECONDS);
+        }
+    }
+
+    //debounce 应用房主+访客OP策略 publishServer后或访客连接时调用
+    public void applyOpPolicy(net.minecraft.server.MinecraftServer server, boolean hostOp, boolean guestOp) {
+        try {
+            String hostName = Minecraft.getInstance().getUser().getName();
+            for (var player : server.getPlayerList().getPlayers()) {
+                String name = player.getName().getString();
+                boolean isHost = name.equals(hostName);
+                boolean want = isHost ? hostOp : guestOp;
+                String cmd = want ? "op " + name : "deop " + name;
+                server.getCommands().performPrefixedCommand(
+                    server.createCommandSourceStack(), cmd);
+                VoxLinkMod.LOGGER.info("[RoomManager] {}{}: {}",
+                    isHost ? "房主" : "访客", want ? "OP" : "DEOP", name);
+            }
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[RoomManager] OP策略应用失败: {}", e.getMessage());
+        }
+    }
+
+    //debounce 访客连接后重试确保deop生效
+    private void applyGuestOpPolicy(RoomState st, Minecraft mc, boolean retry) {
+        try {
+            var server = mc.getSingleplayerServer();
+            if (server == null) return;
+            applyOpPolicy(server, st.roomInfo.isHostOp(), st.roomInfo.isGuestOp());
+        } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[RoomManager] 访客OP处理失败: {}", e.getMessage());
         }
     }
 
@@ -1311,8 +1390,8 @@ if (wasPending) {
         VoxLinkMod.LOGGER.info("对端已断开: {}", from);
         RoomState state = currentRoom.get();
         if (state != null && state != PENDING && state.roomInfo.isHost() && from != null) {
-            UdpHolePuncher puncher = connectionManager.removeHolePuncher("host");
-            if (puncher != null) puncher.close();
+            //debounce 清hostPunching 否则新join_request被排队卡住
+            connectionManager.clearHostPunchingState();
             ReliableUdpTransport transport = connectionManager.removeUdpTransport(from);
             if (transport != null) {
                 try { transport.close(); } catch (Exception ignored) {}

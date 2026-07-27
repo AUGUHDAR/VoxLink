@@ -38,10 +38,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
     private AuthType authType = AuthType.OFFLINE;
     private boolean guestOp = false;
     private String gameType = "survival";
-    private boolean allowCheats = false;
+    private boolean hostOp = false;
     private Button guestOpButton;
     private Button gameTypeButton;
-    private Button cheatsButton;
+    private Button hostOpButton;
 
     private String selectedCategory = "other";
     private Map<String, String> categoryMap = new LinkedHashMap<>();
@@ -188,28 +188,35 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         }).bounds(centerX - BTN_W / 2, advY + ADV_ROW1_OFFSET_Y, HALF_BTN_W, BTN_H).build();
         this.addRenderableWidget(gameTypeButton);
 
-        cheatsButton = Button.builder(buildCheatsLabel(), button -> {
-            allowCheats = !allowCheats;
-            cheatsButton.setMessage(buildCheatsLabel());
+        hostOpButton = Button.builder(buildHostOpLabel(), button -> {
+            hostOp = !hostOp;
+            hostOpButton.setMessage(buildHostOpLabel());
+            //debounce 房主OP关闭时访客OP强制关且禁用
+            if (!hostOp && guestOp) {
+                guestOp = false;
+                guestOpButton.setMessage(buildGuestOpLabel());
+            }
+            guestOpButton.active = hostOp;
         }).bounds(centerX + PAIR_BTN_OFFSET, advY + ADV_ROW1_OFFSET_Y, HALF_BTN_W, BTN_H).build();
-        this.addRenderableWidget(cheatsButton);
+        this.addRenderableWidget(hostOpButton);
 
         guestOpButton = Button.builder(buildGuestOpLabel(), button -> {
             guestOp = !guestOp;
             guestOpButton.setMessage(buildGuestOpLabel());
         }).bounds(centerX - BTN_W / 2, advY + ADV_ROW2_OFFSET_Y, HALF_BTN_W, BTN_H).build();
+        guestOpButton.active = hostOp;
         this.addRenderableWidget(guestOpButton);
 
         if (TerracottaManager.isBinaryReady()) {
             addRenderableWidget(Button.builder(
-                    Component.translatable("voxlink.terracotta.toggle",
+                    Component.translatable("voxlink.terracotta.toggle.join",
                             Component.translatable(VoxLinkMod.getConfig().isParallelP2P()
                                     ? "voxlink.terracotta.on" : "voxlink.terracotta.off")),
                     button -> {
                         boolean v = !VoxLinkMod.getConfig().isParallelP2P();
                         VoxLinkMod.getConfig().setParallelP2P(v);
                         VoxLinkMod.getConfig().save();
-                        button.setMessage(Component.translatable("voxlink.terracotta.toggle",
+                        button.setMessage(Component.translatable("voxlink.terracotta.toggle.join",
                                 Component.translatable(v ? "voxlink.terracotta.on" : "voxlink.terracotta.off")));
                     }
             ).bounds(centerX + PAIR_BTN_OFFSET, advY + ADV_ROW2_OFFSET_Y, HALF_BTN_W, BTN_H).build());
@@ -236,7 +243,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             authButton.active = false;
             guestOpButton.active = false;
             gameTypeButton.active = false;
-            cheatsButton.active = false;
+            hostOpButton.active = false;
             customCategoryField.setEditable(false);
             for (Button btn : categoryButtons) {
                 btn.active = false;
@@ -374,9 +381,9 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         return Component.translatable("voxlink.game_type." + gameType);
     }
 
-    private Component buildCheatsLabel() {
-        return allowCheats ? Component.translatable("voxlink.cheats.on")
-                : Component.translatable("voxlink.cheats.off");
+    private Component buildHostOpLabel() {
+        return hostOp ? Component.translatable("voxlink.host_op.on")
+                : Component.translatable("voxlink.host_op.off");
     }
 
     private String resolveCategory() {
@@ -469,7 +476,9 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                 default -> GameType.SURVIVAL;
             };
             this.publishedServer = server;
-            boolean published = server.publishServer(selectedGameType, allowCheats, mcPort);
+            //debounce allowCommands=guestOp 访客OP控制世界命令开关 房主OP由applyOpPolicy单独设置
+            boolean allowCommands = guestOp;
+            boolean published = server.publishServer(selectedGameType, allowCommands, mcPort);
             if (!published) {
                 creating = false;
                 if (mc.player != null) {
@@ -482,6 +491,8 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                 server.setUsesAuthentication(false);
                 VoxLinkMod.LOGGER.info("[CreateRoom] publishServer后重新关闭正版验证 (usesAuthentication={})", server.usesAuthentication());
             }
+            //debounce publishServer启用命令会给所有人OP 这里按hostOp/guestOp重新分配
+            VoxLinkMod.getRoomManager().applyOpPolicy(server, hostOp, guestOp);
         }
 
         final int effectivePort = server.getPort() > 0 ? server.getPort() : mcPort;
@@ -506,7 +517,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                             createdRoom = roomInfo;
                             roomInfo.setGuestOp(guestOp);
                             roomInfo.setGameType(gameType);
-                            roomInfo.setAllowCheats(allowCheats);
+                            roomInfo.setHostOp(hostOp);
                             sendChatMessages(mc, roomInfo);
                             mc.setScreen(CreateRoomScreen.this);
                         }

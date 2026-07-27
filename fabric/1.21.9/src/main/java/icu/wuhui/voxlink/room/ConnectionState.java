@@ -29,7 +29,7 @@ public enum ConnectionState {
             case STUN_PROBE -> next == SIGNAL_EXCHANGE || next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED;
             case SIGNAL_EXCHANGE -> next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED || next == TRANSPORT_SETUP;
             case UDP_PUNCH -> next == TRANSPORT_SETUP || next == TCP_FALLBACK || next == FAILED || next == CONNECTED;
-            case TCP_FALLBACK -> next == TRANSPORT_SETUP || next == FAILED || next == CONNECTED;
+            case TCP_FALLBACK -> next == TRANSPORT_SETUP || next == FAILED || next == CONNECTED || next == STUN_PROBE || next == UDP_PUNCH;
             case TRANSPORT_SETUP -> next == CONNECTED || next == FAILED;
             case CONNECTED -> next == DISCONNECTED;
             case DISCONNECTED, FAILED -> next == IDLE || next == STUN_PROBE || next == UDP_PUNCH;
@@ -56,6 +56,15 @@ public enum ConnectionState {
 
     public static ConnectionState getCurrent() {
         return currentState;
+    }
+
+    //debounce 阶段六: 可观测性访问器 UI轮询显示当前状态持续时间
+    public static long getStateEnterTime() {
+        return stateEnterTime;
+    }
+
+    public static long getStateDurationMs() {
+        return System.currentTimeMillis() - stateEnterTime;
     }
 
     public static void reset() {

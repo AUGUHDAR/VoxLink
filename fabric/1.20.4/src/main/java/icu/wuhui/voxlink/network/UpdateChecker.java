@@ -12,20 +12,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class UpdateChecker {
     private static final String RELEASES_API = "https://api.github.com/repos/AUGUHDAR/VoxLink/releases/latest";
     private static final int CONNECT_TIMEOUT_SEC = 10;
     private static final int REQUEST_TIMEOUT_SEC = 15;
-    private static final AtomicBoolean checked = new AtomicBoolean(false);
 
     private UpdateChecker() {}
 
-    //进世界时调用一次
+    //每次进世界都检查
     public static void checkOnce() {
         if (!VoxLinkMod.getConfig().isUpdateCheckEnabled()) return;
-        if (!checked.compareAndSet(false, true)) return;
 
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SEC))
