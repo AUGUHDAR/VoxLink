@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.network.chat.Component;
 
@@ -28,7 +29,7 @@ public class VoxLinkClient implements ClientModInitializer {
                 RoomInfo room = rmStart != null ? rmStart.getCurrentRoom() : null;
                 if (room != null && room.isHost()) {
                     server.setUsesAuthentication(false);
-                    VoxLinkMod.LOGGER.info("主持房间离线模式已开启");
+                    VoxLinkMod.LOGGER.info("Host room offline mode enabled");
                 }
             }
         });
@@ -86,7 +87,7 @@ public class VoxLinkClient implements ClientModInitializer {
                     && !ConnectionHelper.isConnecting()) {
                 autoLeaveTicks++;
                 if (autoLeaveTicks >= AUTO_LEAVE_DELAY_TICKS) {
-                    VoxLinkMod.LOGGER.info("MC退出世界，自动退房间({}tick后)", autoLeaveTicks);
+                    VoxLinkMod.LOGGER.info("MC exited world, auto leave room (after {} ticks)", autoLeaveTicks);
                     autoLeaveTicks = 0;
                     rmRef.leaveRoom();
                 }

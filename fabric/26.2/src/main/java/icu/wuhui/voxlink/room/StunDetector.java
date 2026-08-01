@@ -103,7 +103,7 @@ public final class StunDetector {
                 }
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunDetector] 获取本地IP失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.warn("[StunDetector] Get local IP failed: {}", e.getMessage());
         }
         return null;
     }
@@ -133,12 +133,12 @@ public final class StunDetector {
             if (myParts.length == 4 && hostParts.length == 4) {
                 boolean same = myParts[0].equals(hostParts[0]) && myParts[1].equals(hostParts[1]) && myParts[2].equals(hostParts[2]);
                 if (same) {
-                    VoxLinkMod.LOGGER.info("[StunDetector] 内网检测: myIp={} hostIp={} 同一内网", myLocalIp, hostLocalIp);
+                    VoxLinkMod.LOGGER.info("[StunDetector] LAN check: myIp={} hostIp={} same LAN", myLocalIp, hostLocalIp);
                 }
                 return same;
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunDetector] 内网检测失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.warn("[StunDetector] LAN check failed: {}", e.getMessage());
         }
         return false;
     }

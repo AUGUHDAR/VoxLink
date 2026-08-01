@@ -1,0 +1,69 @@
+﻿.\gradlew.bat : WARNING: A restricted method in java.lang.System has been called
+At line:15 char:5508
++ ... \neoforge\26.2"; .\gradlew.bat build -x test --no-daemon 2>&1 | Tee-O ...
++                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (WARNING: A rest...has been called:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnam
+ed module (file:/D:/.gradle/wrapper/dists/gradle-9.2.1-bin/2t0n5ozlw9xmuyvbp7dnzaxug/gradle-9.2.1/lib/native-platform-0
+.22-milestone-29.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.2.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :
+Creating Minecraft artifacts without recompilation.
+
+> Task :compileStubsJava UP-TO-DATE
+> Task :createMinecraftArtifacts
+Picked up JAVA_TOOL_OPTIONS: -Djava.net.preferIPv4Stack=true
+Loaded 154 artifacts from D:\..\voxlink\neoforge\26.2\build\tmp\createMinecraftArtifacts\nfrt_artifact_manifest.properties
+[1m*** Started working on [4mdownloadManifest[0m[0m
+  DL    https://launchermeta.mojang.com/mc/game/version_manifest_v2.json
+ [1m[92mDONE [0m Completed [4mdownloadManifest[0m in 0.97s
+[1m*** Started working on [4mdownloadJson[0m[0m
+ [1m[92mDONE [0m Completed [4mdownloadJson[0m in 0.01s
+[1m*** Started working on [4mdownloadClient[0m[0m
+[1m*** Started working on [4mdownloadServer[0m[0m
+ [1m[92mDONE [0m Completed [4mdownloadServer[0m in 0.04s
+ [1m[92mDONE [0m Completed [4mdownloadClient[0m in 0.04s
+[1m*** Started working on [4mpreProcessJar[0m[0m
+ RUN   Running external tool net.neoforged.installertools:installertools:4.0.16:fatjar
+ [1m[92mDONE [0m Completed [4mpreProcessJar[0m in 3.90s
+[1m*** Started working on [4mbinaryPatch[0m[0m
+  [33mWARNING: [0mnet.neoforged.installertools:binarypatcher:4.0.12:fatjar is not present in the artifact manifest
+ RUN   Running external tool net.neoforged.installertools:binarypatcher:4.0.12:fatjar
+ [1m[92mDONE [0m Completed [4mbinaryPatch[0m in 4.92s
+[1m*** Started working on [4mcopyUnpatchedClasses[0m[0m
+ [1m[92mDONE [0m Completed [4mcopyUnpatchedClasses[0m in 5.71s
+[1m*** Started working on [4mapplyDevTransforms[0m[0m
+ RUN   Running external tool net.neoforged.installertools:installertools:4.0.12:fatjar
+ [1m[92mDONE [0m Completed [4mapplyDevTransforms[0m in 4.64s
+Total runtime: 21.33s
+
+
+> Task :processStubsResources NO-SOURCE
+> Task :stubsClasses UP-TO-DATE
+> Task :compileJava
+> Task :processResources
+> Task :classes
+> Task :jarJar NO-SOURCE
+> Task :jar
+> Task :sourcesJar
+> Task :assemble
+> Task :check
+> Task :build
+
+[Incubating] Problems report is available at: file:///D:/%E6%A1%8C%E9%9D%A2/voxlink/neoforge/26.2/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.2.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 2m 23s
+6 actionable tasks: 5 executed, 1 up-to-date

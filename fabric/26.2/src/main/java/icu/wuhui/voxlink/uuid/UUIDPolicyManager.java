@@ -92,15 +92,15 @@ public class UUIDPolicyManager {
                                 id.substring(12, 16) + "-" + id.substring(16, 20) + "-" + id.substring(20);
                         UUID uuid = UUID.fromString(formatted);
                         uuidCache.put(playerName, uuid);
-                        LOGGER.debug("缓存了{}的官方UUID", playerName);
+                        LOGGER.debug("Cached official UUID for {}", playerName);
                         return uuid;
                     }
                 } catch (Exception e) {
-                    LOGGER.debug("Mojang响应解析失败({}): {}", playerName, e.getMessage());
+                    LOGGER.debug("Mojang response parse failed ({}): {}", playerName, e.getMessage());
                 }
             }
         } catch (Exception e) {
-            LOGGER.debug("获取{}的官方UUID失败: {}", playerName, e.getMessage());
+            LOGGER.debug("Failed to get official UUID for {}: {}", playerName, e.getMessage());
         }
         return null;
     }

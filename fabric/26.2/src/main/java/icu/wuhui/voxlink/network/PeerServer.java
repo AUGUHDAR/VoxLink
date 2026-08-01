@@ -86,10 +86,10 @@ public class PeerServer {
             httpServer.start();
             port = httpServer.getAddress().getPort();
             refreshCache();
-            LOGGER.info("Peer服务启动，端口{}", port);
+            LOGGER.info("Peer server started, port {}", port);
             return port;
         } catch (IOException e) {
-            LOGGER.error("Peer服务启动失败: {}", e.getMessage());
+            LOGGER.error("Peer server start failed: {}", e.getMessage());
             return -1;
         }
     }
@@ -136,7 +136,7 @@ public class PeerServer {
         try {
             cachedProtocolVersion = ViaCompat.isViaLoaded() ? ViaCompat.getServerProtocolVersion() : 0;
         } catch (Exception e) {
-            LOGGER.debug("获取协议版本失败: {}", e.getMessage());
+            LOGGER.debug("Failed to get protocol version: {}", e.getMessage());
         }
         try {
             List<Map<String, String>> mods = new java.util.ArrayList<>();
@@ -148,7 +148,7 @@ public class PeerServer {
             });
             cachedMods = Collections.unmodifiableList(mods);
         } catch (Exception e) {
-            LOGGER.debug("获取mod列表失败: {}", e.getMessage());
+            LOGGER.debug("Failed to get mod list: {}", e.getMessage());
         }
     }
 

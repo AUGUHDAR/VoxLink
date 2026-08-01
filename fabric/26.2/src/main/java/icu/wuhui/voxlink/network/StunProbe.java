@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
@@ -110,7 +111,7 @@ public class StunProbe {
             originalTimeout = socket.getSoTimeout();
             socket.setSoTimeout(DISCOVER_TIMEOUT_MS);
         } catch (Exception ignored) {}
-        VoxLinkMod.LOGGER.info("[StunProbe] 开始探测，{}个STUN服务器, socket port={}, timeout={}ms", stunUrls.size(), socket.getLocalPort(), DISCOVER_TIMEOUT_MS);
+        VoxLinkMod.LOGGER.info("[StunProbe] Start probing, {} STUN servers, socket port={}, timeout={}ms", stunUrls.size(), socket.getLocalPort(), DISCOVER_TIMEOUT_MS);
         try {
             int attempted = 0;
             int timeouts = 0;
@@ -147,23 +148,23 @@ public class StunProbe {
                         }
                         MappedAddress mapped = parseBindingResponse(responseData, request);
                         if (mapped != null) {
-                            VoxLinkMod.LOGGER.info("[StunProbe] 映射地址: {}:{}", mapped.ip, mapped.port);
+                            VoxLinkMod.LOGGER.info("[StunProbe] Mapped address: {}:{}", mapped.ip, mapped.port);
                             return new PublicMappedAddress(mapped.ip, mapped.port);
                         } else {
                             errors++;
-                            VoxLinkMod.LOGGER.warn("[StunProbe] {}的响应解析不了，继续等", url);
+                            VoxLinkMod.LOGGER.warn("[StunProbe] Cannot parse {} response, keep waiting", url);
                             continue;
                         }
                     }
                 } catch (SocketTimeoutException e) {
                     timeouts++;
-                    VoxLinkMod.LOGGER.debug("[StunProbe] {}探测超时: {}", url, e.getMessage());
+                    VoxLinkMod.LOGGER.debug("[StunProbe] {} probe timeout: {}", url, e.getMessage());
                 } catch (Exception e) {
                     errors++;
-                    VoxLinkMod.LOGGER.warn("[StunProbe] {}探测失败: {}", url, e.getMessage());
+                    VoxLinkMod.LOGGER.warn("[StunProbe] {} probe failed: {}", url, e.getMessage());
                 }
             }
-            VoxLinkMod.LOGGER.warn("[StunProbe] 映射地址探测失败: 尝试={}, 超时={}, 错误={}", attempted, timeouts, errors);
+            VoxLinkMod.LOGGER.warn("[StunProbe] Mapped address probe failed: attempted={}, timeouts={}, errors={}", attempted, timeouts, errors);
             return null;
         } finally {
             try {
@@ -179,7 +180,7 @@ public class StunProbe {
             originalTimeout = socket.getSoTimeout();
             socket.setSoTimeout(DUAL_STUN_TIMEOUT_MS);
         } catch (Exception ignored) {}
-        VoxLinkMod.LOGGER.info("[StunProbe] 并行双STUN: {} + {}, socket port={}", stunUrl1, stunUrl2, socket.getLocalPort());
+        VoxLinkMod.LOGGER.info("[StunProbe] Parallel dual STUN: {} + {}, socket port={}", stunUrl1, stunUrl2, socket.getLocalPort());
         PublicMappedAddress[] results = new PublicMappedAddress[2];
         try {
             ParsedStunUrl u1 = parseStunUrl(stunUrl1);
@@ -224,11 +225,11 @@ public class StunProbe {
             if (results[0] == null) results[0] = discoverMappedAddress(socket, java.util.List.of(stunUrl1));
             if (results[1] == null) results[1] = discoverMappedAddress(socket, java.util.List.of(stunUrl2));
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunProbe] 并行双STUN异常: {}", e.getMessage());
+            VoxLinkMod.LOGGER.warn("[StunProbe] Parallel dual STUN exception: {}", e.getMessage());
         } finally {
             try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
         }
-        VoxLinkMod.LOGGER.info("[StunProbe] 双STUN结果: [0]={}, [1]={}", results[0], results[1]);
+        VoxLinkMod.LOGGER.info("[StunProbe] Dual STUN results: [0]={}, [1]={}", results[0], results[1]);
         return results;
     }
 
@@ -246,7 +247,7 @@ public class StunProbe {
         int n = stunUrls.size();
         ParsedStunUrl[] parsed = new ParsedStunUrl[n];
         byte[][] reqs = new byte[n][];
-        VoxLinkMod.LOGGER.info("[StunProbe] 并行竞速{}STUN取{}个, socket port={}", n, need, socket.getLocalPort());
+        VoxLinkMod.LOGGER.info("[StunProbe] Parallel race {} STUN take {} , socket port={}", n, need, socket.getLocalPort());
         int got = 0;
         try {
             for (int i = 0; i < n; i++) {
@@ -275,18 +276,18 @@ public class StunProbe {
                         if (m != null) {
                             results[got] = new PublicMappedAddress(m.ip, m.port);
                             got++;
-                            VoxLinkMod.LOGGER.info("[StunProbe] 竞速第{}个: {} -> {}:{}", got, stunUrls.get(i), m.ip, m.port);
+                            VoxLinkMod.LOGGER.info("[StunProbe] Race #{}: {} -> {}:{}", got, stunUrls.get(i), m.ip, m.port);
                         }
                         break;
                     }
                 }
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunProbe] 并行竞速异常: {}", e.getMessage());
+            VoxLinkMod.LOGGER.warn("[StunProbe] Parallel race exception: {}", e.getMessage());
         } finally {
             try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
         }
-        VoxLinkMod.LOGGER.info("[StunProbe] 竞速完成: 取到{}/{}", got, need);
+        VoxLinkMod.LOGGER.info("[StunProbe] Race done: got {}/{}", got, need);
         return results;
     }
 
@@ -301,7 +302,7 @@ public class StunProbe {
         } catch (Exception ignored) {}
         String[] urls = {stunUrl1, stunUrl2, stunUrl3, stunUrl4};
         PublicMappedAddress[] results = new PublicMappedAddress[4];
-        VoxLinkMod.LOGGER.info("[StunProbe] 并行4STUN: {}+{}+{}+{}, socket port={}", stunUrl1, stunUrl2, stunUrl3, stunUrl4, socket.getLocalPort());
+        VoxLinkMod.LOGGER.info("[StunProbe] Parallel 4 STUN: {}+{}+{}+{}, socket port={}", stunUrl1, stunUrl2, stunUrl3, stunUrl4, socket.getLocalPort());
         try {
             ParsedStunUrl[] parsed = new ParsedStunUrl[4];
             byte[][] reqs = new byte[4][];
@@ -349,11 +350,11 @@ public class StunProbe {
                 }
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunProbe] 并行4STUN异常: {}", e.getMessage());
+            VoxLinkMod.LOGGER.warn("[StunProbe] Parallel 4 STUN exception: {}", e.getMessage());
         } finally {
             try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
         }
-        VoxLinkMod.LOGGER.info("[StunProbe] 4STUN结果: [0]={}, [1]={}, [2]={}, [3]={}", results[0], results[1], results[2], results[3]);
+        VoxLinkMod.LOGGER.info("[StunProbe] 4 STUN results: [0]={}, [1]={}, [2]={}, [3]={}", results[0], results[1], results[2], results[3]);
         return results;
     }
 
@@ -410,6 +411,34 @@ public class StunProbe {
     }
 
     private static final AtomicReference<CacheEntry> cachedEntry = new AtomicReference<>();
+    //debounce 记录探测时的本地IP 换网络后失效缓存
+    private static volatile String lastProbeLocalIp;
+
+    public static String getLastProbeLocalIp() {
+        return lastProbeLocalIp;
+    }
+
+    //debounce 失效内存缓存 换网络后强制重新探测
+    public static void invalidateCache() {
+        cachedEntry.set(null);
+    }
+
+    //debounce 检查网络是否变化 本地IP变了说明换网络了
+    public static boolean isNetworkChanged() {
+        String last = lastProbeLocalIp;
+        if (last == null || "unknown".equals(last)) return false;
+        String current = detectLocalIp();
+        return !last.equals(current);
+    }
+
+    private static String detectLocalIp() {
+        try (java.net.DatagramSocket s = new java.net.DatagramSocket()) {
+            s.connect(java.net.InetAddress.getByName("8.8.8.8"), 53);
+            return s.getLocalAddress().getHostAddress();
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
 
     public static ProbeResult getCachedResult() {
         CacheEntry entry = cachedEntry.get();
@@ -427,7 +456,7 @@ public class StunProbe {
         // 1. 内存缓存（5分钟）
         ProbeResult cached = getCachedResult();
         if (cached != null) {
-            VoxLinkMod.LOGGER.info("[StunProbe] 用内存缓存: NAT={}, 可达={}", cached.natType.key, cached.reachableStunUrls.size());
+            VoxLinkMod.LOGGER.info("[StunProbe] Using memory cache: NAT={}, reachable={}", cached.natType.key, cached.reachableStunUrls.size());
             return CompletableFuture.completedFuture(cached);
         }
         // 2. 磁盘缓存（24小时）
@@ -440,7 +469,7 @@ public class StunProbe {
             }
             ProbeResult result = new ProbeResult(nat, results);
             setCachedResult(result);
-            VoxLinkMod.LOGGER.info("[StunProbe] 用磁盘缓存: NAT={}, mapped={}:{}", nat.key, diskCache.mappedIp, diskCache.mappedPort);
+            VoxLinkMod.LOGGER.info("[StunProbe] Using disk cache: NAT={}, mapped={}:{}", nat.key, diskCache.mappedIp, diskCache.mappedPort);
             return CompletableFuture.completedFuture(result);
         }
         return CompletableFuture.supplyAsync(() -> {
@@ -467,6 +496,7 @@ public class StunProbe {
     }
 
     public static ProbeResult probe(List<List<String>> stunGroups) {
+        lastProbeLocalIp = detectLocalIp();
         List<CompletableFuture<StunServerResult>> futures = new ArrayList<>();
         for (List<String> group : stunGroups) {
             for (String url : group) {
@@ -474,11 +504,20 @@ public class StunProbe {
             }
         }
 
+        //debounce 凑够2个成功即提前返回 detectNatType只需2个可达
+        CountDownLatch twoSuccessLatch = new CountDownLatch(2);
+        for (CompletableFuture<StunServerResult> f : futures) {
+            f.whenComplete((result, ex) -> {
+                if (result != null && result.reachable) {
+                    twoSuccessLatch.countDown();
+                }
+            });
+        }
+
         try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(PROBE_TIMEOUT_MS + 2000L, TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[StunProbe] 部分探测超时: {}", e.getMessage());
+            twoSuccessLatch.await(PROBE_TIMEOUT_MS + 2000L, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
 
         List<StunServerResult> allResults = new ArrayList<>();
@@ -492,14 +531,14 @@ public class StunProbe {
         NatType natType = detectNatType(allResults);
 
         long reachableCount = allResults.stream().filter(r -> r.reachable).count();
-        VoxLinkMod.LOGGER.info("[StunProbe] NAT={}, 可达={}/{}",
+        VoxLinkMod.LOGGER.info("[StunProbe] NAT={}, reachable={}/{}",
                 natType.key, reachableCount, allResults.size());
 
         return new ProbeResult(natType, allResults);
     }
 
     private static CompletableFuture<StunServerResult> probeSingleServerAsync(String stunUrl) {
-        return CompletableFuture.supplyAsync(() -> probeSingleServer(stunUrl));
+        return CompletableFuture.supplyAsync(() -> probeSingleServer(stunUrl), STUN_EXECUTOR);
     }
 
     private static StunServerResult probeSingleServer(String stunUrl) {
@@ -534,11 +573,11 @@ public class StunProbe {
                         stunUrl, latencyMs, mapped.ip, mapped.port);
                 return new StunServerResult(stunUrl, parsed.host, parsed.port, true, latencyMs, mapped.ip, mapped.port);
             } else {
-                VoxLinkMod.LOGGER.debug("[StunProbe] {}有响应但没映射地址", stunUrl);
+                VoxLinkMod.LOGGER.debug("[StunProbe] {} has response but no mapped address", stunUrl);
                 return new StunServerResult(stunUrl, parsed.host, parsed.port, true, latencyMs, null, 0);
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunProbe] {}不可达: {}", stunUrl, e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunProbe] {} unreachable: {}", stunUrl, e.getMessage());
             return new StunServerResult(stunUrl, parsed.host, parsed.port, false, -1, null, 0);
         } finally {
             if (socket != null) {
@@ -555,7 +594,7 @@ public class StunProbe {
             ProbeResult result = probe(stunGroups);
             return result != null ? result.natType : null;
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunProbe] NAT类型探测失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunProbe] NAT type probe failed: {}", e.getMessage());
             return null;
         }
     }
@@ -597,13 +636,13 @@ public class StunProbe {
             int type = ((resp[0] & 0xFF) << 8) | (resp[1] & 0xFF);
             if (type == 0x0111) {
                 //错误响应, 服务器不支持RFC5780
-                VoxLinkMod.LOGGER.info("[StunProbe] STUN错误响应, 不支持RFC5780");
+                VoxLinkMod.LOGGER.info("[StunProbe] STUN error response, RFC5780 not supported");
                 return null;
             }
             if (type != 0x0101) return null;
             return (InetSocketAddress) recv.getSocketAddress();
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunProbe] CHANGE-REQUEST失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunProbe] CHANGE-REQUEST failed: {}", e.getMessage());
             return null;
         }
     }
@@ -625,14 +664,14 @@ public class StunProbe {
             try {
                 socket.receive(recv);
             } catch (SocketTimeoutException e) {
-                VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 Step1无响应, 降级");
+                VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 Step1 no response, fallback");
                 return null;
             }
             byte[] resp1 = new byte[recv.getLength()];
             System.arraycopy(recv.getData(), 0, resp1, 0, recv.getLength());
             MappedAddress m1 = parseBindingResponse(resp1, req1);
             if (m1 == null) {
-                VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 Step1解析失败, 降级");
+                VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 Step1 parse failed, fallback");
                 return null;
             }
             //Step2: CHANGE-REQUEST (changePort=true)
@@ -644,10 +683,10 @@ public class StunProbe {
                 DatagramPacket recv3 = new DatagramPacket(buf, buf.length);
                 try {
                     socket.receive(recv3);
-                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780判定FullCone (CHANGE-REQUEST成功+altPort响应)");
+                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 determined FullCone (CHANGE-REQUEST success + altPort response)");
                     return NatType.FULL_CONE;
                 } catch (SocketTimeoutException e) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780判定RestrictedCone (CHANGE-REQUEST成功+altPort无响应)");
+                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 determined RestrictedCone (CHANGE-REQUEST success + altPort no response)");
                     return NatType.RESTRICTED_CONE;
                 }
             }
@@ -662,16 +701,16 @@ public class StunProbe {
                 MappedAddress mSym = parseBindingResponse(respSym, reqSym);
                 if (mSym != null && mSym.port != m1.port) {
                     //端口不同=对称NAT, 降级让差值法判EasySym方向
-                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780检测到对称NAT({} vs {}), 降级差值法", m1.port, mSym.port);
+                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 detected symmetric NAT ({} vs {}), fallback to delta method", m1.port, mSym.port);
                     return null;
                 }
             } catch (SocketTimeoutException e) {
                 //altPort也无响应, 按PortRestricted处理
             }
-            VoxLinkMod.LOGGER.info("[StunProbe] RFC5780判定PortRestricted (CHANGE-REQUEST无响应, 非对称)");
+            VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 determined PortRestricted (CHANGE-REQUEST no response, non-symmetric)");
             return NatType.PORT_RESTRICTED_CONE;
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunProbe] RFC5780异常: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunProbe] RFC5780 exception: {}", e.getMessage());
             return null;
         } finally {
             try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
@@ -684,7 +723,7 @@ public class StunProbe {
                 .toList();
 
         if (reachable.size() < 2) {
-            VoxLinkMod.LOGGER.info("[StunProbe] 可达服务器不够({})，无法判断NAT类型", reachable.size());
+            VoxLinkMod.LOGGER.info("[StunProbe] Not enough reachable servers ({}), cannot determine NAT type", reachable.size());
             return reachable.isEmpty() ? NatType.UNKNOWN : NatType.PORT_RESTRICTED_CONE;
         }
 
@@ -700,11 +739,11 @@ public class StunProbe {
                 rfc5780Tries++;
                 NatType rfc5780 = detectNatTypeWithRfc5780(socket, s.host, s.port, s.port + 1);
                 if (rfc5780 != null) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780判定: {} -> {}", s.url, rfc5780.key);
+                    VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 determined: {} -> {}", s.url, rfc5780.key);
                     return rfc5780;
                 }
             }
-            VoxLinkMod.LOGGER.info("[StunProbe] RFC5780全部失败({}个试过), 降级两服务器差值法", rfc5780Tries);
+            VoxLinkMod.LOGGER.info("[StunProbe] RFC5780 all failed ({} tried), fallback to two-server delta method", rfc5780Tries);
 
             //降级差值
             StunServerResult first = reachable.get(0);
@@ -751,7 +790,7 @@ public class StunProbe {
             if (mapped1 == null || mapped2 == null) return NatType.UNKNOWN;
 
             if (!mapped1.ip.equals(mapped2.ip) || mapped1.port != mapped2.port) {
-                VoxLinkMod.LOGGER.info("[StunProbe] 对称NAT，映射地址不同 ({}:{} vs {}:{})", mapped1.ip, mapped1.port, mapped2.ip, mapped2.port);
+                VoxLinkMod.LOGGER.info("[StunProbe] Symmetric NAT, mapped addresses differ ({}:{} vs {}:{})", mapped1.ip, mapped1.port, mapped2.ip, mapped2.port);
                 // 修复1: 用同一socket发第3个STUN, 避免新建socket致basePort基准失真
                 NatType easyType = detectEasySymmetric(socket, mapped1.port, reachable);
                 if (easyType != null) {
@@ -765,7 +804,7 @@ public class StunProbe {
                 int twoDiff = mapped2.port - mapped1.port;
                 int absDiff = Math.abs(twoDiff);
                 if (!mapped1.ip.equals(mapped2.ip)) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback: 公网IP不同({} vs {}), 判定HardSym", mapped1.ip, mapped2.ip);
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback: public IP differs ({} vs {}), determined HardSym", mapped1.ip, mapped2.ip);
                     return NatType.SYMMETRIC;
                 }
                 //15阈值, 异常时兜底100
@@ -773,20 +812,20 @@ public class StunProbe {
                         ? EASY_SYM_PORT_DELTA_THRESHOLD : EASY_SYM_PORT_DELTA_FALLBACK;
                 if (absDiff > 0 && absDiff < threshold) {
                     NatType easyFallback = twoDiff > 0 ? NatType.SYMMETRIC_EASY_INC : NatType.SYMMETRIC_EASY_DEC;
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback(三次采样失败): {}→{} diff={}, 阈值={}, 判定{}", mapped1.port, mapped2.port, twoDiff, threshold, easyFallback.key);
-                    VoxLinkMod.LOGGER.debug("端口差值 {} -> {}", twoDiff, easyFallback.key);
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback (3-sample failed): {}->{} diff={}, threshold={}, determined {}", mapped1.port, mapped2.port, twoDiff, threshold, easyFallback.key);
+                    VoxLinkMod.LOGGER.debug("Port delta {} -> {}", twoDiff, easyFallback.key);
                     return easyFallback;
                 } else {
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback: {}→{} diff={}>={}, 阈值={}, 判定HardSym", mapped1.port, mapped2.port, absDiff, threshold, threshold);
-                    VoxLinkMod.LOGGER.debug("端口差值 {} -> {}", twoDiff, NatType.SYMMETRIC.key);
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym fallback: {}->{} diff={}>={}, threshold={}, determined HardSym", mapped1.port, mapped2.port, absDiff, threshold, threshold);
+                    VoxLinkMod.LOGGER.debug("Port delta {} -> {}", twoDiff, NatType.SYMMETRIC.key);
                     return NatType.SYMMETRIC;
                 }
             }
 
-            VoxLinkMod.LOGGER.info("[StunProbe] 非对称NAT，映射地址相同 ({}:{})", mapped1.ip, mapped1.port);
+            VoxLinkMod.LOGGER.info("[StunProbe] Non-symmetric NAT, mapped addresses same ({}:{})", mapped1.ip, mapped1.port);
             return NatType.PORT_RESTRICTED_CONE;
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunProbe] NAT检测失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunProbe] NAT detection failed: {}", e.getMessage());
             return NatType.UNKNOWN;
         } finally {
             if (socket != null) socket.close();
@@ -803,9 +842,9 @@ public class StunProbe {
             third = reachable.get(2);
         } else if (reachable.size() >= 1) {
             third = reachable.get(0);  // 复用第1个服务器, 同socket再发一次仍可触发NAT分配新端口
-            VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: 可达STUN仅{}, 复用{}:{}做第3次采样", reachable.size(), third.host, third.port);
+            VoxLinkMod.LOGGER.info("[StunProbe] EasySym detection: only {} reachable STUN, reuse {}:{} for 3rd sample", reachable.size(), third.host, third.port);
         } else {
-            VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: 无可用STUN, 跳过第三次采样");
+            VoxLinkMod.LOGGER.info("[StunProbe] EasySym detection: no STUN available, skip 3rd sample");
             return null;
         }
         try {
@@ -827,32 +866,32 @@ public class StunProbe {
                 //15阈值, 异常时兜底100
                 int threshold = (basePort > 0 && extraMapped.port > 0)
                         ? EASY_SYM_PORT_DELTA_THRESHOLD : EASY_SYM_PORT_DELTA_FALLBACK;
-                VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测(同socket第3服务器): basePort={}, extraPort={}, diff={}, 阈值={}", basePort, extraMapped.port, diff, threshold);
+                VoxLinkMod.LOGGER.info("[StunProbe] EasySym detection (same socket 3rd server): basePort={}, extraPort={}, diff={}, threshold={}", basePort, extraMapped.port, diff, threshold);
                 // 回归修复: 已确认是对称NAT(前两个STUN端口不同), 第3个采样只判定方向
                 //   diff > 0 且 < 15: EasySym递增
                 //   diff < 0 且 > -15: EasySym递减
                 //   absDiff >= 15: HardSym
                 //   diff == 0: 罕见, NAT偶尔复用端口, 仍按EasySym处理(方向取前两次)
                 if (diff > 0 && diff < threshold) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym递增(端口+{}, 阈值={})", diff, threshold);
-                    VoxLinkMod.LOGGER.debug("端口差值 {} -> {}", diff, NatType.SYMMETRIC_EASY_INC.key);
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym increment (port+{}, threshold={})", diff, threshold);
+                    VoxLinkMod.LOGGER.debug("Port delta {} -> {}", diff, NatType.SYMMETRIC_EASY_INC.key);
                     return NatType.SYMMETRIC_EASY_INC;
                 } else if (diff < 0 && diff > -threshold) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym递减(端口{}, 阈值={})", diff, threshold);
-                    VoxLinkMod.LOGGER.debug("端口差值 {} -> {}", diff, NatType.SYMMETRIC_EASY_DEC.key);
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym decrement (port{}, threshold={})", diff, threshold);
+                    VoxLinkMod.LOGGER.debug("Port delta {} -> {}", diff, NatType.SYMMETRIC_EASY_DEC.key);
                     return NatType.SYMMETRIC_EASY_DEC;
                 } else if (absDiff >= threshold) {
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: diff={}>={}, 判定HardSym", absDiff, threshold);
-                    VoxLinkMod.LOGGER.debug("端口差值 {} -> {}", diff, NatType.SYMMETRIC.key);
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym detection: diff={}>={}, determined HardSym", absDiff, threshold);
+                    VoxLinkMod.LOGGER.debug("Port delta {} -> {}", diff, NatType.SYMMETRIC.key);
                     return NatType.SYMMETRIC;
                 } else {
                     // diff == 0, NAT复用了端口, 但前两次已确认是对称NAT, 按EasySym处理
-                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym检测: diff=0(NAT复用端口), 仍判定EasySym");
+                    VoxLinkMod.LOGGER.info("[StunProbe] EasySym detection: diff=0 (NAT reuses port), still EasySym");
                     return NatType.SYMMETRIC_EASY_INC;
                 }
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunProbe] EasySym检测失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunProbe] EasySym detection failed: {}", e.getMessage());
         }
         return null;
     }
@@ -888,7 +927,7 @@ public class StunProbe {
         int msgLen = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
         int maxMsgLen = data.length - 20;
         if (msgLen > maxMsgLen) msgLen = maxMsgLen;
-        VoxLinkMod.LOGGER.info("[StunProbe] 绑定响应: dataLen={}, msgLen={}", data.length, msgLen);
+        VoxLinkMod.LOGGER.info("[StunProbe] Binding response: dataLen={}, msgLen={}", data.length, msgLen);
         int offset = 20;
 
         while (offset + 4 <= data.length && offset - 20 < msgLen) {
@@ -904,13 +943,13 @@ public class StunProbe {
             } else if (attrType == 0x8020) {
                 return parseXorMappedAddress(data, offset, attrLen, originalRequest);
             } else if (attrType == 0x8028) {
-                VoxLinkMod.LOGGER.debug("[StunProbe] 跳过FINGERPRINT");
+                VoxLinkMod.LOGGER.debug("[StunProbe] Skip FINGERPRINT");
             } else if (attrType == 0x8022) {
-                VoxLinkMod.LOGGER.debug("[StunProbe] 跳过SOFTWARE(len={})", attrLen);
+                VoxLinkMod.LOGGER.debug("[StunProbe] Skip SOFTWARE(len={})", attrLen);
             } else if (attrType == 0x8029) {
-                VoxLinkMod.LOGGER.debug("[StunProbe] 跳过MESSAGE-INTEGRITY(len={})", attrLen);
+                VoxLinkMod.LOGGER.debug("[StunProbe] Skip MESSAGE-INTEGRITY(len={})", attrLen);
             } else {
-                VoxLinkMod.LOGGER.warn("[StunProbe] 未知属性: 0x{}, len={}", Integer.toHexString(attrType), attrLen);
+                VoxLinkMod.LOGGER.warn("[StunProbe] Unknown attribute: 0x{}, len={}", Integer.toHexString(attrType), attrLen);
             }
 
             offset += 4 + attrLen;
@@ -991,7 +1030,7 @@ public class StunProbe {
                 String host = stripped.substring(0, lastColon);
                 String portStr = stripped.substring(lastColon + 1);
                 if (host.contains(":")) {
-                    VoxLinkMod.LOGGER.warn("[StunProbe] IPv6没加方括号，有歧义，忽略: {}", stunUrl);
+                    VoxLinkMod.LOGGER.warn("[StunProbe] IPv6 without brackets, ambiguous, ignore: {}", stunUrl);
                     return null;
                 }
                 try {
@@ -1059,17 +1098,17 @@ public class StunProbe {
                             selectedHost = parsed[i].host;
                             selectedPort = parsed[i].port;
                             ports.add(ma.port);
-                            VoxLinkMod.LOGGER.info("[StunProbe] P-PRE竞速选定STUN: {}:{}, 首端口={}", selectedHost, selectedPort, ma.port);
+                            VoxLinkMod.LOGGER.info("[StunProbe] P-PRE race selected STUN: {}:{}, first port={}", selectedHost, selectedPort, ma.port);
                         }
                         break;
                     }
                 }
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE竞速异常: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE race exception: {}", e.getMessage());
         }
         if (selectedHost == null) {
-            VoxLinkMod.LOGGER.warn("[StunProbe] P-PRE竞速无响应, 采样失败");
+            VoxLinkMod.LOGGER.warn("[StunProbe] P-PRE race no response, sampling failed");
             try { if (originalTimeout >= 0) socket.setSoTimeout(originalTimeout); } catch (Exception ignored) {}
             return ports;
         }
@@ -1097,7 +1136,7 @@ public class StunProbe {
                     catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
                 }
             } catch (Exception e) {
-                VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE采样#{}/{} 失败: {}", i + 1, count, e.getMessage());
+                VoxLinkMod.LOGGER.debug("[StunProbe] P-PRE sample #{}/{} failed: {}", i + 1, count, e.getMessage());
             }
         }
 

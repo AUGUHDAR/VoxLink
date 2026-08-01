@@ -54,7 +54,7 @@ public final class TerracottaClient {
                     }
                     //debounce 5xx退避重试
                     if (attempt < HTTP_MAX_RETRIES - 1) {
-                        LOGGER.debug("陶瓦HTTP {}返回{} 退避{}ms后重试", path, e.statusCode, HTTP_BACKOFF_MS[attempt]);
+                        LOGGER.debug("Terracotta HTTP {} returned {} retry after {}ms backoff", path, e.statusCode, HTTP_BACKOFF_MS[attempt]);
                         try {
                             Thread.sleep(HTTP_BACKOFF_MS[attempt]);
                         } catch (InterruptedException ie) {
@@ -65,7 +65,7 @@ public final class TerracottaClient {
                 } catch (IOException e) {
                     lastIoEx = e;
                     if (attempt < HTTP_MAX_RETRIES - 1) {
-                        LOGGER.debug("陶瓦HTTP {} IO异常 {} 退避{}ms后重试", path, e.getMessage(), HTTP_BACKOFF_MS[attempt]);
+                        LOGGER.debug("Terracotta HTTP {} IO exception {} retry after {}ms backoff", path, e.getMessage(), HTTP_BACKOFF_MS[attempt]);
                         try {
                             Thread.sleep(HTTP_BACKOFF_MS[attempt]);
                         } catch (InterruptedException ie) {

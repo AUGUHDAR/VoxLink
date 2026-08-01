@@ -215,7 +215,7 @@ public final class TerracottaBinary {
             readyCache.set(new ReadyCache(binaryPath, mtime, size, ok));
             return ok;
         } catch (Exception e) {
-            LOGGER.warn("陶瓦校验异常, 当作未就绪: {}", e.getMessage());
+            LOGGER.warn("Terracotta verify exception, treat as not ready: {}", e.getMessage());
             return false;
         }
     }
@@ -232,7 +232,7 @@ public final class TerracottaBinary {
             bridge.getMethod("loadLibrary", String.class).invoke(null, binaryPath.toAbsolutePath().toString());
             return true;
         } catch (Throwable t) {
-            LOGGER.warn("陶瓦 .so 加载失败: {}", t.getMessage());
+            LOGGER.warn("Terracotta .so load failed: {}", t.getMessage());
             return false;
         }
     }
@@ -273,7 +273,7 @@ public final class TerracottaBinary {
                 if (CURRENT.android) {
                     Path archivePath = CACHE_DIR.resolve(CURRENT.filename + ".downloading");
                     java.util.List<String> urls = raceMirrors(CURRENT.filename);
-                    LOGGER.info("[download] 镜像竞速排序: {}", urls);
+                    LOGGER.info("[download] Mirror race sort: {}", urls);
                     Exception lastError = null;
                     for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
                         if (Thread.currentThread().isInterrupted() || downloadCancelled) break;
@@ -310,7 +310,7 @@ public final class TerracottaBinary {
                                     return;
                                 }
                                 lastError = e;
-                                LOGGER.warn("下载失败 (尝试 {}/{}): {} - {}", attempt + 1, MAX_RETRIES, url, e.getMessage());
+                                LOGGER.warn("Download failed (attempt {}/{}): {} - {}", attempt + 1, MAX_RETRIES, url, e.getMessage());
                             }
                         }
                         if (attempt < MAX_RETRIES - 1 && !downloadCancelled) {
@@ -337,7 +337,7 @@ public final class TerracottaBinary {
 
                 //debounce 镜像竞速: 并发HEAD探测 GitHub/Gitee/ghproxy 谁先通用谁
                 java.util.List<String> urls = raceMirrors(CURRENT.filename);
-                LOGGER.info("[download] 镜像竞速排序: {}", urls);
+                LOGGER.info("[download] Mirror race sort: {}", urls);
 
                 Exception lastError = null;
                 for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -372,7 +372,7 @@ public final class TerracottaBinary {
                                 return;
                             }
                             lastError = e;
-                            LOGGER.warn("下载失败 (尝试 {}/{}): {} - {}", attempt + 1, MAX_RETRIES, url, e.getMessage());
+                            LOGGER.warn("Download failed (attempt {}/{}): {} - {}", attempt + 1, MAX_RETRIES, url, e.getMessage());
                         }
                     }
                     if (attempt < MAX_RETRIES - 1 && !downloadCancelled) {
@@ -425,12 +425,12 @@ public final class TerracottaBinary {
                     HttpResponse<Void> resp = DOWNLOAD_CLIENT.send(req, HttpResponse.BodyHandlers.discarding());
                     if (resp.statusCode() >= 200 && resp.statusCode() < 400) {
                         okQueue.add(url);
-                        LOGGER.info("[probe] 镜像可用: {} (status={})", url, resp.statusCode());
+                        LOGGER.info("[probe] Mirror available: {} (status={})", url, resp.statusCode());
                     } else {
-                        LOGGER.info("[probe] 镜像不可用: {} (status={})", url, resp.statusCode());
+                        LOGGER.info("[probe] Mirror unavailable: {} (status={})", url, resp.statusCode());
                     }
                 } catch (Exception e) {
-                    LOGGER.info("[probe] 镜像探测失败: {} ({})", url, e.getMessage());
+                    LOGGER.info("[probe] Mirror probe failed: {} ({})", url, e.getMessage());
                 }
             }));
         }
@@ -444,7 +444,7 @@ public final class TerracottaBinary {
 
         java.util.List<String> ordered = new java.util.ArrayList<>(okQueue);
         if (ordered.isEmpty()) {
-            LOGGER.warn("[probe] 所有镜像探测失败,按原顺序尝试全部");
+            LOGGER.warn("[probe] All mirror probes failed, try all in original order");
             for (String base : bases) {
                 ordered.add(base + "/" + filename);
             }
@@ -584,7 +584,7 @@ public final class TerracottaBinary {
             try {
                 Files.deleteIfExists(archivePath);
             } catch (IOException e) {
-                LOGGER.warn("删除压缩包失败: {}", e.getMessage());
+                LOGGER.warn("Failed to delete archive: {}", e.getMessage());
             }
 
             if (downloadCancelled) throw new IOException("下载已取消");
@@ -600,7 +600,7 @@ public final class TerracottaBinary {
             }
         } finally {
             try { deleteRecursively(extractDir); } catch (IOException e) {
-                LOGGER.warn("清理临时解压目录失败: {}", e.getMessage());
+                LOGGER.warn("Failed to clean temp extract dir: {}", e.getMessage());
             }
         }
     }
@@ -739,7 +739,7 @@ public final class TerracottaBinary {
                     .build();
                 HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() != 200) {
-                    LOGGER.debug("陶瓦meta返回非200: {} 用兜底版本", resp.statusCode());
+                    LOGGER.debug("Terracotta meta returned non-200: {} use fallback version", resp.statusCode());
                     return LATEST_VERSION;
                 }
                 com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(resp.body()).getAsJsonObject();
@@ -751,7 +751,7 @@ public final class TerracottaBinary {
                 }
                 return LATEST_VERSION;
             } catch (Exception e) {
-                LOGGER.debug("拉取陶瓦最新版本失败 用兜底: {}", e.getMessage());
+                LOGGER.debug("Failed to fetch Terracotta latest version, use fallback: {}", e.getMessage());
                 return LATEST_VERSION;
             }
         });
@@ -772,13 +772,13 @@ public final class TerracottaBinary {
         if (binaryPath == null || !Files.exists(binaryPath)) return false;
         if (CURRENT.sha256 == null) return false;
         if (!verifySha256(binaryPath, CURRENT.sha256)) {
-            LOGGER.warn("陶瓦二进制SHA256校验失败");
+            LOGGER.warn("Terracotta binary SHA256 verification failed");
             return false;
         }
         //debounce Android走JNI加载.so不检查可执行权限 PC端Unix检查
         if (!CURRENT.android && !System.getProperty("os.name", "").toLowerCase().contains("win")) {
             if (!Files.isExecutable(binaryPath)) {
-                LOGGER.warn("陶瓦二进制无可执行权限: {}", binaryPath);
+                LOGGER.warn("Terracotta binary not executable: {}", binaryPath);
                 return false;
             }
         }
@@ -799,7 +799,7 @@ public final class TerracottaBinary {
     public static void markDownloadPending() {
         try { Files.createDirectories(CACHE_DIR); Files.createFile(getPendingFile()); }
         catch (IOException e) {
-            LOGGER.warn("无法写入下载意图标记: {}", e.getMessage());
+            LOGGER.warn("Failed to write download intent marker: {}", e.getMessage());
         }
     }
     public static void clearDownloadPending() {

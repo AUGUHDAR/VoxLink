@@ -80,13 +80,13 @@ public final class TerracottaNodeList {
                 List<NodeInfo> nodes = parseNodes(resp.body());
                 cachedNodes = nodes;
                 cacheTime = System.currentTimeMillis();
-                LOGGER.info("陶瓦节点列表拉取成功: {} 个节点", nodes.size());
+                LOGGER.info("Terracotta node list fetched: {} nodes", nodes.size());
                 return nodes;
             })
             .exceptionally(e -> {
                 Throwable cause = (e instanceof java.util.concurrent.CompletionException && e.getCause() != null)
                     ? e.getCause() : e;
-                LOGGER.warn("陶瓦节点列表拉取失败, Terracotta将用默认节点: {}", cause.getMessage());
+                LOGGER.warn("Terracotta node list fetch failed, using default nodes: {}", cause.getMessage());
                 //debounce 失败保留旧缓存(如有) 否则空列表
                 if (cachedNodes == null) cachedNodes = new ArrayList<>();
                 return cachedNodes;
@@ -113,7 +113,7 @@ public final class TerracottaNodeList {
                     filtered.add(ni.uri);
                 }
             }
-            LOGGER.info("陶瓦CN节点过滤: {} -> {}", nodes.size(), filtered.size());
+            LOGGER.info("Terracotta CN node filter: {} -> {}", nodes.size(), filtered.size());
             //debounce 全过滤空时回退全部 避免无节点可用
             return filtered.isEmpty() ? toUris(nodes) : filtered;
         });
@@ -146,14 +146,14 @@ public final class TerracottaNodeList {
                     try {
                         uri = URI.create(url);
                     } catch (Exception ex) {
-                        LOGGER.warn("陶瓦节点URL无效 跳过: {}", url);
+                        LOGGER.warn("Terracotta node URL invalid, skip: {}", url);
                         continue;
                     }
                     nodes.add(new NodeInfo(uri, region));
                 } catch (Exception ignored) {}
             }
         } catch (Exception e) {
-            LOGGER.warn("陶瓦节点列表解析失败: {}", e.getMessage());
+            LOGGER.warn("Terracotta node list parse failed: {}", e.getMessage());
         }
         return nodes;
     }

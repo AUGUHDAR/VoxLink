@@ -32,6 +32,7 @@ public class RoomInfo {
     private volatile String authType;
     private volatile int peerPort;
     private volatile String clientType = "mod";
+    private volatile String loader = "unknown";
     private volatile Component connectionMode = Component.empty();
     //debounce 显式标记当前是否走中继 避免UI层字符串匹配翻译文本
     private volatile boolean usingRelay = false;
@@ -194,6 +195,8 @@ public class RoomInfo {
     public void setPeerPort(int peerPort) { this.peerPort = peerPort; }
     public String getClientType() { return clientType; }
     public void setClientType(String clientType) { this.clientType = clientType; }
+    public String getLoader() { return loader; }
+    public void setLoader(String loader) { this.loader = loader; }
     public Component getConnectionMode() { return connectionMode; }
     public void setConnectionMode(Component connectionMode) {
         this.connectionMode = connectionMode;

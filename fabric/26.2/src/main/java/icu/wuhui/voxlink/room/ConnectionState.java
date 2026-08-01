@@ -45,11 +45,11 @@ public enum ConnectionState {
             return;
         }
         if (!oldState.canTransitionTo(newState)) {
-            VoxLinkMod.LOGGER.warn("[ConnState] 非法状态转换: {} -> {} (detail={})", oldState, newState, detail);
+            VoxLinkMod.LOGGER.warn("[ConnState] Invalid state transition: {} -> {} (detail={})", oldState, newState, detail);
             if (!newState.isTerminal()) return;
         }
         long duration = System.currentTimeMillis() - stateEnterTime;
-        VoxLinkMod.LOGGER.info("[ConnState] {} -> {} (耗时{}ms) {}", oldState.displayName, newState.displayName, duration, detail);
+        VoxLinkMod.LOGGER.info("[ConnState] {} -> {} ({}ms) {}", oldState.displayName, newState.displayName, duration, detail);
         currentState = newState;
         stateEnterTime = System.currentTimeMillis();
     }

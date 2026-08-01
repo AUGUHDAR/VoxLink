@@ -32,7 +32,7 @@ public final class ChatCompat {
                 return (ClickEvent) oldClickEventCtor.newInstance(copyAction, value);
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("ChatCompat反射失败", e);
+            VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
         }
         return null;
     }
@@ -47,7 +47,7 @@ public final class ChatCompat {
                 return (HoverEvent) oldHoverEventCtor.newInstance(showTextAction, text);
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("ChatCompat反射失败", e);
+            VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
         }
         return null;
     }
@@ -73,7 +73,7 @@ public final class ChatCompat {
                     return;
                 }
             } catch (NoSuchMethodException e) {
-                VoxLinkMod.LOGGER.debug("ChatCompat反射失败", e);
+                VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
             }
         }
         try {
@@ -106,7 +106,7 @@ public final class ChatCompat {
                 }
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("ChatCompat反射失败", e);
+            VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
         }
     }
 
@@ -157,7 +157,7 @@ public final class ChatCompat {
                 }
             }
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("ChatCompat反射失败", e);
+            VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
         }
     }
 

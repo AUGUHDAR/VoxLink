@@ -95,7 +95,7 @@ public final class PunchProfile {
         PunchProfile old = current;
         current = target;
         switchReason = reason;
-        LOGGER.info("[PunchProfile] 切换: {} -> {} 原因: {}", old.name, target.name, reason);
+        LOGGER.info("[PunchProfile] Switch: {} -> {} reason: {}", old.name, target.name, reason);
     }
 
     public static void switchToAggressive(String reason) {

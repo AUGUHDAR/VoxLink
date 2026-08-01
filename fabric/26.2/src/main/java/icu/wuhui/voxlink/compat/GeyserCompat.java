@@ -41,7 +41,7 @@ public final class GeyserCompat {
                 }
             }
         } catch (Throwable e) {
-            LOGGER.debug("GeyserApi.bedrockListener() 失败，试GeyserImpl: {}", e.getMessage());
+            LOGGER.debug("GeyserApi.bedrockListener() failed, trying GeyserImpl: {}", e.getMessage());
         }
         try {
             var geyserImpl = Class.forName("org.geysermc.geyser.GeyserImpl")
@@ -54,7 +54,7 @@ public final class GeyserCompat {
             return bedrockPort;
         } catch (Throwable e) {
             //debounce 反射失败打印堆栈 便于排查Geyser API变化
-            LOGGER.warn("读Geyser基岩端口失败，用默认{}: {}", DEFAULT_BEDROCK_PORT, e.toString(), e);
+            LOGGER.warn("Failed to read Geyser bedrock port, using default {}: {}", DEFAULT_BEDROCK_PORT, e.toString(), e);
             return DEFAULT_BEDROCK_PORT;
         }
     }
