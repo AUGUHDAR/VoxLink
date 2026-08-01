@@ -5,7 +5,9 @@ import icu.wuhui.voxlink.config.VoxLinkConfig;
 import icu.wuhui.voxlink.network.P2PBridge;
 import icu.wuhui.voxlink.network.PeerServer;
 import icu.wuhui.voxlink.network.SignalingClient;
+import icu.wuhui.voxlink.network.StunProbe;
 import icu.wuhui.voxlink.room.RoomManager;
+import icu.wuhui.voxlink.room.StunDetector;
 import icu.wuhui.voxlink.network.TopologyClient;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.api.EnvType;
@@ -46,7 +48,7 @@ public class VoxLinkMod implements ModInitializer {
                 try {
                     leaveFuture.get(2, java.util.concurrent.TimeUnit.SECONDS);
                 } catch (Exception e) {
-                    LOGGER.warn("leaveRoomSync超时 强制继续shutdown: {}", e.getMessage());
+                    LOGGER.warn("leaveRoomSync timeout, force continue shutdown: {}", e.getMessage());
                 }
                 try {
                     Thread.sleep(SHUTDOWN_DELAY_MS);
@@ -54,21 +56,21 @@ public class VoxLinkMod implements ModInitializer {
                     Thread.currentThread().interrupt();
                 }
             }
-            try { roomManager.shutdown(); } catch (Exception e) { LOGGER.warn("roomManager.shutdown异常: {}", e.getMessage()); }
+            try { roomManager.shutdown(); } catch (Exception e) { LOGGER.warn("roomManager.shutdown exception: {}", e.getMessage()); }
         }
-        try { if (topologyClient != null) topologyClient.onRoomLeft(); } catch (Exception e) { LOGGER.warn("topologyClient.onRoomLeft异常: {}", e.getMessage()); }
+        try { if (topologyClient != null) topologyClient.onRoomLeft(); } catch (Exception e) { LOGGER.warn("topologyClient.onRoomLeft exception: {}", e.getMessage()); }
         try {
             if (signalingClient != null) {
                 signalingClient.shutdown();
             }
-        } catch (Exception e) { LOGGER.warn("signalingClient.shutdown异常: {}", e.getMessage()); }
-        try { P2PBridge.disconnect(); } catch (Exception e) { LOGGER.warn("P2PBridge.disconnect异常: {}", e.getMessage()); }
-        try { PeerServer.stop(); } catch (Exception e) { LOGGER.warn("PeerServer.stop异常: {}", e.getMessage()); }
-        try { icu.wuhui.voxlink.network.StunProbe.shutdown(); } catch (Exception e) { LOGGER.warn("StunProbe.shutdown异常: {}", e.getMessage()); }
-        try { icu.wuhui.voxlink.network.ConnectionFallback.shutdown(); } catch (Exception e) { LOGGER.warn("ConnectionFallback.shutdown异常: {}", e.getMessage()); }
-        try { icu.wuhui.voxlink.network.UdpHolePuncher.shutdown(); } catch (Exception e) { LOGGER.warn("UdpHolePuncher.shutdown异常: {}", e.getMessage()); }
-        try { icu.wuhui.voxlink.network.TopologyClient.shutdown(); } catch (Exception e) { LOGGER.warn("TopologyClient.shutdown异常: {}", e.getMessage()); }
-        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); } catch (Exception e) { LOGGER.warn("TerracottaManager.shutdown异常: {}", e.getMessage()); }
+        } catch (Exception e) { LOGGER.warn("signalingClient.shutdown exception: {}", e.getMessage()); }
+        try { P2PBridge.disconnect(); } catch (Exception e) { LOGGER.warn("P2PBridge.disconnect exception: {}", e.getMessage()); }
+        try { PeerServer.stop(); } catch (Exception e) { LOGGER.warn("PeerServer.stop exception: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.StunProbe.shutdown(); } catch (Exception e) { LOGGER.warn("StunProbe.shutdown exception: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.ConnectionFallback.shutdown(); } catch (Exception e) { LOGGER.warn("ConnectionFallback.shutdown exception: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.UdpHolePuncher.shutdown(); } catch (Exception e) { LOGGER.warn("UdpHolePuncher.shutdown exception: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.network.TopologyClient.shutdown(); } catch (Exception e) { LOGGER.warn("TopologyClient.shutdown exception: {}", e.getMessage()); }
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); } catch (Exception e) { LOGGER.warn("TerracottaManager.shutdown exception: {}", e.getMessage()); }
     }
 
     @Override
@@ -78,13 +80,19 @@ public class VoxLinkMod implements ModInitializer {
         try {
             signalingClient = new SignalingClient(config);
         } catch (Exception e) {
-            LOGGER.error("SignalingClient初始化失败 联机功能不可用: {}", e.getMessage());
+            LOGGER.error("SignalingClient init failed, multiplayer unavailable: {}", e.getMessage());
             signalingClient = null;
         }
 
         if (signalingClient != null && FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
             topologyClient = new TopologyClient(signalingClient);
             roomManager = new RoomManager(signalingClient, topologyClient);
+            //debounce 后台预取STUN 主菜单时即开始探测 加入时命中缓存零延迟
+            try {
+                StunProbe.probeAsync(StunDetector.getStunServerGroups());
+            } catch (Exception e) {
+                LOGGER.warn("STUN prefetch on init failed: {}", e.getMessage());
+            }
         }
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
@@ -108,7 +116,7 @@ public class VoxLinkMod implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             if (server instanceof net.minecraft.client.server.IntegratedServer) {
-                VoxLinkMod.LOGGER.info("内置服务器停止，退房间（网络不断）");
+                VoxLinkMod.LOGGER.info("Built-in server stopped, leaving room (network kept)");
                 if (roomManager != null && roomManager.isInRoom()) {
                     roomManager.leaveRoom();
                 }
@@ -121,7 +129,7 @@ public class VoxLinkMod implements ModInitializer {
             }
             //debounce 兜底杀陶瓦 防止退出世界后残留
             try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
-            catch (Exception e) { LOGGER.warn("退出世界时停止陶瓦失败: {}", e.getMessage()); }
+            catch (Exception e) { LOGGER.warn("Failed to stop Terracotta on world exit: {}", e.getMessage()); }
         });
 
         Runtime.getRuntime().addShutdownHook(new Thread(VoxLinkMod::doShutdown, "VoxLink-ShutdownHook"));
@@ -131,7 +139,7 @@ public class VoxLinkMod implements ModInitializer {
             icu.wuhui.voxlink.terracotta.TerracottaManager.resumeDownloadIfPending();
         }
 
-        LOGGER.info("VoxLink初始化完成");
+        LOGGER.info("VoxLink initialized");
     }
 
     public static VoxLinkConfig getConfig() {

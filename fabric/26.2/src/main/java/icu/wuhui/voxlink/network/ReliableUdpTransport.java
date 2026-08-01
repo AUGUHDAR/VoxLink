@@ -147,7 +147,7 @@ public class ReliableUdpTransport implements AutoCloseable {
         Runnable r = onIceRestartRequested;
         if (r != null) {
             try { r.run(); } catch (Exception e) {
-                LOGGER.warn("[ReliableUdp] ICE Restart回调异常: {}", e.getMessage());
+                LOGGER.warn("[ReliableUdp] ICE Restart callback exception: {}", e.getMessage());
             }
         }
     }
@@ -186,7 +186,7 @@ public class ReliableUdpTransport implements AutoCloseable {
                     //debounce 阶段三: 收到对端RESTART信号 触发回调上层重新打洞
                     case TYPE_RESTART -> {
                         lastRecvTime = System.currentTimeMillis();
-                        LOGGER.info("[ReliableUdp] 收到对端RESTART信号, 触发ICE Restart");
+                        LOGGER.info("[ReliableUdp] Received peer RESTART signal, trigger ICE Restart");
                         triggerIceRestart();
                     }
                 }
@@ -197,10 +197,10 @@ public class ReliableUdpTransport implements AutoCloseable {
                     running = false;
                     break;
                 }
-                LOGGER.warn("[ReliableUdp] 接收错误: {}", e.getMessage());
+                LOGGER.warn("[ReliableUdp] Receive error: {}", e.getMessage());
             } catch (Throwable t) {
                 //debounce 防RuntimeException静默杀死线程 sendBytes死等
-                LOGGER.error("[ReliableUdp] receiveLoop 异常死亡: {}", t.getMessage(), t);
+                LOGGER.error("[ReliableUdp] receiveLoop died with exception: {}", t.getMessage(), t);
                 running = false;
                 connected.set(false);
                 synchronized (recvLock) { recvLock.notifyAll(); }
@@ -329,7 +329,7 @@ public class ReliableUdpTransport implements AutoCloseable {
                 }
                 recvLock.notifyAll();
             }
-            LOGGER.debug("[ReliableUdp] FEC恢复seq {}", missingSeq);
+            LOGGER.debug("[ReliableUdp] FEC recovered seq {}", missingSeq);
             fecRecvGroup.remove(groupId);
             fecRecvXor.remove(groupId);
             fecRecvLengths.remove(groupId);
@@ -369,7 +369,7 @@ public class ReliableUdpTransport implements AutoCloseable {
     }
 
     private void handleDisconnect() {
-        LOGGER.warn("[ReliableUdp] 收到DISCONNECT包");
+        LOGGER.warn("[ReliableUdp] Received DISCONNECT packet");
         running = false;
         connected.set(false);
         synchronized (recvLock) {
@@ -389,7 +389,7 @@ public class ReliableUdpTransport implements AutoCloseable {
             writeInt32(data, 7, nextExpectedSeq.get());
             socket.send(new DatagramPacket(data, data.length, remoteAddress));
         } catch (IOException e) {
-            LOGGER.debug("[ReliableUdp] ACK发送失败: {}", e.getMessage());
+            LOGGER.debug("[ReliableUdp] ACK send failed: {}", e.getMessage());
         }
     }
 
@@ -414,7 +414,7 @@ public class ReliableUdpTransport implements AutoCloseable {
                 }, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
             }
         } catch (IOException e) {
-            LOGGER.debug("[ReliableUdp] 数据发送失败: {}", e.getMessage());
+            LOGGER.debug("[ReliableUdp] Data send failed: {}", e.getMessage());
         }
     }
 
@@ -435,7 +435,7 @@ public class ReliableUdpTransport implements AutoCloseable {
             System.arraycopy(xorPayload, 0, data, bodyOffset, xorPayload.length);
             socket.send(new DatagramPacket(data, data.length, remoteAddress));
         } catch (IOException e) {
-            LOGGER.debug("[ReliableUdp] FEC发送失败: {}", e.getMessage());
+            LOGGER.debug("[ReliableUdp] FEC send failed: {}", e.getMessage());
         }
     }
 
@@ -456,7 +456,7 @@ public class ReliableUdpTransport implements AutoCloseable {
     private void retransmitCheck() {
         if (!running) return;
         if (System.currentTimeMillis() - lastRecvTime > KEEPALIVE_TIMEOUT_S * 1000L) {
-            LOGGER.warn("[ReliableUdp] {}秒没收到数据，连接死了", KEEPALIVE_TIMEOUT_S);
+            LOGGER.warn("[ReliableUdp] No data received for {}s, connection dead", KEEPALIVE_TIMEOUT_S);
             //debounce 阶段三: 连接死掉前通知对端重启 + 触发本端ICE Restart回调
             sendRestart();
             triggerIceRestart();
@@ -465,7 +465,7 @@ public class ReliableUdpTransport implements AutoCloseable {
         }
         // 无数据=对端挂了。用lastRecvTime避免丢包时误判。
         if (!pendingAcks.isEmpty() && System.currentTimeMillis() - lastRecvTime > MAX_SILENT_RETRANSMIT_CYCLES * RETRANSMIT_TIMEOUT_MS) {
-            LOGGER.warn("[ReliableUdp] {}ms没收到任何包，{}个包pending，对端大概挂了",
+            LOGGER.warn("[ReliableUdp] No packets received for {}ms, {} packets pending, peer probably dead",
                     MAX_SILENT_RETRANSMIT_CYCLES * RETRANSMIT_TIMEOUT_MS, pendingAcks.size());
             //debounce 阶段三: 同上 通知对端 + 触发回调
             sendRestart();
@@ -479,13 +479,13 @@ public class ReliableUdpTransport implements AutoCloseable {
                 PendingPacket pp = entry.getValue();
                 if (now - pp.sendTime > RETRANSMIT_TIMEOUT_MS) {
                     if (pp.retries >= MAX_RETRANSMITS) {
-                        LOGGER.warn("[ReliableUdp] seq {}重试{}次超限(未确认:{})",
+                        LOGGER.warn("[ReliableUdp] seq {} retry {} times exceeded limit (unacked:{})",
                                 entry.getKey(), MAX_RETRANSMITS, pendingAcks.size());
                         close();
                         return;
                     }
                     if (pp.retries == 0) {
-                        LOGGER.info("[ReliableUdp] 重传seq {}(pending={})", entry.getKey(), pendingAcks.size());
+                        LOGGER.info("[ReliableUdp] Retransmit seq {} (pending={})", entry.getKey(), pendingAcks.size());
                     }
                     pp.sendTime = now;
                     pp.retries++;
@@ -728,7 +728,7 @@ public class ReliableUdpTransport implements AutoCloseable {
             try {
                 sendBytes(b, off, len);
             } catch (IOException e) {
-                LOGGER.debug("[ReliableUdp] 写入失败: {}", e.getMessage());
+                LOGGER.debug("[ReliableUdp] Write failed: {}", e.getMessage());
                 throw e;
             }
         }

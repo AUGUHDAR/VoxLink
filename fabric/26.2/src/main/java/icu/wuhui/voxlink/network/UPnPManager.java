@@ -43,13 +43,13 @@ public class UPnPManager {
         try {
             GatewayInfo gateway = getCachedGateway();
             if (gateway == null) {
-                LOGGER.info("没找到UPnP网关");
+                LOGGER.info("No UPnP gateway found");
                 return new UPnPResult(false, false, port);
             }
 
             String localIp = getCachedLocalIp();
             if (localIp == null) {
-                LOGGER.warn("拿不到本地IP");
+                LOGGER.warn("Cannot get local IP");
                 return new UPnPResult(true, false, port);
             }
 
@@ -58,14 +58,14 @@ public class UPnPManager {
 
             if (response != null && !response.contains("errorCode")) {
                 mappedPorts.put(port + "_" + protocol, true);
-                LOGGER.info("UPnP: {}端口{}开放成功", protocol, port);
+                LOGGER.info("UPnP: {} port {} opened successfully", protocol, port);
                 return new UPnPResult(true, true, port);
             } else {
-                LOGGER.warn("UPnP: {}端口{}开放失败", protocol, port);
+                LOGGER.warn("UPnP: {} port {} open failed", protocol, port);
                 return new UPnPResult(true, false, port);
             }
         } catch (Exception e) {
-            LOGGER.error("UPnP出错: {}", e.getMessage());
+            LOGGER.error("UPnP error: {}", e.getMessage());
             return new UPnPResult(false, false, port);
         }
     }
@@ -87,9 +87,9 @@ public class UPnPManager {
             String soapBody = buildDeletePortMapping(port, protocol);
             sendSoapRequest(gateway, "DeletePortMapping", soapBody);
             mappedPorts.remove(port + "_" + protocol);
-            LOGGER.info("UPnP: {}端口{}已关闭", protocol, port);
+            LOGGER.info("UPnP: {} port {} closed", protocol, port);
         } catch (Exception e) {
-            LOGGER.error("UPnP关闭出错: {}", e.getMessage());
+            LOGGER.error("UPnP close error: {}", e.getMessage());
         }
     }
 
@@ -98,12 +98,12 @@ public class UPnPManager {
         try {
             GatewayInfo gateway = getCachedGateway();
             if (gateway == null) {
-                LOGGER.info("没找到UPnP网关");
+                LOGGER.info("No UPnP gateway found");
                 return false;
             }
             String localIp = getCachedLocalIp();
             if (localIp == null) {
-                LOGGER.warn("拿不到本地IP");
+                LOGGER.warn("Cannot get local IP");
                 return false;
             }
             String soapBody = buildAddPortMappingLease(internalPort, externalPort, localIp, "VoxLink", "UDP", 3600);
@@ -112,10 +112,10 @@ public class UPnPManager {
                 mappedPorts.put(externalPort + "_UDP", true);
                 return true;
             }
-            LOGGER.warn("UPnP: UDP端口{}映射失败", externalPort);
+            LOGGER.warn("UPnP: UDP port {} mapping failed", externalPort);
             return false;
         } catch (Exception e) {
-            LOGGER.error("UPnP映射出错: {}", e.getMessage());
+            LOGGER.error("UPnP mapping error: {}", e.getMessage());
             return false;
         }
     }
@@ -164,21 +164,21 @@ public class UPnPManager {
                 long t0 = System.currentTimeMillis();
                 GatewayInfo gw = getCachedGateway();
                 if (gw == null) {
-                    LOGGER.info("[UPnP] 启动预发现: 未找到UPnP网关 ({}ms)", System.currentTimeMillis() - t0);
+                    LOGGER.info("[UPnP] Startup pre-discovery: no UPnP gateway found ({}ms)", System.currentTimeMillis() - t0);
                     return;
                 }
                 String localIp = getCachedLocalIp();
                 if (localIp == null) {
-                    LOGGER.warn("[UPnP] 启动预发现: 拿不到本地IP ({}ms)", System.currentTimeMillis() - t0);
+                    LOGGER.warn("[UPnP] Startup pre-discovery: cannot get local IP ({}ms)", System.currentTimeMillis() - t0);
                     return;
                 }
-                LOGGER.info("[UPnP] 启动预发现成功: 网关={} 本地IP={} ({}ms)",
+                LOGGER.info("[UPnP] Startup pre-discovery success: gateway={} local IP={} ({}ms)",
                         gw.controlUrl, localIp, System.currentTimeMillis() - t0);
             } catch (Exception e) {
-                LOGGER.warn("[UPnP] 启动预发现异常: {}", e.getMessage());
+                LOGGER.warn("[UPnP] Startup pre-discovery exception: {}", e.getMessage());
             }
         });
-        LOGGER.info("[UPnP] 启动即尝试UPnP预发现网关");
+        LOGGER.info("[UPnP] Attempting UPnP gateway pre-discovery at startup");
     }
 
     private static GatewayInfo discoverGateway() throws Exception {
@@ -321,7 +321,7 @@ public class UPnPManager {
                 return new GatewayInfo(baseUrl, controlUrl, serviceType);
             }
         } catch (Exception e) {
-            LOGGER.debug("网关解析失败: {}", e.getMessage());
+            LOGGER.debug("Gateway parse failed: {}", e.getMessage());
         }
         return null;
     }

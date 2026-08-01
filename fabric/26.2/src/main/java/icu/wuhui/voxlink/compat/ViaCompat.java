@@ -46,7 +46,7 @@ public final class ViaCompat {
                 return 0;
             }
         } catch (Throwable e) {
-            LOGGER.warn("获取ViaVersion服务端协议失败: {}", e.getMessage());
+            LOGGER.warn("Failed to get ViaVersion server protocol: {}", e.getMessage());
             return 0;
         }
     }
@@ -72,7 +72,7 @@ public final class ViaCompat {
                 return 0;
             }
         } catch (Throwable e) {
-            LOGGER.debug("获取玩家协议版本失败: {}", e.getMessage());
+            LOGGER.debug("Failed to get player protocol version: {}", e.getMessage());
             //debounce 反射失败返回-1 与"未加载"的0区分 调用方可针对性处理
             return -1;
         }
@@ -95,7 +95,7 @@ public final class ViaCompat {
                 return host + "." + suffix + ":" + port;
             }
         } catch (Throwable e) {
-            LOGGER.debug("AddressParser失败，用直连后缀: {}", e.getMessage());
+            LOGGER.debug("AddressParser failed, using direct suffix: {}", e.getMessage());
         }
         return host + "._v" + targetProtocol + ".viafabric:" + port;
     }

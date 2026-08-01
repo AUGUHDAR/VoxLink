@@ -29,7 +29,7 @@ public class P2PBridge {
     private static final long KEEPALIVE_TIME_SEC = 60L;
     private static final int AWAIT_SEC = 3;
     private static final int AWAIT_FINAL_SEC = 1;
-    private static final int RETRY_DELAY_MS = 1000;
+    private static final int RETRY_DELAY_MS = 500;
 
     private static final AtomicBoolean running = new AtomicBoolean(false);
     private static final AtomicBoolean cancelled = new AtomicBoolean(false);
@@ -492,7 +492,7 @@ public class P2PBridge {
     public static synchronized void disconnect() {
         StackTraceElement[] st = new Throwable().getStackTrace();
         String caller = st.length > 1 ? st[1].getClassName() + "." + st[1].getMethodName() : "?";
-        LOGGER.info("[P2PBridge] disconnect调用 from {}", caller);
+        LOGGER.info("[P2PBridge] disconnect called from {}", caller);
         cancelled.set(true);
         running.set(false);
 
@@ -534,10 +534,10 @@ public class P2PBridge {
             oldExecutor.shutdown();
             try {
                 if (!oldExecutor.awaitTermination(AWAIT_SEC, TimeUnit.SECONDS)) {
-                    LOGGER.warn("bridge executor 3s没停干净，强杀");
+                    LOGGER.warn("bridge executor not stopped in 3s, force kill");
                     oldExecutor.shutdownNow();
                     if (!oldExecutor.awaitTermination(AWAIT_FINAL_SEC, TimeUnit.SECONDS)) {
-                        LOGGER.warn("bridge executor强杀后还在跑 :(");
+                        LOGGER.warn("bridge executor still running after force kill :(");
                     }
                 }
             } catch (InterruptedException e) {
@@ -580,7 +580,7 @@ public class P2PBridge {
     public static void notifyTrafficDetected() {
         if (!trafficDetected) {
             trafficDetected = true;
-            LOGGER.info("检测到 TCP 流量, 触发 P2P 打洞");
+            LOGGER.info("Detected TCP traffic, triggering P2P punch");
         }
     }
 
@@ -714,7 +714,7 @@ public class P2PBridge {
                 mcOut.write(buffer, 0, bytesRead);
                 mcOut.flush();
             }
-            LOGGER.info("UDP->MC退出: running={} conn={} mcClosed={} read={}",
+            LOGGER.info("UDP->MC exit: running={} conn={} mcClosed={} read={}",
                     running.get(), transport.isConnected(), mcSocket.isClosed(), bytesRead);
         } catch (IOException e) {
             if (running.get()) LOGGER.info("UDP->MC bridge closed: {}", e.getMessage());
@@ -739,7 +739,7 @@ public class P2PBridge {
                 udpOut.write(buffer, 0, bytesRead);
                 udpOut.flush();
             }
-            LOGGER.info("MC->UDP退出: running={} conn={} mcClosed={} read={}",
+            LOGGER.info("MC->UDP exit: running={} conn={} mcClosed={} read={}",
                     running.get(), transport.isConnected(), mcSocket.isClosed(), bytesRead);
         } catch (IOException e) {
             if (running.get()) LOGGER.info("MC->UDP bridge closed: {}", e.getMessage());

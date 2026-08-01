@@ -61,7 +61,7 @@ public final class PortPredictor {
         double slope = (n * sumXY - sumX * sumY) / denom;
         double intercept = (sumY - slope * sumX) / n;
         int predicted = (int) Math.round(slope * n + intercept);
-        VoxLinkMod.LOGGER.info("[PortPredictor] 线性回归: slope={}, intercept={}, predicted={} (n={})",
+        VoxLinkMod.LOGGER.info("[PortPredictor] Linear regression: slope={}, intercept={}, predicted={} (n={})",
                 String.format("%.2f", slope), String.format("%.2f", intercept), predicted, n);
         return predicted;
     }
@@ -93,7 +93,7 @@ public final class PortPredictor {
         int delta = (int) Math.round(ema);
         int lastPort = ports.get(ports.size() - 1);
         int predicted = lastPort + delta;
-        VoxLinkMod.LOGGER.info("[PortPredictor] 差值预测: delta={}, lastPort={}, predicted={} (n={})",
+        VoxLinkMod.LOGGER.info("[PortPredictor] Delta prediction: delta={}, lastPort={}, predicted={} (n={})",
                 delta, lastPort, predicted, ports.size());
         return predicted;
     }
@@ -125,7 +125,7 @@ public final class PortPredictor {
         if (finalPredicted < MIN_PORT) finalPredicted = MIN_PORT;
         if (finalPredicted > MAX_PORT) finalPredicted = MAX_PORT;
         int range = confidenceRange(ports.size());
-        VoxLinkMod.LOGGER.info("[PortPredictor] 综合: lr={}, delta={}, final={}, range=±{}",
+        VoxLinkMod.LOGGER.info("[PortPredictor] Combined: lr={}, delta={}, final={}, range=±{}",
                 lrPredicted, deltaPredicted, finalPredicted, range);
         return new PredictResult(finalPredicted, range, "combined");
     }

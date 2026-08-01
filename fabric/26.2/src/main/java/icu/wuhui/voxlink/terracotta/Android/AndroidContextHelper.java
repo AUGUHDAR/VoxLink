@@ -36,11 +36,11 @@ public final class AndroidContextHelper {
             getApplication.setAccessible(true);
             Object app = getApplication.invoke(at);
             if (app != null) {
-                LOGGER.info("反射拿Application Context成功");
+                LOGGER.info("Got Application Context via reflection");
                 return app;
             }
         } catch (Throwable t) {
-            LOGGER.debug("从ActivityThread拿Application失败: {}", t.getMessage());
+            LOGGER.debug("Failed to get Application from ActivityThread: {}", t.getMessage());
         }
         return null;
     }

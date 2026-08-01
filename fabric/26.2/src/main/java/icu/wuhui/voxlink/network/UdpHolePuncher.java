@@ -181,7 +181,7 @@ public class UdpHolePuncher {
 
         int maxTotalCycles = PunchProfile.current().punchTimeoutMs / PUNCH_INTERVAL_MS;
         //debounce 阶段六P2: 加入profile便于排查档位切换问题
-        LOGGER.info("[UdpHolePuncher] 多socket发送启动: 目标={}:{}, sockets={}, 间隔={}ms, profile={}",
+        LOGGER.info("[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
                 remoteIp, targetPort, socketGroup.size(), PUNCH_INTERVAL_MS, PunchProfile.describe());
 
         // NIO Selector 单线程管所有 socket, 避免 84 socket × 3 线程 = 252 线程资源耗尽
@@ -214,7 +214,7 @@ public class UdpHolePuncher {
                 channelToIndex.put(ch, si);
             }
         } catch (IOException e) {
-            LOGGER.warn("[UdpHolePuncher] NIO Selector 初始化失败, 回退多线程模式: {}", e.getMessage());
+            LOGGER.warn("[UdpHolePuncher] NIO Selector init failed, fallback to multi-thread mode: {}", e.getMessage());
             // 回退旧多线程路径
             return punchMultiSocketLegacy(remoteIp, targetPort, socketGroup, wonFlag);
         }
@@ -260,7 +260,7 @@ public class UdpHolePuncher {
                                     sp.socketTransferred = true;
                                     remoteAddress = from.getAddress();
                                     remotePort = from.getPort();
-                                    LOGGER.info("[UdpHolePuncher] socket#{}收到PUNCH，打洞成功 (NIO)", sIdx);
+                                    LOGGER.info("[UdpHolePuncher] socket#{} received PUNCH, punch success (NIO)", sIdx);
                                     long elapsed = System.currentTimeMillis() - startTime;
                                     result.complete(PunchResult.success(sp.getSocket(), socketsTried,
                                             recvPunchCounter[0], recvAckCounter[0], 0, elapsed));
@@ -276,7 +276,7 @@ public class UdpHolePuncher {
                                     sp.socketTransferred = true;
                                     remoteAddress = from.getAddress();
                                     remotePort = from.getPort();
-                                    LOGGER.info("[UdpHolePuncher] socket#{}收到ACK，打洞成功 (NIO)", sIdx);
+                                    LOGGER.info("[UdpHolePuncher] socket#{} received ACK, punch success (NIO)", sIdx);
                                     long elapsed = System.currentTimeMillis() - startTime;
                                     result.complete(PunchResult.success(sp.getSocket(), socketsTried,
                                             recvPunchCounter[0], recvAckCounter[0], 0, elapsed));
@@ -290,7 +290,7 @@ public class UdpHolePuncher {
                     }
                 }
             } catch (IOException e) {
-                LOGGER.debug("[UdpHolePuncher] Selector 接收异常: {}", e.getMessage());
+                LOGGER.debug("[UdpHolePuncher] Selector receive exception: {}", e.getMessage());
             } finally {
                 try { finalSelector.close(); } catch (IOException ignored) {}
                 // 不关闭 channel, 因为底层 socket 可能已被 transferred
@@ -309,7 +309,7 @@ public class UdpHolePuncher {
                 // 防火墙检测: 发了4秒还没收到任何回包 (单socket预测打洞跳过, 端口预测错误本就无回包)
                 if (!skipFirewallCheck && cycles >= PunchProfile.current().firewallDetectCycles && !remoteReceived.get()) {
                     long elapsed = System.currentTimeMillis() - sendStartMs;
-                    LOGGER.warn("[UdpHolePuncher] 多socket防火墙检测: 发送{}轮/{}ms无回包，判定UDP被阻，提前终止", cycles, elapsed);
+                    LOGGER.warn("[UdpHolePuncher] Multi-socket firewall check: sent {} cycles/{}ms no reply, UDP blocked, abort early", cycles, elapsed);
                     synchronized (completionLock) {
                         if (completed.compareAndSet(false, true)) {
                             punching.set(false);
@@ -337,7 +337,7 @@ public class UdpHolePuncher {
                     break;
                 }
             }
-            LOGGER.info("[UdpHolePuncher] 多socket发送结束: cycles={}, holeOpen={}", cycles, holeOpen.get());
+            LOGGER.info("[UdpHolePuncher] Multi-socket send end: cycles={}, holeOpen={}", cycles, holeOpen.get());
             if (!holeOpen.get() && punching.get()) {
                 synchronized (completionLock) {
                     if (completed.compareAndSet(false, true)) {
@@ -389,7 +389,7 @@ public class UdpHolePuncher {
         completed.set(false);
 
         //debounce 阶段六P2: 前置上下文日志 多端口预测打洞的target/range/profile 便于调试
-        LOGGER.info("[UdpHolePuncher] punchMultiPort启动: 目标={}, 端口数={}, 范围={}~{}, profile={}",
+        LOGGER.info("[UdpHolePuncher] punchMultiPort start: target={}, port count={}, range={}~{}, profile={}",
                 remoteIp, targetPorts.size(),
                 targetPorts.isEmpty() ? -1 : targetPorts.get(0),
                 targetPorts.isEmpty() ? -1 : targetPorts.get(targetPorts.size() - 1),
@@ -423,7 +423,7 @@ public class UdpHolePuncher {
                     socket.receive(packet);
                     debugCount++;
                     if (debugCount <= 10) {
-                        LOGGER.info("[UdpHolePuncher] 收到#{}: 来自{}:{}, len={}, bytes=[{},{},{}]",
+                        LOGGER.info("[UdpHolePuncher] Received #{}: from {}:{}, len={}, bytes=[{},{},{}]",
                                 debugCount, packet.getAddress().getHostAddress(), packet.getPort(),
                                 packet.getLength(),
                                 packet.getLength() > 0 ? (buf[0] & 0xFF) : -1,
@@ -434,7 +434,7 @@ public class UdpHolePuncher {
                     if (buf[0] != MAGIC[0] || buf[1] != MAGIC[1]) continue;
                     byte type = buf[2];
                     if (!packet.getAddress().equals(remoteAddress)) {
-                        LOGGER.info("[UdpHolePuncher] CGNAT多IP: 接受来自{}:{} (期望IP{})",
+                        LOGGER.info("[UdpHolePuncher] CGNAT multi-IP: accept from {}:{} (expected IP {})",
                                 packet.getAddress().getHostAddress(), packet.getPort(), remoteAddress.getHostAddress());
                         remoteAddress = packet.getAddress();
                         remotePort = packet.getPort();
@@ -446,7 +446,7 @@ public class UdpHolePuncher {
                         }
                     }
                     if (packet.getPort() != remotePort) {
-                        LOGGER.info("[UdpHolePuncher] 接受来自{}:{} (期望端口{})",
+                        LOGGER.info("[UdpHolePuncher] Accept from {}:{} (expected port {})",
                                 packet.getAddress().getHostAddress(), packet.getPort(), remotePort);
                         remotePort = packet.getPort();
                         if (!peerPunchNotified && peerPunchCb != null) {
@@ -508,13 +508,13 @@ public class UdpHolePuncher {
             data[0] = MAGIC[0];
             data[1] = MAGIC[1];
             data[2] = TYPE_PUNCH;
-            LOGGER.info("[UdpHolePuncher] 多端口发送线程启动: 目标={}, 端口={}, 本地端口={}",
+            LOGGER.info("[UdpHolePuncher] Multi-port send thread start: target={}, port={}, local port={}",
                     remoteAddress.getHostAddress(), targetPorts, socket.getLocalPort());
             while (punching.get() && !holeOpen.get() && cyclesPerformed < maxTotalCycles) {
                 //debounce 防火墙检测: 仅在打洞80%时间仍无回包时判定 避免端口预测难被误判
                 if (cyclesPerformed >= maxTotalCycles * 4 / 5 && !remoteReceived.get()) {
                     long elapsed = System.currentTimeMillis() - sendStartMs;
-                    LOGGER.warn("[UdpHolePuncher] 多端口防火墙检测: 发送{}轮/{}ms无回包，判定UDP被阻，提前终止", cyclesPerformed, elapsed);
+                    LOGGER.warn("[UdpHolePuncher] Multi-port firewall check: sent {} cycles/{}ms no reply, UDP blocked, abort early", cyclesPerformed, elapsed);
                     synchronized (completionLock) {
                         if (completed.compareAndSet(false, true)) {
                             punching.set(false);
@@ -538,7 +538,7 @@ public class UdpHolePuncher {
                     break;
                 }
             }
-            LOGGER.info("[UdpHolePuncher] 多端口发送线程结束: cycles={}, holeOpen={}, punching={}",
+            LOGGER.info("[UdpHolePuncher] Multi-port send thread end: cycles={}, holeOpen={}, punching={}",
                     cyclesPerformed, holeOpen.get(), punching.get());
             if (!holeOpen.get() && punching.get()) {
                 synchronized (completionLock) {
@@ -579,7 +579,7 @@ public class UdpHolePuncher {
         completed.set(false);
 
         //debounce 阶段六P2: 前置上下文日志 端口预测打洞的target/range/fixed/profile 便于调试
-        LOGGER.info("[UdpHolePuncher] punchWithPortPrediction启动: 目标={}:{}, range={}, fixed={}, profile={}",
+        LOGGER.info("[UdpHolePuncher] punchWithPortPrediction start: target={}:{}, range={}, fixed={}, profile={}",
                 remoteIp, basePort, portRange, fixedRange, PunchProfile.describe());
 
         try {
@@ -614,7 +614,7 @@ public class UdpHolePuncher {
                     socket.receive(packet);
                     debugCount++;
                     if (debugCount <= 10) {
-                        LOGGER.info("[UdpHolePuncher] 收到#{}: 来自{}:{}, len={}, bytes=[{},{},{}]",
+                        LOGGER.info("[UdpHolePuncher] Received #{}: from {}:{}, len={}, bytes=[{},{},{}]",
                                 debugCount, packet.getAddress().getHostAddress(), packet.getPort(),
                                 packet.getLength(),
                                 packet.getLength() > 0 ? (buf[0] & 0xFF) : -1,
@@ -630,7 +630,7 @@ public class UdpHolePuncher {
                             continue;
                         }
                         if (packet.getPort() != remotePort) {
-                            LOGGER.info("[UdpHolePuncher] 接受来自{}:{} (期望端口{})",
+                            LOGGER.info("[UdpHolePuncher] Accept from {}:{} (expected port {})",
                                     packet.getAddress().getHostAddress(), packet.getPort(), remotePort);
                             remotePort = packet.getPort();
                             if (!peerPunchNotified && peerPunchCb != null) {
@@ -692,7 +692,7 @@ public class UdpHolePuncher {
             int maxTotalCycles = PunchProfile.current().punchTimeoutMs / PUNCH_INTERVAL_MS;
             int debugSendCount = 0;
             long sendStartMs = System.currentTimeMillis();
-            LOGGER.info("[UdpHolePuncher] 发送线程启动: 目标={}, 端口={}, range={}, 本地端口={}",
+            LOGGER.info("[UdpHolePuncher] Send thread start: target={}, port={}, range={}, local port={}",
                     remoteAddress != null ? remoteAddress.getHostAddress() : "null", remotePort, portRange, socket.getLocalPort());
             while (punching.get() && !holeOpen.get() && cyclesPerformed < maxTotalCycles) {
                 //debounce 端口预测打洞: 猜错端口无回包是常态 不做防火墙检测 让持续重试继续尝试
@@ -709,13 +709,13 @@ public class UdpHolePuncher {
                         currentRange = Math.min(PunchProfile.current().progressiveRanges[rangeIdx], portRange);
                     }
                     if (debugSendCount < 5) {
-                        LOGGER.info("[UdpHolePuncher] 发送#{}: PUNCH到{}:{}±{} (cycle={}, fixed={}, 本地端口={})",
+                        LOGGER.info("[UdpHolePuncher] Send #{}: PUNCH to {}:{}±{} (cycle={}, fixed={}, local port={})",
                                 debugSendCount + 1, remoteAddress.getHostAddress(), basePort, currentRange, cyclesPerformed, useFixedRange, socket.getLocalPort());
                     }
                     sendControlMultiPort(TYPE_PUNCH, basePort, currentRange, cyclesPerformed);
                 } else {
                     if (debugSendCount < 5) {
-                        LOGGER.info("[UdpHolePuncher] 发送#{}: PUNCH到{}:{} (cycle={}, 本地端口={})",
+                        LOGGER.info("[UdpHolePuncher] Send #{}: PUNCH to {}:{} (cycle={}, local port={})",
                                 debugSendCount + 1, remoteAddress.getHostAddress(), remotePort, cyclesPerformed, socket.getLocalPort());
                     }
                     sendControl(TYPE_PUNCH);
@@ -729,7 +729,7 @@ public class UdpHolePuncher {
                     break;
                 }
             }
-            LOGGER.info("[UdpHolePuncher] 发送线程结束: cyclesPerformed={}, holeOpen={}, punching={}",
+            LOGGER.info("[UdpHolePuncher] Send thread end: cyclesPerformed={}, holeOpen={}, punching={}",
                     cyclesPerformed, holeOpen.get(), punching.get());
             if (!holeOpen.get() && punching.get()) {
                 synchronized (completionLock) {
@@ -777,7 +777,7 @@ public class UdpHolePuncher {
             int socketCount) {
         final int effectiveSocketCount = socketCount > 0 ? socketCount : EASY_SYM_DUAL_SOCKET_COUNT;
         //debounce 阶段六P2: 加入profile便于排查档位切换问题
-        LOGGER.info("[UdpHolePuncher] EasySym对打启动: 目标={}:{}, sockets={}, range=±{}, local={}, remote={}, profile={}",
+        LOGGER.info("[UdpHolePuncher] EasySym mutual punch start: target={}:{}, sockets={}, range=+/-{}, local={}, remote={}, profile={}",
                 remoteIp, remoteBasePort, effectiveSocketCount, EASY_SYM_DUAL_PORT_RANGE,
                 localNat.key, remoteNat.key, PunchProfile.describe());
 
@@ -787,7 +787,7 @@ public class UdpHolePuncher {
             try {
                 p.createSocket();
             } catch (SocketException e) {
-                LOGGER.warn("[UdpHolePuncher] EasySym socket#{}创建失败: {}", i, e.getMessage());
+                LOGGER.warn("[UdpHolePuncher] EasySym socket#{} create failed: {}", i, e.getMessage());
                 continue;
             }
             punchers.add(p);
@@ -820,7 +820,7 @@ public class UdpHolePuncher {
                 if (pr != null && pr.isSuccess()) {
                     //CAS守卫: 首个命中即整体成功
                     if (result.complete(pr)) {
-                        LOGGER.info("[UdpHolePuncher] EasySym socket#{}命中, 取消其余", idx);
+                        LOGGER.info("[UdpHolePuncher] EasySym socket#{} hit, cancel others", idx);
                         for (int j = 0; j < punchersFinal.size(); j++) {
                             if (j != idx) {
                                 punchersFinal.get(j).cancel();
@@ -864,7 +864,7 @@ public class UdpHolePuncher {
             DatagramPacket packet = new DatagramPacket(data, data.length, remoteAddress, remotePort);
             socket.send(packet);
         } catch (IOException e) {
-            LOGGER.debug("[UdpHolePuncher] 发送失败: {}", e.getMessage());
+            LOGGER.debug("[UdpHolePuncher] Send failed: {}", e.getMessage());
         }
     }
 
@@ -914,7 +914,7 @@ public class UdpHolePuncher {
             }
         }
 
-        LOGGER.info("[UdpHolePuncher] sendControlMultiPort: 发到{}个端口(x3次x3轮, round={}): {} (中心={}, range=±{}, 随机={}, 本地端口={})",
+        LOGGER.info("[UdpHolePuncher] sendControlMultiPort: send to {} ports (x3 times x3 rounds, round={}): {} (center={}, range=+/-{}, random={}, local port={})",
                 portsToSend.size(), round, portsToSend.subList(0, Math.min(10, portsToSend.size())),
                 centerPort, portRange, useRandomScan, socket.getLocalPort());
 
@@ -1002,9 +1002,9 @@ public class UdpHolePuncher {
         try {
             this.remoteAddress = InetAddress.getByName(newIp);
             this.remotePort = newPort;
-            LOGGER.info("[UdpHolePuncher] 目标更新为{}:{}", newIp, newPort);
+            LOGGER.info("[UdpHolePuncher] Target updated to {}:{}", newIp, newPort);
         } catch (Exception e) {
-            LOGGER.warn("[UdpHolePuncher] 目标更新失败: {}", e.getMessage());
+            LOGGER.warn("[UdpHolePuncher] Target update failed: {}", e.getMessage());
         }
     }
 
@@ -1106,7 +1106,7 @@ public class UdpHolePuncher {
         data[2] = TYPE_PUNCH;
 
         int maxTotalCycles = PunchProfile.current().punchTimeoutMs / PUNCH_INTERVAL_MS;
-        LOGGER.info("[UdpHolePuncher] 多socket发送启动(Legacy): 目标={}:{}, sockets={}, profile={}",
+        LOGGER.info("[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
                 remoteIp, targetPort, socketGroup.size(), PunchProfile.describe());
 
         java.util.List<Thread> recvThreads = new java.util.ArrayList<>();
@@ -1135,7 +1135,7 @@ public class UdpHolePuncher {
                                     sp.socketTransferred = true;
                                     remoteAddress = packet.getAddress();
                                     remotePort = packet.getPort();
-                                    LOGGER.info("[UdpHolePuncher] socket#{}收到PUNCH，打洞成功(Legacy)", sIdx);
+                                    LOGGER.info("[UdpHolePuncher] socket#{} received PUNCH, punch success (Legacy)", sIdx);
                                     long elapsed = System.currentTimeMillis() - startTime;
                                     result.complete(PunchResult.success(ssock, socketsTried,
                                             recvPunchCounter[0], recvAckCounter[0], 0, elapsed));
@@ -1151,7 +1151,7 @@ public class UdpHolePuncher {
                                     sp.socketTransferred = true;
                                     remoteAddress = packet.getAddress();
                                     remotePort = packet.getPort();
-                                    LOGGER.info("[UdpHolePuncher] socket#{}收到ACK，打洞成功(Legacy)", sIdx);
+                                    LOGGER.info("[UdpHolePuncher] socket#{} received ACK, punch success (Legacy)", sIdx);
                                     long elapsed = System.currentTimeMillis() - startTime;
                                     result.complete(PunchResult.success(ssock, socketsTried,
                                             recvPunchCounter[0], recvAckCounter[0], 0, elapsed));
@@ -1182,7 +1182,7 @@ public class UdpHolePuncher {
             while (punching.get() && !holeOpen.get() && cycles < maxTotalCycles) {
                 if (!skipFirewallCheck && cycles >= PunchProfile.current().firewallDetectCycles && !remoteReceived.get()) {
                     long elapsed = System.currentTimeMillis() - sendStartMs;
-                    LOGGER.warn("[UdpHolePuncher] 多socket防火墙检测(Legacy): 发送{}轮/{}ms无回包，判定UDP被阻", cycles, elapsed);
+                    LOGGER.warn("[UdpHolePuncher] Multi-socket firewall check (Legacy): sent {} cycles/{}ms no reply, UDP blocked", cycles, elapsed);
                     synchronized (completionLock) {
                         if (completed.compareAndSet(false, true)) {
                             punching.set(false);

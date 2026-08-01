@@ -85,22 +85,22 @@ public class VoxLinkConfig {
                     config.serverUrl = DEFAULT_SERVER_URL;
                 }
                 if (config.serverUrl.contains("index.php")) {
-                    LOGGER.warn("检测到旧版URL格式: {}，重置为默认", config.serverUrl);
+                    LOGGER.warn("Detected legacy URL format: {}, reset to default", config.serverUrl);
                     config.serverUrl = DEFAULT_SERVER_URL;
                 }
                 //debounce 旧版配置(无configVersion或<1)强制relayEnabled=true 覆盖显式false
                 int fileVer = root.has("configVersion") ? root.get("configVersion").getAsInt() : 0;
                 if (fileVer < 1) {
                     config.relayEnabled = true;
-                    LOGGER.info("旧版配置迁移: relayEnabled 强制设为 true");
+                    LOGGER.info("Legacy config migration: relayEnabled forced to true");
                 }
                 config.configVersion = CURRENT_CONFIG_VERSION;
                 config.validate();
                 config.save();
-                LOGGER.info("配置加载完成");
+                LOGGER.info("Config loaded");
                 return config;
             } catch (Exception e) {
-                LOGGER.warn("配置加载失败，用默认值: {}", e.getMessage());
+                LOGGER.warn("Config load failed, using defaults: {}", e.getMessage());
             }
         }
         VoxLinkConfig config = new VoxLinkConfig();
@@ -119,7 +119,7 @@ public class VoxLinkConfig {
                 Files.move(tmpPath, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
-            LOGGER.error("配置保存失败: {}", e.getMessage());
+            LOGGER.error("Config save failed: {}", e.getMessage());
         } finally {
             try { Files.deleteIfExists(tmpPath); } catch (Exception ignored) {}
         }

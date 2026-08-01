@@ -28,7 +28,7 @@ public final class TerracottaAndroidBridge {
         if (libraryLoaded) return;
         System.load(absolutePath);
         libraryLoaded = true;
-        LOGGER.info("陶瓦 .so 已加载: {}", absolutePath);
+        LOGGER.info("Terracotta .so loaded: {}", absolutePath);
     }
 
     public static boolean isLibraryLoaded() { return libraryLoaded; }
@@ -48,7 +48,7 @@ public final class TerracottaAndroidBridge {
             int code = start0(baseDir, fd);
             if (code != 0) throw new RuntimeException("start0 failed: " + code);
             initialized = true;
-            LOGGER.info("陶瓦 JNI 初始化成功");
+            LOGGER.info("Terracotta JNI init succeeded");
         } catch (Exception e) {
             throw new RuntimeException("initialize failed: " + e.getMessage(), e);
         }

@@ -1,0 +1,138 @@
+plugins {
+    id 'net.neoforged.moddev.legacyforge' version '2.0.143'
+}
+
+//debounce NFRT走IPv4 避免maven.neoforged.net IPv6 TLS中断
+try {
+    def envClass = Class.forName('java.lang.ProcessEnvironment')
+    def envField = envClass.getDeclaredField('theEnvironment')
+    envField.setAccessible(true)
+    def envMap = (Map) envField.get(null)
+    envMap.put('JAVA_TOOL_OPTIONS', '-Djava.net.preferIPv4Stack=true -Djava.net.useSystemProxies=true')
+} catch (Exception e) {
+    logger.warn("Cannot set JAVA_TOOL_OPTIONS via reflection: {}", e.message)
+}
+
+version = project.mod_version + "-neoforge"
+group = project.mod_group_id
+
+base {
+    archivesName = project.mod_id
+}
+
+repositories {
+    maven {
+        name = 'Minecraft libraries'
+        url = 'https://libraries.minecraft.net'
+    }
+    //debounce NFRT HttpClient IPv6不稳 用Gradle预下载mcp_config
+    maven {
+        name = 'NeoForge releases'
+        url = 'https://maven.neoforged.net/releases'
+    }
+    mavenCentral()
+}
+
+//debounce NFRT HttpClient连不上maven 用Gradle代下mcp_config并注册到manifest
+configurations {
+    nfrtPreload {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+dependencies {
+    nfrtPreload 'de.oceanlabs.mcp:mcp_config:1.20.1-20230612.114412@zip'
+    //debounce NFRT未解析api classifier Gradle代下注册到manifest
+    nfrtPreload 'net.minecraftforge:mergetool:1.1.7:api'
+}
+tasks.configureEach {
+    if (name == 'createMinecraftArtifacts') {
+        //debounce 注册mcp_config到NFRT manifest 避免NFRT HttpClient下载失败
+        addArtifactsToManifest(project.configurations.nfrtPreload)
+    }
+}
+
+//debounce Android stub 仅PC编译用 不打包进jar
+sourceSets {
+    stubs {
+        java {
+            srcDir 'src/stubs/java'
+        }
+    }
+    main {
+        compileClasspath += sourceSets.stubs.output
+    }
+}
+
+compileStubsJava {
+    options.release = Integer.parseInt(project.release_bytecode)
+}
+compileJava.dependsOn compileStubsJava
+jar {
+    exclude 'android/**'
+}
+
+legacyForge {
+    enable {
+        forgeVersion = project.neo_version
+        disableRecompilation = true
+    }
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+mixin {
+    add sourceSets.main, 'voxlink-refmap.json'
+    config 'voxlink.mixins.json'
+}
+
+tasks.withType(ProcessResources).configureEach {
+    var replaceProperties = [
+        mod_id: project.mod_id,
+        mod_version: project.mod_version,
+        mod_license: project.mod_license,
+        minecraft_version: project.minecraft_version,
+        minecraft_version_range: project.minecraft_version_range,
+        neo_version_range: project.neo_version_range,
+        loader_version_range: project.loader_version_range,
+    ]
+    inputs.properties replaceProperties
+    filesMatching(['META-INF/neoforge.mods.toml']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = Integer.parseInt(project.release_bytecode)
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+jar {
+    manifest.attributes([
+        "MixinConfigs": "voxlink.mixins.json"
+    ])
+    from("../../LICENSE") {}
+}

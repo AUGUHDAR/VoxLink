@@ -79,20 +79,20 @@ public class StunCache {
             String json = Files.readString(path, StandardCharsets.UTF_8);
             Entry entry = GSON.fromJson(json, Entry.class);
             if (entry == null || entry.isExpired()) {
-                VoxLinkMod.LOGGER.info("[StunCache] 缓存已过期或无效");
+                VoxLinkMod.LOGGER.info("[StunCache] Cache expired or invalid");
                 return null;
             }
             String currentFingerprint = buildNetworkFingerprint();
             if (!currentFingerprint.equals(entry.networkFingerprint)) {
-                VoxLinkMod.LOGGER.info("[StunCache] 网络环境变了，缓存失效");
+                VoxLinkMod.LOGGER.info("[StunCache] Network changed, cache invalidated");
                 return null;
             }
-            VoxLinkMod.LOGGER.info("[StunCache] 命中: NAT={}, mapped={}:{}, 年龄={}h",
+            VoxLinkMod.LOGGER.info("[StunCache] Hit: NAT={}, mapped={}:{}, age={}h",
                     entry.natType, entry.mappedIp, entry.mappedPort,
                     (System.currentTimeMillis() - entry.timestamp) / 3600000);
             return entry;
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunCache] 读取失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunCache] Read failed: {}", e.getMessage());
             return null;
         }
     }
@@ -102,9 +102,9 @@ public class StunCache {
             Entry entry = new Entry(natType, mappedIp, mappedPort, stunUrls, buildNetworkFingerprint());
             Path path = getCachePath();
             Files.writeString(path, GSON.toJson(entry), StandardCharsets.UTF_8);
-            VoxLinkMod.LOGGER.info("[StunCache] 已保存: NAT={}, mapped={}:{}" , natType, mappedIp, mappedPort);
+            VoxLinkMod.LOGGER.info("[StunCache] Saved: NAT={}, mapped={}:{}" , natType, mappedIp, mappedPort);
         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[StunCache] 保存失败: {}", e.getMessage());
+            VoxLinkMod.LOGGER.debug("[StunCache] Save failed: {}", e.getMessage());
         }
     }
 }

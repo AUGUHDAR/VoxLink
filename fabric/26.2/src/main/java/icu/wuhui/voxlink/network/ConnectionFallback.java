@@ -82,32 +82,32 @@ public class ConnectionFallback {
                 socket.connect(new InetSocketAddress(addr, hostPort), SOCKET_TIMEOUT);
                 socket.close();
                 socket = null;
-                LOGGER.info("IPv6连上了: [{}]:{}", hostIpv6, hostPort);
-                statusText = Component.translatable("voxlink.connection.probing");
+                LOGGER.info("IPv6 connected: [{}]:{}", hostIpv6, hostPort);
+                statusText = Component.translatable("voxlink.connection.bridge_setup");
                 //debounce won CAS防与tryIpv4/tryTcpSimOpen竞态 两通道同时返回success
                 if (!won.compareAndSet(false, true)) return ConnectResult.cancelled();
                 settled.set(true);
                 return ConnectResult.success("IPv6", hostIpv6, hostPort, ConnectionMode.IPV6_DIRECT);
             } catch (java.net.SocketTimeoutException e) {
                 LOGGER.info("IPv6 timeout: [{}]:{}", hostIpv6, hostPort);
-                statusText = Component.translatable("voxlink.connection.probing");
+                statusText = Component.translatable("voxlink.connection.timeout");
                 return ConnectResult.failed("IPV6_TIMEOUT", "IPv6 timeout");
             } catch (java.net.NoRouteToHostException e) {
-                LOGGER.info("IPv6没路由: [{}]:{}", hostIpv6, hostPort);
-                statusText = Component.translatable("voxlink.connection.probing");
+                LOGGER.info("IPv6 no route: [{}]:{}", hostIpv6, hostPort);
+                statusText = Component.translatable("voxlink.connection.failed");
                 return ConnectResult.failed("IPV6_NO_ROUTE", "IPv6 no route");
             } catch (java.net.ConnectException e) {
                 String msg = e.getMessage();
-                LOGGER.info("IPv6连不上: [{}]:{} - {}", hostIpv6, hostPort, msg);
+                LOGGER.info("IPv6 connect failed: [{}]:{} - {}", hostIpv6, hostPort, msg);
                 if (msg != null && msg.contains("Connection refused")) {
-                    statusText = Component.translatable("voxlink.connection.probing");
+                    statusText = Component.translatable("voxlink.connection.failed");
                     return ConnectResult.failed("IPV6_REFUSED", "IPv6 refused");
                 }
-                statusText = Component.translatable("voxlink.connection.probing");
+                statusText = Component.translatable("voxlink.connection.failed");
                 return ConnectResult.failed("IPV6_ERROR", "IPv6 failed");
             } catch (IOException e) {
-                LOGGER.info("IPv6异常: [{}]:{} - {}", hostIpv6, hostPort, e.getMessage());
-                statusText = Component.translatable("voxlink.connection.probing");
+                LOGGER.info("IPv6 exception: [{}]:{} - {}", hostIpv6, hostPort, e.getMessage());
+                statusText = Component.translatable("voxlink.connection.failed");
                 return ConnectResult.failed("IPV6_EXCEPTION", "IPv6 exception: " + e.getMessage());
             } finally {
                 if (socket != null) try { socket.close(); } catch (Exception ignored) {}
@@ -134,32 +134,32 @@ public class ConnectionFallback {
                 socket.connect(new InetSocketAddress(addr, hostPort), SOCKET_TIMEOUT);
                 socket.close();
                 socket = null;
-                LOGGER.info("IPv4连上了: {}:{}", hostIp, hostPort);
-                statusText = Component.translatable("voxlink.connection.probing");
+                LOGGER.info("IPv4 connected: {}:{}", hostIp, hostPort);
+                statusText = Component.translatable("voxlink.connection.bridge_setup");
                 //debounce won CAS防与tryIpv6/tryTcpSimOpen竞态 两通道同时返回success
                 if (!won.compareAndSet(false, true)) return ConnectResult.cancelled();
                 settled.set(true);
                 return ConnectResult.success("IPv4", hostIp, hostPort, ConnectionMode.IPV4_DIRECT);
             } catch (java.net.SocketTimeoutException e) {
-                LOGGER.info("IPv4超时: {}:{}", hostIp, hostPort);
-                statusText = Component.translatable("voxlink.connection.probing");
+                LOGGER.info("IPv4 timeout: {}:{}", hostIp, hostPort);
+                statusText = Component.translatable("voxlink.connection.timeout");
                 return ConnectResult.failed("IPV4_TIMEOUT", "IPv4 timeout");
             } catch (java.net.NoRouteToHostException e) {
-                LOGGER.info("IPv4没路由: {}:{}", hostIp, hostPort);
-                statusText = Component.translatable("voxlink.connection.probing");
+                LOGGER.info("IPv4 no route: {}:{}", hostIp, hostPort);
+                statusText = Component.translatable("voxlink.connection.failed");
                 return ConnectResult.failed("IPV4_NO_ROUTE", "IPv4 no route");
             } catch (java.net.ConnectException e) {
                 String msg = e.getMessage();
-                LOGGER.info("IPv4连不上: {}:{} - {}", hostIp, hostPort, msg);
+                LOGGER.info("IPv4 connect failed: {}:{} - {}", hostIp, hostPort, msg);
                 if (msg != null && msg.contains("Connection refused")) {
-                    statusText = Component.translatable("voxlink.connection.probing");
+                    statusText = Component.translatable("voxlink.connection.failed");
                     return ConnectResult.failed("IPV4_REFUSED", "IPv4 refused");
                 }
-                statusText = Component.translatable("voxlink.connection.probing");
+                statusText = Component.translatable("voxlink.connection.failed");
                 return ConnectResult.failed("IPV4_ERROR", "IPv4 failed");
             } catch (IOException e) {
-                LOGGER.info("IPv4异常: {}:{} - {}", hostIp, hostPort, e.getMessage());
-                statusText = Component.translatable("voxlink.connection.probing");
+                LOGGER.info("IPv4 exception: {}:{} - {}", hostIp, hostPort, e.getMessage());
+                statusText = Component.translatable("voxlink.connection.failed");
                 return ConnectResult.failed("IPV4_EXCEPTION", "IPv4 exception: " + e.getMessage());
             } finally {
                 if (socket != null) try { socket.close(); } catch (Exception ignored) {}
@@ -192,15 +192,15 @@ public class ConnectionFallback {
             //debounce try-with-resources 保证异常路径也关socket
             try (java.net.Socket sock = new java.net.Socket()) {
                 sock.connect(new java.net.InetSocketAddress(target, 53), SOCKET_CONNECT_TIMEOUT_MS);
-                LOGGER.info("[IPv6] 连通性验证成功: {}", target);
+                LOGGER.info("[IPv6] Connectivity check success: {}", target);
                 ipv6ConnectivityCached = true;
                 ipv6ConnectivityCheckTime = now;
                 return true;
             } catch (Exception e) {
-                LOGGER.debug("[IPv6] 连通性验证失败 {}: {}", target, e.getMessage());
+                LOGGER.debug("[IPv6] Connectivity check failed {}: {}", target, e.getMessage());
             }
         }
-        LOGGER.info("[IPv6] 连通性验证失败：所有目标不可达");
+        LOGGER.info("[IPv6] Connectivity check failed: all targets unreachable");
         ipv6ConnectivityCached = false;
         ipv6ConnectivityCheckTime = now;
         return false;
@@ -294,15 +294,15 @@ public class ConnectionFallback {
                         clientSocket.bind(new InetSocketAddress(localPort));
                     } catch (IOException bindEx) {
                         //debounce 端口被占 SimOpen必失败 直接返回 不浪费5次3s超时
-                        LOGGER.info("TCP SimOpen: 本地端口{}被占, SimOpen必失败", localPort);
+                        LOGGER.info("TCP SimOpen: local port {} occupied, SimOpen will fail", localPort);
                         if (clientSocket != null) try { clientSocket.close(); } catch (Exception ignored) {}
                         return ConnectResult.failed("TCP_SIMOPEN_BIND_FAIL", "本地端口" + localPort + "被占");
                     }
-                    LOGGER.info("TCP SimOpen: 第{}/{}次 从端口{}连到{}:{}",
+                    LOGGER.info("TCP SimOpen: attempt {}/{}, from port {} to {}:{}",
                             attempts, TCP_SIMOPEN_MAX_ATTEMPTS, clientSocket.getLocalPort(), remoteIp, remotePort);
                     clientSocket.connect(new InetSocketAddress(addr, remotePort), SOCKET_TIMEOUT);
-                    LOGGER.info("TCP SimOpen: 第{}次连上了 {}:{}", attempts, remoteIp, remotePort);
-                    statusText = Component.translatable("voxlink.connection.probing");
+                    LOGGER.info("TCP SimOpen: attempt {} connected {}:{}", attempts, remoteIp, remotePort);
+                    statusText = Component.translatable("voxlink.connection.bridge_setup");
                     //debounce won CAS 与tryIpv6/tryIpv4对称 防两通道同时success
                     if (!won.compareAndSet(false, true)) {
                         if (clientSocket != null) try { clientSocket.close(); } catch (Exception ignored) {}
@@ -312,7 +312,7 @@ public class ConnectionFallback {
                     clientSocket.close();
                     return ConnectResult.success("TCP-SimOpen", remoteIp, remotePort, ConnectionMode.IPV4_DIRECT);
                 } catch (Exception e) {
-                    LOGGER.info("TCP SimOpen第{}次失败: {}:{} - {}", attempts, remoteIp, remotePort, e.getMessage());
+                    LOGGER.info("TCP SimOpen attempt {} failed: {}:{} - {}", attempts, remoteIp, remotePort, e.getMessage());
                     if (clientSocket != null) try { clientSocket.close(); } catch (Exception ignored) {}
                     if (won.get() || cancelled.get() || settled.get()) break;
                     if (System.currentTimeMillis() >= deadline || attempts >= TCP_SIMOPEN_MAX_ATTEMPTS) break;
@@ -325,7 +325,7 @@ public class ConnectionFallback {
                 }
             }
 
-            statusText = Component.translatable("voxlink.connection.probing");
+            statusText = Component.translatable("voxlink.connection.failed");
             return ConnectResult.failed("TCP_SIMOPEN_FAILED", "TCP SimOpen failed after " + attempts + " attempts");
         }, FALLBACK_EXECUTOR);
     }

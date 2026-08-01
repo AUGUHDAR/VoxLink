@@ -47,7 +47,7 @@ public final class TerracottaProcess {
         //debounce 1分钟兜底 防止supplyAsync内部卡死导致startingGuard永久true
         if (startingGuard.get() && startingSince > 0
                 && System.currentTimeMillis() - startingSince > STARTING_GUARD_TIMEOUT_MS) {
-            LOGGER.warn("startingGuard 卡死超过 60s 强制重置");
+            LOGGER.warn("startingGuard stuck over 60s, force reset");
             startingGuard.set(false);
         }
         if (!startingGuard.compareAndSet(false, true)) {
@@ -98,7 +98,7 @@ public final class TerracottaProcess {
                     try {
                         startVpnServiceReflection(ctx);
                     } catch (Throwable t) {
-                        LOGGER.warn("启动VpnService失败: {}", t.getMessage());
+                        LOGGER.warn("Failed to start VpnService: {}", t.getMessage());
                         try {
                             bridge.getMethod("rejectVpn").invoke(null);
                         } catch (Throwable ignored) {}
@@ -107,7 +107,7 @@ public final class TerracottaProcess {
                 bridge.getMethod("initialize", Object.class, Runnable.class).invoke(null, ctx, onVpnRequired);
                 httpPort = JNI_PORT;
                 isSecondary = false;
-                LOGGER.info("陶瓦 JNI 模式已启动");
+                LOGGER.info("Terracotta JNI mode started");
                 return httpPort;
             } catch (Throwable t) {
                 throw new RuntimeException("Android JNI 初始化失败: " + t.getMessage(), t);
@@ -167,7 +167,7 @@ public final class TerracottaProcess {
                 contextClass.getMethod("startService", intentClass).invoke(ctx, intent);
             }
         } catch (Throwable t) {
-            LOGGER.debug("停VpnService失败: {}", t.getMessage());
+            LOGGER.debug("Failed to stop VpnService: {}", t.getMessage());
         }
     }
 
@@ -182,7 +182,7 @@ public final class TerracottaProcess {
                 portFile = portDir.resolve("http").toAbsolutePath();
                 //debounce 启动前先删portFile 防止读到上次残留旧端口
                 try { Files.deleteIfExists(portFile); } catch (IOException e) {
-                    LOGGER.warn("清理portFile失败: {}", e.getMessage());
+                    LOGGER.warn("Failed to clean portFile: {}", e.getMessage());
                 }
 
                 ProcessBuilder pb = new ProcessBuilder(binary.toString(), "--hmcl", portFile.toString());
@@ -208,7 +208,7 @@ public final class TerracottaProcess {
                                     if (sp > 0) {
                                         httpPort = sp;
                                         isSecondary = true;
-                                        LOGGER.info("陶瓦 secondary 模式, 复用 primary 端口 {}", sp);
+                                        LOGGER.info("Terracotta secondary mode, reuse primary port {}", sp);
                                     }
                                 }
                             }
@@ -234,14 +234,14 @@ public final class TerracottaProcess {
                     if (!proc.isAlive()) {
                         if (isSecondary && httpPort > 0) {
                             restartUsed.set(false);
-                            LOGGER.info("陶瓦 secondary 进程退出, 复用 primary 端口 {}", httpPort);
+                            LOGGER.info("Terracotta secondary process exited, reuse primary port {}", httpPort);
                             return httpPort;
                         }
                         if (procExitTime == -1) procExitTime = System.currentTimeMillis();
                         //debounce 进程退出后继续等10s端口文件 对齐HMCL逻辑 --hmcl父进程会立即退出
                         if (System.currentTimeMillis() - procExitTime >= 10000) {
                             if (restartUsed.compareAndSet(false, true)) {
-                                LOGGER.warn("陶瓦进程意外退出, 尝试重启1次. 错误行: {}", lastErrorLine);
+                                LOGGER.warn("Terracotta process exited unexpectedly, try restart once. Error line: {}", lastErrorLine);
                                 stopInternalQuiet();
                                 return startInternalRetry();
                             }
@@ -257,7 +257,7 @@ public final class TerracottaProcess {
                             if (port > 0) {
                                 httpPort = port;
                                 restartUsed.set(false);
-                                LOGGER.info("陶瓦进程已启动, HTTP 端口 {}", port);
+                                LOGGER.info("Terracotta process started, HTTP port {}", port);
                                 return port;
                             }
                         }
@@ -270,7 +270,7 @@ public final class TerracottaProcess {
                             + "s)未写出端口文件: " + (lastErrorLine != null ? lastErrorLine : "无错误输出"));
                     }
                     if (now - lastLogMs >= 10000) {
-                        LOGGER.info("等待陶瓦启动 (UAC授权窗口可能已弹出), 已等待{}ms", elapsed);
+                        LOGGER.info("Waiting for Terracotta start (UAC prompt may have appeared), waited {}ms", elapsed);
                         lastLogMs = now;
                     }
                     Thread.sleep(PORT_POLL_MS);
@@ -293,7 +293,7 @@ public final class TerracottaProcess {
             Path portDir = Files.createTempDirectory("voxlink-terracotta-" + ThreadLocalRandom.current().nextLong());
             portFile = portDir.resolve("http").toAbsolutePath();
             try { Files.deleteIfExists(portFile); } catch (IOException e) {
-                LOGGER.warn("清理portFile失败: {}", e.getMessage());
+                LOGGER.warn("Failed to clean portFile: {}", e.getMessage());
             }
             ProcessBuilder pb = new ProcessBuilder(binary.toString(), "--hmcl", portFile.toString());
             pb.redirectErrorStream(true);
@@ -317,7 +317,7 @@ public final class TerracottaProcess {
                                 if (sp > 0) {
                                     httpPort = sp;
                                     isSecondary = true;
-                                    LOGGER.info("陶瓦 secondary 模式(重启), 复用 primary 端口 {}", sp);
+                                    LOGGER.info("Terracotta secondary mode (restart), reuse primary port {}", sp);
                                 }
                             }
                         }
@@ -342,7 +342,7 @@ public final class TerracottaProcess {
                     //debounce secondary模式进程正常退出 httpPort已被stdout设置 直接返回
                     if (isSecondary && httpPort > 0) {
                         restartUsed.set(false);
-                        LOGGER.info("陶瓦 secondary 进程退出(重启), 复用 primary 端口 {}", httpPort);
+                        LOGGER.info("Terracotta secondary process exited (restart), reuse primary port {}", httpPort);
                         return httpPort;
                     }
                     //debounce --hmcl父进程立即退出 属正常 继续等10s端口文件
@@ -360,7 +360,7 @@ public final class TerracottaProcess {
                         if (port > 0) {
                             httpPort = port;
                             restartUsed.set(false);
-                            LOGGER.info("陶瓦进程重启成功, HTTP 端口 {}", port);
+                            LOGGER.info("Terracotta process restart succeeded, HTTP port {}", port);
                             return port;
                         }
                     }
@@ -373,7 +373,7 @@ public final class TerracottaProcess {
                         + "s)未写出端口文件: " + (lastErrorLine != null ? lastErrorLine : "无错误输出"));
                 }
                 if (now - lastLogMs >= 10000) {
-                    LOGGER.info("等待陶瓦重启启动, 已等待{}ms", elapsed);
+                    LOGGER.info("Waiting for Terracotta restart, waited {}ms", elapsed);
                     lastLogMs = now;
                 }
                 Thread.sleep(PORT_POLL_MS);
@@ -423,7 +423,7 @@ public final class TerracottaProcess {
                 Class<?> bridge = Class.forName("icu.wuhui.voxlink.terracotta.Android.TerracottaAndroidBridge");
                 bridge.getMethod("setWaiting").invoke(null);
             } catch (Throwable t) {
-                LOGGER.warn("JNI setWaiting失败: {}", t.getMessage());
+                LOGGER.warn("JNI setWaiting failed: {}", t.getMessage());
             }
             stopVpnServiceReflection();
             httpPort = 0;
@@ -434,7 +434,7 @@ public final class TerracottaProcess {
         }
         //debounce secondary模式不拥有进程 只清静态变量 primary由其他JVM管理
         if (isSecondary) {
-            LOGGER.info("陶瓦 secondary 模式停用, 不关闭 primary 进程");
+            LOGGER.info("Terracotta secondary mode disabled, keep primary process");
             httpPort = 0;
             isSecondary = false;
             restartUsed.set(false);
@@ -457,7 +457,7 @@ public final class TerracottaProcess {
             try {
                 if (!p.waitFor(GRACEFUL_SHUTDOWN_SEC, TimeUnit.SECONDS)) {
                     try { p.destroyForcibly(); } catch (Exception ignored) {}
-                    LOGGER.warn("陶瓦进程未在{}秒内退出", GRACEFUL_SHUTDOWN_SEC);
+                    LOGGER.warn("Terracotta process did not exit within {}s", GRACEFUL_SHUTDOWN_SEC);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -472,7 +472,7 @@ public final class TerracottaProcess {
 
         if (portFile != null) {
             try { Files.deleteIfExists(portFile); } catch (IOException e) {
-                LOGGER.warn("删除端口文件失败: {}", e.getMessage());
+                LOGGER.warn("Failed to delete port file: {}", e.getMessage());
             }
             portFile = null;
         }
