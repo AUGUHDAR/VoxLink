@@ -559,16 +559,6 @@ public class SignalingClient {
     public void shutdown() {
         executor.shutdownNow();
         scheduler.shutdownNow();
-        try {
-            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                VoxLinkMod.LOGGER.warn("signaling executor not fully stopped");
-            }
-            if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) {
-                VoxLinkMod.LOGGER.warn("signaling scheduler not fully stopped");
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
         //debounce JVM关闭时自动清理HttpClient,反射close()会触发模块访问警告
     }
 

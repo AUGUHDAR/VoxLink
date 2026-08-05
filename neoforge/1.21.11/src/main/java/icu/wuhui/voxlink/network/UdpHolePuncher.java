@@ -54,14 +54,7 @@ public class UdpHolePuncher {
     private static final int SLEEP_LONG_MS = 10;
     public static void shutdown() {
         PUNCH_TIMEOUT_SCHEDULER.shutdown();
-        try {
-            if (!PUNCH_TIMEOUT_SCHEDULER.awaitTermination(2, TimeUnit.SECONDS)) {
-                PUNCH_TIMEOUT_SCHEDULER.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            PUNCH_TIMEOUT_SCHEDULER.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        PUNCH_TIMEOUT_SCHEDULER.shutdownNow();
     }
     private static final ScheduledExecutorService PUNCH_TIMEOUT_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "VoxLink-PunchTimeout");
@@ -433,7 +426,8 @@ public class UdpHolePuncher {
                     if (packet.getLength() < 3) continue;
                     if (buf[0] != MAGIC[0] || buf[1] != MAGIC[1]) continue;
                     byte type = buf[2];
-                    if (!packet.getAddress().equals(remoteAddress)) {
+                    //debounce 打洞完成后冻结地址/端口 防止对端败北socket的迟到包把remotePort改到死端口
+                    if (!completed.get() && !packet.getAddress().equals(remoteAddress)) {
                         LOGGER.info("[UdpHolePuncher] CGNAT multi-IP: accept from {}:{} (expected IP {})",
                                 packet.getAddress().getHostAddress(), packet.getPort(), remoteAddress.getHostAddress());
                         remoteAddress = packet.getAddress();
@@ -445,7 +439,7 @@ public class UdpHolePuncher {
                             } catch (Exception ignored) {}
                         }
                     }
-                    if (packet.getPort() != remotePort) {
+                    if (!completed.get() && packet.getPort() != remotePort) {
                         LOGGER.info("[UdpHolePuncher] Accept from {}:{} (expected port {})",
                                 packet.getAddress().getHostAddress(), packet.getPort(), remotePort);
                         remotePort = packet.getPort();
@@ -629,7 +623,8 @@ public class UdpHolePuncher {
                         if (!packet.getAddress().equals(remoteAddress)) {
                             continue;
                         }
-                        if (packet.getPort() != remotePort) {
+                        //debounce 打洞完成后冻结端口 防止对端败北socket的迟到包把remotePort改到死端口
+                        if (!completed.get() && packet.getPort() != remotePort) {
                             LOGGER.info("[UdpHolePuncher] Accept from {}:{} (expected port {})",
                                     packet.getAddress().getHostAddress(), packet.getPort(), remotePort);
                             remotePort = packet.getPort();

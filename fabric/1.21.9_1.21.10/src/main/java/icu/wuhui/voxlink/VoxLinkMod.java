@@ -37,23 +37,17 @@ public class VoxLinkMod implements ModInitializer {
     private static volatile TopologyClient topologyClient;
 
     private static final AtomicBoolean shutdownDone = new AtomicBoolean(false);
-    private static final int SHUTDOWN_DELAY_MS = 200;
 
     private static void doShutdown() {
         if (!shutdownDone.compareAndSet(false, true)) return;
         if (roomManager != null) {
             if (roomManager.isInRoom()) {
-                //debounce leaveRoomSync包2s硬超时 防止ShutdownHook永久阻塞JVM退出
-                java.util.concurrent.Future<?> leaveFuture = java.util.concurrent.CompletableFuture.runAsync(roomManager::leaveRoomSync);
+                //debounce fire-and-forget 不阻塞JVM退出
                 try {
-                    leaveFuture.get(2, java.util.concurrent.TimeUnit.SECONDS);
+                    java.util.concurrent.CompletableFuture.runAsync(roomManager::leaveRoomSync)
+                            .exceptionally(e -> { LOGGER.warn("leaveRoomSync async failed: {}", e.getMessage()); return null; });
                 } catch (Exception e) {
-                    LOGGER.warn("leaveRoomSync timeout, force continue shutdown: {}", e.getMessage());
-                }
-                try {
-                    Thread.sleep(SHUTDOWN_DELAY_MS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    LOGGER.warn("leaveRoomSync submit failed: {}", e.getMessage());
                 }
             }
             try { roomManager.shutdown(); } catch (Exception e) { LOGGER.warn("roomManager.shutdown exception: {}", e.getMessage()); }

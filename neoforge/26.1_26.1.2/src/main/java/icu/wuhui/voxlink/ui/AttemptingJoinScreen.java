@@ -22,11 +22,6 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
     private static final int VOXLINK_STATUS_Y_OFFSET = 0;
     private static final int TERRACOTTA_STATUS_Y_OFFSET = 14;
     private static final int TICK_INTERVAL_MS = 500;
-    private static final int COLOR_WHITE = 0xFFFFFFFF;
-    private static final int COLOR_MUTED = 0xFFAAAAAA;
-    private static final int COLOR_SUCCESS = 0xFF55FF55;
-    private static final int COLOR_ERROR = 0xFFFF5555;
-    private static final int COLOR_WARNING = 0xFFFFFF55;
     private static final int RELAY_BTN_GAP = 4;
     private static final int RELAY_FAILED_MSG_MS = 3000;
 
@@ -36,17 +31,19 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
     //debounce 上方statusMessage已删除 只保留双P2P两行
     //双P2P状态 (text直接存显示文本 monitor轮询connectionMode动态更新VoxLink行)
     private String voxlinkStatusText = "";
-    private int voxlinkStatusColor = COLOR_MUTED;
+    private int voxlinkStatusColor = VoxLinkColors.MUTED;
     private volatile boolean voxlinkFinal = false;
     private String terracottaStatusText = "";
-    private int terracottaStatusColor = COLOR_MUTED;
+    private int terracottaStatusColor = VoxLinkColors.MUTED;
     private volatile boolean terracottaFinal = false;
     private volatile boolean active = false;
     private boolean joinApiDone = false;
+    private volatile boolean joinCompleted = false;
     private volatile java.util.concurrent.ScheduledExecutorService connectionScheduler;
     private java.util.concurrent.ScheduledFuture<?> connectionFuture;
     private int monitorTicks = 0;
-    private static final int MAX_MONITOR_TICKS = 360;
+    private static final int MAX_MONITOR_TICKS = 120;
+    private int bridgeEstablishedAtTick = -1;
     private volatile boolean relayButtonVisible = false;
     private volatile long relayFailedMsgTime = 0;
     private volatile boolean lastManualRelayInProgress = false;
@@ -71,16 +68,16 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
             room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
             voxlinkFinal = true;
             voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-            voxlinkStatusColor = COLOR_SUCCESS;
+            voxlinkStatusColor = VoxLinkColors.SUCCESS;
         } else if (room != null && room.isConnectionFailed()) {
             active = false;
             voxlinkFinal = true;
             voxlinkStatusText = Component.translatable("voxlink.connection.all_failed").getString();
-            voxlinkStatusColor = COLOR_ERROR;
+            voxlinkStatusColor = VoxLinkColors.ERROR;
         } else if (room != null && room.getLocalBridgePort() > 0) {
             //debounce 桥已建 但MC还在握手
             voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-            voxlinkStatusColor = COLOR_WARNING;
+            voxlinkStatusColor = VoxLinkColors.WARNING;
         }
 
         int centerX = this.width / 2;
@@ -157,7 +154,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
         Minecraft mc = Minecraft.getInstance();
         String playerName = mc.getUser().getName();
         //双P2P: 房间码路由 + 并行竞速
-        VoxLinkMod.getRoomManager().getConnectionManager().startDualP2P(roomCode, playerName, password, (channel, statusKey) -> {
+        java.util.concurrent.CompletableFuture<Void> joinFuture = VoxLinkMod.getRoomManager().getConnectionManager().startDualP2P(roomCode, playerName, password, (channel, statusKey) -> {
             mc.execute(() -> {
                 if (mc.screen != AttemptingJoinScreen.this) return;
                 int color = colorForStatus(statusKey);
@@ -177,10 +174,12 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                     }
                 }
             });
-        })
+        });
+        //join完成前 monitor跳过房间丢失判定
+        joinFuture.whenComplete((v, e) -> joinCompleted = true);
+        joinFuture
                 .thenAccept(v -> mc.execute(() -> {
                     if (mc.screen != AttemptingJoinScreen.this) return;
-                    startConnectionMonitor();
                 }))
                 .exceptionally(e -> {
                     mc.execute(() -> {
@@ -191,25 +190,31 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                     });
                     return null;
                 });
+
+        startConnectionMonitor();
     }
+
 
     //状态颜色映射
     private int colorForStatus(String statusKey) {
-        if (statusKey == null) return COLOR_MUTED;
-        if (statusKey.endsWith(".connected") || statusKey.endsWith(".p2p_established")) return COLOR_SUCCESS;
-        if (statusKey.endsWith(".all_failed") || statusKey.endsWith(".channel_failed")) return COLOR_ERROR;
-        if (statusKey.endsWith(".status_cancelled")) return COLOR_MUTED;
-        return COLOR_WARNING;
+        if (statusKey == null) return VoxLinkColors.MUTED;
+        if (statusKey.endsWith(".connected") || statusKey.endsWith(".p2p_established")) return VoxLinkColors.SUCCESS;
+        if (statusKey.endsWith(".all_failed") || statusKey.endsWith(".channel_failed")) return VoxLinkColors.ERROR;
+        if (statusKey.endsWith(".status_cancelled")) return VoxLinkColors.MUTED;
+        return VoxLinkColors.WARNING;
     }
 
     private void onFailed(String msg) {
         //debounce 失败信息显示到VoxLink行(上方statusMessage已删除)
         voxlinkFinal = true;
         voxlinkStatusText = msg;
-        voxlinkStatusColor = COLOR_ERROR;
+        voxlinkStatusColor = VoxLinkColors.ERROR;
         active = false;
         stopConnectionMonitor();
-        VoxLinkMod.getRoomManager().leaveRoom();
+        RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
+        if (room == null || room.getLocalBridgePort() <= 0) {
+            VoxLinkMod.getRoomManager().leaveRoom();
+        }
         clearOurWidgets();
         init();
     }
@@ -256,6 +261,13 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                     monitorTicks++;
                     RoomInfo roomInfo = VoxLinkMod.getRoomManager().getCurrentRoom();
                     if (roomInfo == null) {
+                        if (!joinCompleted) {
+                            if (connectionFuture != null) connectionFuture.cancel(false);
+                            if (monitorActive.get() && connectionScheduler != null && !connectionScheduler.isShutdown()) {
+                                connectionFuture = connectionScheduler.schedule(() -> mc.execute(this), TICK_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            }
+                            return;
+                        }
                         monitorActive.set(false);
                         mc.execute(() -> {
                             if (mc.screen != AttemptingJoinScreen.this) return;
@@ -265,6 +277,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                         return;
                     }
                     if (roomInfo.getLocalBridgePort() > 0) {
+                        if (bridgeEstablishedAtTick < 0) {
+                            bridgeEstablishedAtTick = monitorTicks;
+                        }
                         //debounce 桥已建 等待MC真正握手成功
                         if (ConnectionHelper.isMcTrulyConnected()) {
                             monitorActive.set(false);
@@ -275,7 +290,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                                 if (mc.screen != AttemptingJoinScreen.this) return;
                                 voxlinkFinal = true;
                                 voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-                                voxlinkStatusColor = COLOR_SUCCESS;
+                                voxlinkStatusColor = VoxLinkColors.SUCCESS;
                                 active = false;
                             });
                             if (connectionScheduler != null && !connectionScheduler.isShutdown()) connectionScheduler.shutdownNow();
@@ -297,12 +312,22 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                             if (mc.screen != AttemptingJoinScreen.this) return;
                             if (!voxlinkFinal) {
                                 voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-                                voxlinkStatusColor = COLOR_WARNING;
+                                voxlinkStatusColor = VoxLinkColors.WARNING;
                             }
                         });
                     }
-                    if (roomInfo.isConnectionFailed() || monitorTicks >= MAX_MONITOR_TICKS) {
+                    boolean bridgeBuiltNow = roomInfo.getLocalBridgePort() > 0;
+                    boolean handshakeTimeout = bridgeBuiltNow && bridgeEstablishedAtTick >= 0
+                            ? (monitorTicks - bridgeEstablishedAtTick >= MAX_MONITOR_TICKS)
+                            : (monitorTicks >= MAX_MONITOR_TICKS);
+                    //debounce 无限重试规范: 底层持续重试中不因UI硬超时判失败 仅底层终态(玩家取消/对端cancel)才失败
+                    boolean persistentRetrying = VoxLinkMod.getRoomManager().getConnectionManager().isPersistentRetrying();
+                    if (roomInfo.isConnectionFailed() || (handshakeTimeout && !persistentRetrying)) {
                         monitorActive.set(false);
+                        if (handshakeTimeout) {
+                            //握手超时 清理MC连接发起状态
+                            ConnectionHelper.clearConnectInitiated();
+                        }
                         mc.execute(() -> {
                             if (mc.screen != AttemptingJoinScreen.this) return;
                             onFailed(Component.translatable("voxlink.connection.all_failed").getString());
@@ -317,7 +342,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                             if (mc.screen != AttemptingJoinScreen.this) return;
                             if (!voxlinkFinal) {
                                 voxlinkStatusText = connMode.getString();
-                                voxlinkStatusColor = COLOR_WARNING;
+                                voxlinkStatusColor = VoxLinkColors.WARNING;
                             }
                         });
                     }
@@ -361,11 +386,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
         int centerX = this.width / 2;
 
-        drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, COLOR_WHITE);
+        drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.WHITE);
 
         //debounce 不显示明文房间号 只画一个标签
         drawCenteredString(graphics, ChatFormatting.YELLOW.toString() + ChatFormatting.BOLD.toString()
-                + Component.translatable("voxlink.chat.room_code_label").getString().trim(), centerX, this.height / 2 - ROOM_CODE_Y_OFFSET, COLOR_WARNING);
+                + Component.translatable("voxlink.chat.room_code_label").getString().trim(), centerX, this.height / 2 - ROOM_CODE_Y_OFFSET, VoxLinkColors.WARNING);
 
         //debounce 中继失败3秒提示 显示在房间号上方
         if (relayFailedMsgTime > 0) {
@@ -373,7 +398,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
             if (elapsed < RELAY_FAILED_MSG_MS) {
                 drawCenteredString(graphics,
                         Component.translatable("voxlink.relay.failed_retry_punch").getString(),
-                        centerX, this.height / 2 - ROOM_CODE_Y_OFFSET - 12, COLOR_WARNING);
+                        centerX, this.height / 2 - ROOM_CODE_Y_OFFSET - 12, VoxLinkColors.WARNING);
             } else {
                 relayFailedMsgTime = 0;
             }

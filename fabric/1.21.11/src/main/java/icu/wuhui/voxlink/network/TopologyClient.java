@@ -24,14 +24,7 @@ public class TopologyClient implements PacketHandler {
     private static final int UUID_PREFIX_LEN = 8;
     public static void shutdown() {
         TOPOLOGY_DELAY_EXECUTOR.shutdown();
-        try {
-            if (!TOPOLOGY_DELAY_EXECUTOR.awaitTermination(2, TimeUnit.SECONDS)) {
-                TOPOLOGY_DELAY_EXECUTOR.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            TOPOLOGY_DELAY_EXECUTOR.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        TOPOLOGY_DELAY_EXECUTOR.shutdownNow();
     }
     private static final ScheduledExecutorService TOPOLOGY_DELAY_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "VoxLink-Topology-Delay");

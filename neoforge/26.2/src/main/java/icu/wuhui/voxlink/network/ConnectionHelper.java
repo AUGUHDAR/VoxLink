@@ -71,7 +71,9 @@ public final class ConnectionHelper {
         Minecraft mc = Minecraft.getInstance();
         if (mc.gui.screen() instanceof DisconnectedScreen) return true;
         ClientPacketListener cpl = mc.getConnection();
-        if (cpl != null && !cpl.getConnection().isConnected()) return true;
+        if (cpl != null && !cpl.getConnection().isConnected()) {
+            if (!(mc.gui.screen() instanceof ConnectScreen)) return true;
+        }
         return false;
     }
 

@@ -143,7 +143,9 @@ public abstract class DirectConnectMixin extends Screen {
                     }
                     return;
                 }
-                if (roomInfo.isConnectionFailed() || monitorTicks >= MAX_MONITOR_TICKS) {
+                //debounce 无限重试规范: 底层持续重试中不因UI硬超时判失败 仅底层终态(玩家取消/对端cancel)才失败
+                boolean persistentRetrying = VoxLinkMod.getRoomManager().getConnectionManager().isPersistentRetrying();
+                if (roomInfo.isConnectionFailed() || (monitorTicks >= MAX_MONITOR_TICKS && !persistentRetrying)) {
                     if (monitorDone.compareAndSet(false, true)) {
                         mc.execute(() -> {
                             if (mc.player != null) {

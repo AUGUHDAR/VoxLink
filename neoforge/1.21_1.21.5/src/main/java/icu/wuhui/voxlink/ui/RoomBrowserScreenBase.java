@@ -19,16 +19,8 @@ import java.util.List;
 //1.21.x 专属: 原生输入 API
 public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     private static final int KEY_ENTER = 257;
-    private static final int COLOR_WHITE = 0xFFFFFFFF;
-    private static final int COLOR_MUTED = 0xFFAAAAAA;
-    private static final int COLOR_ERROR = 0xFFFF5555;
-    private static final int COLOR_WARNING = 0xFFFFFF55;
-    private static final int COLOR_SUCCESS = 0xFF55FF55;
-    private static final int COLOR_TEXT_LIGHT = 0xFFCCCCCC;
-    private static final int COLOR_TEXT_DIM = 0xFF888888;
     private static final int COLOR_NO_ROOMS_HINT = 0xFF666666;
     private static final int COLOR_CAT_BADGE_BG = 0x44333333;
-    private static final int COLOR_CAT_BADGE_TEXT = 0xFF999999;
     private static final int COLOR_BG_SELECTED = 0xDD122E8A;
     private static final int COLOR_BG_HOVER = 0xDD555555;
     private static final int COLOR_BG_NORMAL = 0xDD333333;
@@ -90,7 +82,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     protected Button joinBtn;
     protected int selectedIdx = -1;
     protected String statusMsg = "";
-    protected int statusColor = COLOR_MUTED;
+    protected int statusColor = VoxLinkColors.MUTED;
     protected boolean initialFetchDone = false;
     protected int currentPage = 1;
     protected int totalRooms = 0;
@@ -111,7 +103,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     protected java.util.List<int[]> pageClickAreas = new java.util.ArrayList<>();
 
     protected static final java.util.Set<String> DEFAULT_CATEGORY_KEYS = java.util.Set.of(
-            "survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"
+    "survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"
     );
 
     private static final String GAME_VERSION = icu.wuhui.voxlink.VoxLinkConstants.GAME_VERSION;
@@ -124,7 +116,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
     }
 
     protected record RoomEntry(String code, String name, String category, String loader, int players, int maxPlayers,
-                               boolean hasPassword, String natType, int protocolVersion, String gameVersion) {}
+    boolean hasPassword, String natType, int protocolVersion, String gameVersion) {}
 
     public RoomBrowserScreenBase(Screen parent) {
         super(Component.translatable("voxlink.browser.title"));
@@ -157,16 +149,16 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         }).bounds(sortX, TOP_BTN_Y, w / 5, TOP_BTN_H).build());
 
         this.addRenderableWidget(Button.builder(Component.translatable("voxlink.refresh"), b -> fetchRooms())
-                .bounds(w - pad - REFRESH_BTN_W, TOP_BTN_Y, REFRESH_BTN_W, TOP_BTN_H).build());
+        .bounds(w - pad - REFRESH_BTN_W, TOP_BTN_Y, REFRESH_BTN_W, TOP_BTN_H).build());
 
         joinBtn = Button.builder(Component.translatable("voxlink.join_room"), b -> joinSelected())
-                .bounds(w / 2 - 10, this.height - BOTTOM_MARGIN, 100, 20).build();
+        .bounds(w / 2 - 10, this.height - BOTTOM_MARGIN, 100, 20).build();
         joinBtn.active = false;
         this.addRenderableWidget(joinBtn);
 
         this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), b ->
-                Minecraft.getInstance().setScreen(parent))
-                .bounds(w / 2 - 130, this.height - BOTTOM_MARGIN, 100, 20).build());
+        Minecraft.getInstance().setScreen(parent))
+        .bounds(w / 2 - 130, this.height - BOTTOM_MARGIN, 100, 20).build());
 
         pageInput = new EditBox(Minecraft.getInstance().font, -100, -100, PAGE_INPUT_W, PAGE_BTN_H, Component.literal(""));
         pageInput.setMaxLength(4);
@@ -186,24 +178,24 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
 
     private void fetchCategories() {
         VoxLinkMod.getSignalingClient().getCategories()
-                .thenAccept(apiResponse -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    mc.execute(() -> {
-                        if (removed) return;
-                        try {
-                            if (apiResponse.success && apiResponse.data != null && apiResponse.data.isJsonObject()) {
-                                JsonObject obj = apiResponse.data.getAsJsonObject();
-                                categoryMap.clear();
-                                for (String key : obj.keySet()) {
-                                    categoryMap.put(key, obj.get(key).getAsString());
-                                }
-                                categoriesFetched = true;
-                                rebuildCategoryButtons();
-                            }
-                        } catch (Exception ignored) {}
-                    });
-                })
-                .exceptionally(e -> null);
+        .thenAccept(apiResponse -> {
+            Minecraft mc = Minecraft.getInstance();
+            mc.execute(() -> {
+                if (removed) return;
+                try {
+                    if (apiResponse.success && apiResponse.data != null && apiResponse.data.isJsonObject()) {
+                        JsonObject obj = apiResponse.data.getAsJsonObject();
+                        categoryMap.clear();
+                        for (String key : obj.keySet()) {
+                            categoryMap.put(key, obj.get(key).getAsString());
+                        }
+                        categoriesFetched = true;
+                        rebuildCategoryButtons();
+                    }
+                } catch (Exception ignored) {}
+            });
+        })
+        .exceptionally(e -> null);
     }
 
     protected void rebuildCategoryButtons() {
@@ -262,6 +254,24 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             this.addRenderableWidget(btn);
         }
 
+        loaderFilterBtn = Button.builder(
+        Component.translatable("voxlink.browser.loader",
+        selectedLoader.isEmpty() ? Component.translatable("voxlink.loader.all") : Component.translatable("voxlink.loader." + selectedLoader)),
+        button -> {
+            String[] loaders = {"", "fabric", "neoforge", "forge"};
+            int idx = 0;
+            for (int i = 0; i < loaders.length; i++) {
+                if (loaders[i].equals(selectedLoader)) { idx = i; break; }
+            }
+            selectedLoader = loaders[(idx + 1) % loaders.length];
+            button.setMessage(Component.translatable("voxlink.browser.loader",
+            selectedLoader.isEmpty() ? Component.translatable("voxlink.loader.all") : Component.translatable("voxlink.loader." + selectedLoader)));
+            fetchRooms();
+        })
+        .bounds(this.width / 2 - LOADER_BTN_W / 2, LOADER_ROW_Y, LOADER_BTN_W, BTN_H)
+        .build();
+        this.addRenderableWidget(loaderFilterBtn);
+
         customCatKeys.clear();
         for (String key : categoryMap.keySet()) {
             if (!DEFAULT_CATEGORY_KEYS.contains(key)) {
@@ -271,7 +281,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         java.util.Collections.sort(customCatKeys);
 
         if (isCustomRowVisible() && !customCatKeys.isEmpty()) {
-            int customRowY = catY + 20;
+            int customRowY = CUSTOM_ROW_Y;
             int visibleCount = Math.min(customTagShowCount, customCatKeys.size() - customTagStartIndex);
             if (visibleCount < 0) visibleCount = 0;
             if (visibleCount > 0) {
@@ -346,75 +356,75 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             allRooms.clear();
             scrollOffset = 0;
             statusMsg = Component.translatable("voxlink.browser.loading").getString();
-            statusColor = COLOR_WARNING;
+            statusColor = VoxLinkColors.WARNING;
         }
         String category = "all".equals(selectedCategory) ? null : selectedCategory;
         final int finalPage = page;
         VoxLinkMod.getSignalingClient().listRooms(page, PAGE_SIZE, category, selectedLoader)
-                .thenAccept(apiResponse -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    mc.execute(() -> {
-                        if (removed) return;
-                        loadingMore = false;
-                        try {
-                            if (!apiResponse.success || apiResponse.data == null) {
-                                if (clear) {
-                                    statusMsg = ChatFormatting.RED.toString() + Component.translatable("voxlink.browser.load_failed").getString();
-                                    statusColor = COLOR_ERROR;
-                                }
-                                return;
-                            }
-                            JsonObject data = apiResponse.data;
-                            totalRooms = data.has("total") ? data.get("total").getAsInt() : totalRooms;
-                            if (clear) allRooms.clear();
-                            if (data.has("rooms") && data.get("rooms").isJsonArray()) {
-                                java.util.Set<String> existingCodes = new java.util.HashSet<>();
-                                for (RoomEntry existing : allRooms) {
-                                    existingCodes.add(existing.code);
-                                }
-                                for (JsonElement e : data.getAsJsonArray("rooms")) {
-                                    JsonObject r = e.getAsJsonObject();
-                                    String code = r.has("code") ? r.get("code").getAsString() : "";
-                                    if (existingCodes.contains(code)) continue;
-                                    String roomClientType = r.has("clientType") ? r.get("clientType").getAsString() : "mod";
-                                    if (!"mod".equals(roomClientType)) continue;
-                                    allRooms.add(new RoomEntry(
-                                            code,
-                                            r.has("name") ? r.get("name").getAsString() : Component.translatable("voxlink.unknown").getString(),
-                                            r.has("category") ? r.get("category").getAsString() : "other",
-                                            r.has("loader") ? r.get("loader").getAsString() : "unknown",
-                                            r.has("currentPlayers") ? r.get("currentPlayers").getAsInt() : 0,
-                                            r.has("maxPlayers") ? r.get("maxPlayers").getAsInt() : 20,
-                                            r.has("hasPassword") && r.get("hasPassword").getAsBoolean(),
-                                            r.has("natType") ? r.get("natType").getAsString() : "unknown",
-                                            r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
-                                            r.has("gameVersion") ? r.get("gameVersion").getAsString() : ""
-                                    ));
-                                    existingCodes.add(code);
-                                }
-                            }
-                            currentPage = finalPage;
-                            fetchP2PDetails();
-                        } catch (Exception ex) {
-                            statusMsg = Component.translatable("voxlink.browser.load_rooms_failed").getString();
-                            statusColor = COLOR_ERROR;
+        .thenAccept(apiResponse -> {
+            Minecraft mc = Minecraft.getInstance();
+            mc.execute(() -> {
+                if (removed) return;
+                loadingMore = false;
+                try {
+                    if (!apiResponse.success || apiResponse.data == null) {
+                        if (clear) {
+                            statusMsg = ChatFormatting.RED.toString() + Component.translatable("voxlink.browser.load_failed").getString();
+                            statusColor = VoxLinkColors.ERROR;
                         }
-                    });
-                })
-                .exceptionally(e -> {
-                    Minecraft.getInstance().execute(() -> {
-                        loadingMore = false;
-                        statusMsg = Component.translatable("voxlink.error.network_error").getString();
-                        statusColor = COLOR_ERROR;
-                    });
-                    return null;
-                });
+                        return;
+                    }
+                    JsonObject data = apiResponse.data;
+                    totalRooms = data.has("total") ? data.get("total").getAsInt() : totalRooms;
+                    if (clear) allRooms.clear();
+                    if (data.has("rooms") && data.get("rooms").isJsonArray()) {
+                        java.util.Set<String> existingCodes = new java.util.HashSet<>();
+                        for (RoomEntry existing : allRooms) {
+                            existingCodes.add(existing.code);
+                        }
+                        for (JsonElement e : data.getAsJsonArray("rooms")) {
+                            JsonObject r = e.getAsJsonObject();
+                            String code = r.has("code") ? r.get("code").getAsString() : "";
+                            if (existingCodes.contains(code)) continue;
+                            String roomClientType = r.has("clientType") ? r.get("clientType").getAsString() : "mod";
+                            if (!"mod".equals(roomClientType)) continue;
+                            allRooms.add(new RoomEntry(
+                            code,
+                            r.has("name") ? r.get("name").getAsString() : Component.translatable("voxlink.unknown").getString(),
+                            r.has("category") ? r.get("category").getAsString() : "other",
+                            r.has("loader") ? r.get("loader").getAsString() : "unknown",
+                            r.has("currentPlayers") ? r.get("currentPlayers").getAsInt() : 0,
+                            r.has("maxPlayers") ? r.get("maxPlayers").getAsInt() : 20,
+                            r.has("hasPassword") && r.get("hasPassword").getAsBoolean(),
+                            r.has("natType") ? r.get("natType").getAsString() : "unknown",
+                            r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
+                            r.has("gameVersion") ? r.get("gameVersion").getAsString() : ""
+                            ));
+                            existingCodes.add(code);
+                        }
+                    }
+                    currentPage = finalPage;
+                    fetchP2PDetails();
+                } catch (Exception ex) {
+                    statusMsg = Component.translatable("voxlink.browser.load_rooms_failed").getString();
+                    statusColor = VoxLinkColors.ERROR;
+                }
+            });
+        })
+        .exceptionally(e -> {
+            Minecraft.getInstance().execute(() -> {
+                loadingMore = false;
+                statusMsg = Component.translatable("voxlink.error.network_error").getString();
+                statusColor = VoxLinkColors.ERROR;
+            });
+            return null;
+        });
     }
 
     protected void fetchP2PDetails() {
         applyFilter();
         statusMsg = allRooms.size() + " " + Component.translatable("voxlink.browser.rooms_count").getString();
-        statusColor = COLOR_SUCCESS;
+        statusColor = VoxLinkColors.SUCCESS;
     }
 
     protected void applyFilter() {
@@ -422,13 +432,13 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         int myProtocol = ViaCompat.isViaLoaded() ? ViaCompat.getServerProtocolVersion() : 0;
 
         displayedRooms = allRooms.stream()
-                .filter(r -> !r.hasPassword)
-                .filter(r -> (selectedCategory.equals("all") || r.category.equals(selectedCategory))
-                        && (selectedLoader.isEmpty() || selectedLoader.equals(r.loader)))
-                .filter(r -> query.isEmpty() || r.name.toLowerCase().contains(query) || r.code.toLowerCase().contains(query))
-                .filter(r -> sortMode != SortMode.VERSION_SAME || GAME_VERSION.equals(r.gameVersion))
-                .sorted(getComparator(myProtocol))
-                .toList();
+        .filter(r -> !r.hasPassword)
+        .filter(r -> (selectedCategory.equals("all") || r.category.equals(selectedCategory))
+        && (selectedLoader.isEmpty() || selectedLoader.equals(r.loader)))
+        .filter(r -> query.isEmpty() || r.name.toLowerCase().contains(query) || r.code.toLowerCase().contains(query))
+        .filter(r -> sortMode != SortMode.VERSION_SAME || GAME_VERSION.equals(r.gameVersion))
+        .sorted(getComparator(myProtocol))
+        .toList();
         scrollOffset = 0;
         selectedIdx = -1;
         if (joinBtn != null) joinBtn.active = false;
@@ -439,7 +449,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             case PLAYERS_DESC -> Comparator.comparingInt((RoomEntry r) -> r.players).reversed();
             case PLAYERS_ASC -> Comparator.comparingInt(r -> r.players);
             case VERSION_SAME -> Comparator.comparingInt((RoomEntry r) -> GAME_VERSION.equals(r.gameVersion) ? 0 : 1)
-                    .thenComparingInt(r -> -r.players);
+            .thenComparingInt(r -> -r.players);
             case NAME_ASC -> Comparator.comparing(r -> r.name.toLowerCase());
             case NAME_DESC -> Comparator.comparing((RoomEntry r) -> r.name.toLowerCase()).reversed();
         };
@@ -564,24 +574,24 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             int textX = x + CARD_TEXT_X;
             int textY = y + CARD_TEXT_Y;
 
-            drawString(graphics, truncate(roomName, cardW / CARD_TRUNC_DIV), textX, textY, COLOR_WHITE);
-            drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + CARD_CODE_Y, COLOR_MUTED);
-            drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + CARD_PLAYERS_Y, COLOR_TEXT_LIGHT);
+            drawString(graphics, truncate(roomName, cardW / CARD_TRUNC_DIV), textX, textY, VoxLinkColors.WHITE);
+            drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + CARD_CODE_Y, VoxLinkColors.MUTED);
+            drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + CARD_PLAYERS_Y, VoxLinkColors.TEXT_LIGHT);
 
             String catLabel = getCategoryLabel(r.category);
             int catW = fontWidth(catLabel) + CAT_BADGE_W_PAD;
             graphics.fill(x + cardW - catW - CAT_BADGE_MARGIN, y + CAT_BADGE_MARGIN, x + cardW - CAT_BADGE_MARGIN, y + CAT_BADGE_BOTTOM_Y, COLOR_CAT_BADGE_BG);
-            drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + CAT_BADGE_TEXT_Y, COLOR_CAT_BADGE_TEXT);
+            drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + CAT_BADGE_TEXT_Y, VoxLinkColors.CAT_BADGE_TEXT);
 
             String loaderKey = r.loader == null || r.loader.isEmpty() ? "unknown" : r.loader;
             String loaderLabel = Component.translatable("voxlink.loader." + loaderKey).getString();
             int loaderW = fontWidth(loaderLabel) + CAT_BADGE_W_PAD;
             graphics.fill(x + cardW - loaderW - CAT_BADGE_MARGIN, y + LOADER_BADGE_Y_TOP, x + cardW - CAT_BADGE_MARGIN, y + LOADER_BADGE_Y_BOTTOM, COLOR_CAT_BADGE_BG);
-            drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + LOADER_BADGE_TEXT_Y, COLOR_CAT_BADGE_TEXT);
+            drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + LOADER_BADGE_TEXT_Y, VoxLinkColors.CAT_BADGE_TEXT);
         }
 
         if (displayedRooms.isEmpty()) {
-            drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + NO_ROOMS_Y_OFFSET, COLOR_TEXT_DIM);
+            drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + NO_ROOMS_Y_OFFSET, VoxLinkColors.TEXT_DIM);
             drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms_hint").getString(), this.width / 2, gridY + NO_ROOMS_HINT_Y_OFFSET, COLOR_NO_ROOMS_HINT);
         }
 
@@ -608,7 +618,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         int bw = PAGE_BTN_W, bh = PAGE_BTN_H, gp = PAGE_BTN_GAP, iw = PAGE_INPUT_W;
         boolean showInput = tp > 6;
         int totalW = showInput ? (bw + gp) * 2 + bw * 3 + gp * 3 + iw + gp + bw + gp + bw
-                               : (bw + gp) * 2 + bw * tp + gp * (tp - 1);
+        : (bw + gp) * 2 + bw * tp + gp * (tp - 1);
         int x = (this.width - totalW) / 2;
         drawPageBtn(graphics, mouseX, mouseY, x, py, bw, bh, Component.translatable("voxlink.page.prev").getString(), currentPage > 1, -1, currentPage);
         x += bw + gp;
@@ -651,7 +661,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
         boolean hover = enabled && mx >= x && mx < x + w && my >= y && my < y + h;
         int bg = !enabled ? COLOR_PAGE_BTN_DISABLED_BG : (active ? COLOR_BG_SELECTED : (hover ? COLOR_PAGE_BTN_HOVER : COLOR_PAGE_BTN_NORMAL));
         graphics.fill(x, y, x + w, y + h, bg);
-        int tc = !enabled ? COLOR_TEXT_DIM : (active ? COLOR_WHITE : COLOR_TEXT_LIGHT);
+        int tc = !enabled ? VoxLinkColors.TEXT_DIM : (active ? VoxLinkColors.WHITE : VoxLinkColors.TEXT_LIGHT);
         int labelWidth = fontWidth(label);
         drawString(graphics, label, x + w / 2 - labelWidth / 2, y + 3, tc);
         if (enabled) pageClickAreas.add(new int[]{x, y, w, h, page});
