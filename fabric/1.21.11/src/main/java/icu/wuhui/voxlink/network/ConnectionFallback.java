@@ -33,14 +33,7 @@ public class ConnectionFallback {
 
     public static void shutdown() {
         FALLBACK_EXECUTOR.shutdown();
-        try {
-            if (!FALLBACK_EXECUTOR.awaitTermination(2, TimeUnit.SECONDS)) {
-                FALLBACK_EXECUTOR.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            FALLBACK_EXECUTOR.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        FALLBACK_EXECUTOR.shutdownNow();
     }
 
     public enum ConnectionMode {

@@ -55,7 +55,6 @@ public class ConnectionManager {
     private static final int TCP_CONNECT_TIMEOUT_MS = 5000;
     private static final int SHORT_SLEEP_MS = 100;
     private static final int PORT_RANGE_DEFAULT = 30;
-    private static final int SOCKET_STAGGER_MS = 80;
     private static final int EXTRA_TIMEOUT_SEC = 5;
     private static final int AWAIT_TIMEOUT_SEC = 20;
     private static final int RELAY_GRACE_MS = 3000;
@@ -87,6 +86,21 @@ public class ConnectionManager {
     private final AtomicBoolean connectionCycleActive = new AtomicBoolean(false);
     private final AtomicBoolean reversePunchAttempted = new AtomicBoolean(false);
     private final AtomicBoolean connectionWon = new AtomicBoolean(false);
+    //debounce 跟踪所有进行中的TCP兜底 连接成功后统一cancel 避免残留重试空打(该关的及时关)
+    private final java.util.List<ConnectionFallback> activeFallbacks = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private ConnectionFallback trackFallback(ConnectionFallback f) {
+        activeFallbacks.add(f);
+        return f;
+    }
+
+    private void cancelAllFallbacks() {
+        for (ConnectionFallback f : activeFallbacks) {
+            try { f.cancel(); } catch (Exception ignored) {}
+        }
+        activeFallbacks.clear();
+    }
+
     //debounce 阶段四: 持续重试至玩家取消 1.0.7+双方有CAP_CONTINUOUS_RETRY才启用 老版本走原maxCycles放弃
     //debounce 无限重试 对齐陶瓦逻辑 未打通前不罢休 仅玩家退出才停
     private static final int CONTINUOUS_RETRY_MAX_ROUNDS = Integer.MAX_VALUE;
@@ -108,8 +122,8 @@ public class ConnectionManager {
     private volatile int savedConnectionHostPort;
     private volatile String savedConnectionHostMappedIp;
     private volatile int savedConnectionHostMappedPort;
-    private static final int CONNECTION_TIMEOUT_SECONDS = 60;
-    private static final int SYMMETRIC_CONNECTION_TIMEOUT_SECONDS = 90;
+    private static final int CONNECTION_TIMEOUT_SECONDS = 45;
+    private static final int SYMMETRIC_CONNECTION_TIMEOUT_SECONDS = 75;
     private volatile ScheduledFuture<?> connectionTimeoutFuture;
     //debounce 安全兜底: 防止connectionCycleActive卡死导致永久停在"探测网络"
     private volatile ScheduledFuture<?> connectionCycleSafetyTimeout;
@@ -198,7 +212,7 @@ public class ConnectionManager {
     }
 
     // 修复6: 获取或创建可复用的socket数组
-    private UdpSocketArray getOrCreateUdpArray(int requiredSize, boolean isEasySym, String stunUrl) {
+    private UdpSocketArray getOrCreateUdpArray(int requiredSize, boolean isEasySym, java.util.List<String> stunUrls) {
         long now = System.currentTimeMillis();
         if (cachedUdpArray != null) {
             if (cachedUdpArray.isReusable(requiredSize, isEasySym, now)) {
@@ -226,7 +240,8 @@ public class ConnectionManager {
                     return null;
                 }
                 try {
-                    StunProbe.PublicMappedAddress addr = puncher.discoverMappedAddress(java.util.List.of(stunUrl));
+                    StunProbe.PublicMappedAddress[] race = StunProbe.discoverMappedAddressRace(puncher.getSocket(), stunUrls, 1);
+                    StunProbe.PublicMappedAddress addr = (race != null && race.length > 0) ? race[0] : null;
                     if (addr != null) {
                         return new Object[]{puncher, addr};
                     } else {
@@ -355,6 +370,11 @@ public class ConnectionManager {
         if (connectionCycleSafetyTimeout != null) connectionCycleSafetyTimeout.cancel(false);
         connectionCycleSafetyTimeout = scheduler.schedule(() -> {
             if (connectionCycleActive.get() && !connectionWon.get() && roomManager.currentRoom.get() == state) {
+                //debounce 无限重试规范: 持续重试中不触发安全兜底 未打通前不罢休 仅玩家取消才停
+                if (isPersistentRetrying()) {
+                    VoxLinkMod.LOGGER.info("[Connection] Safety timeout skipped: persistent retrying round={}", continuousRetryRound.get());
+                    return;
+                }
                 VoxLinkMod.LOGGER.warn("[Connection] Safety timeout (120s), connection cycle stuck, auto-reset");
                 connectionCycleActive.set(false);
                 showConnectFailed(state);
@@ -397,6 +417,8 @@ public class ConnectionManager {
         continuousRetryCancelled.set(true);
         connectionCycleActive.set(false);
         connectionWon.set(true);
+        //debounce 连接已赢 立即停掉所有TCP兜底重试 避免残留SimOpen空打到超时(该关的及时关)
+        cancelAllFallbacks();
         if (connectionTimeoutFuture != null) {
             connectionTimeoutFuture.cancel(false);
             connectionTimeoutFuture = null;
@@ -409,6 +431,9 @@ public class ConnectionManager {
         activeHolePunchers.clear();
         hostPunching = false;
         lastPunchInfoId = "";
+        if (dualRaceActive && !terracottaWon) {
+            killAllConnectionAttempts("terracotta");
+        }
     }
 
     //debounce 手动relay专用: 停打洞不设终态标志 中继失败后可恢复打洞
@@ -466,6 +491,11 @@ public class ConnectionManager {
         return continuousRetryRound.get();
     }
 
+    //debounce 阶段四: UI层查询是否处于持续重试中 供AttemptingJoinScreen/DirectConnectMixin跳过硬超时失败
+    public boolean isPersistentRetrying() {
+        return continuousRetryRound.get() > 0 && !continuousRetryCancelled.get();
+    }
+
     private void notifyRelayFailed() {
         if (manualRelayInProgress) {
             manualRelayInProgress = false;
@@ -484,6 +514,8 @@ public class ConnectionManager {
         //debounce 重置hostPunching 防止scheduler shutdownNow后punchTimeout任务丢弃导致永久true
         hostPunching = false;
         lastPunchInfoId = "";
+        //debounce 统一停TCP兜底 避免残留重试空打
+        cancelAllFallbacks();
         for (UdpHolePuncher puncher : activeHolePunchers.values()) {
             try { puncher.cancel(); puncher.close(); } catch (Exception ignored) {}
         }
@@ -870,6 +902,11 @@ public class ConnectionManager {
             return;
         }
 
+        if (connectionWon.get() && P2PBridge.isRunning()) {
+            VoxLinkMod.LOGGER.info("[RoomManager] Already connected, ignore holepunch_offer");
+            return;
+        }
+
         if (ConnectionHelper.isConnecting() && connectionCycleActive.get()) {
             VoxLinkMod.LOGGER.info("[RoomManager] Already connecting with active cycle, ignore holepunch_offer");
             return;
@@ -1046,6 +1083,8 @@ public class ConnectionManager {
                         VoxLinkMod.LOGGER.warn("[handleHolePunchOffer] holepunch_mapped timeout (12s), start without mapped address");
                         runConnectionCycle(state, from, finalHostIpv6, finalHostIp, finalHostPort, null, 0, 0);
                     }
+                } else {
+                    VoxLinkMod.LOGGER.debug("[handleHolePunchOffer] CAS failed, new offer in progress");
                 }
             }, ICE_POOL_RETAIN_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
             return;
@@ -1115,14 +1154,14 @@ public class ConnectionManager {
                         int connectPort = state.roomInfo.getHostConnectPort() > 0 ? state.roomInfo.getHostConnectPort() : state.roomInfo.getHostPort();
                         int mcPort = state.roomInfo.getHostPort();
                         VoxLinkMod.LOGGER.info("[handleHolepunchMapped] CGNAT: also try hostLocalIp {}:{}", receivedHostLocalIp, connectPort);
-                        ConnectionFallback localFallback = new ConnectionFallback();
+                        ConnectionFallback localFallback = trackFallback(new ConnectionFallback());
                         localFallback.tryIpv4Direct(receivedHostLocalIp, connectPort).thenAccept(result -> {
                             if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                                 VoxLinkMod.LOGGER.info("[handleHolepunchMapped] CGNAT hostLocalIp direct connect won");
                                 connectViaBridge(state, result);
                             }
                         });
-                        ConnectionFallback mcLocalFallback = new ConnectionFallback();
+                        ConnectionFallback mcLocalFallback = trackFallback(new ConnectionFallback());
                         mcLocalFallback.tryIpv4Direct(receivedHostLocalIp, mcPort).thenAccept(result -> {
                             if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                                 VoxLinkMod.LOGGER.info("[handleHolepunchMapped] CGNAT hostLocalIp MC port won");
@@ -1477,6 +1516,8 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
 
             hostPunching = true;
             final String clientId = fFrom;
+            //debounce host侧状态机同步: 开始打洞先推UDP_PUNCH 后续TRANSPORT_SETUP/CONNECTED才是合法转换
+            ConnectionState.transitionTo(ConnectionState.UDP_PUNCH, "Host开始打洞 client=" + clientId);
             java.util.concurrent.atomic.AtomicBoolean hostPunchWon = new java.util.concurrent.atomic.AtomicBoolean(false);
 
             for (UdpHolePuncher p : hostPunchers) {
@@ -2051,7 +2092,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
             return;
         }
         VoxLinkMod.LOGGER.info("[TcpSimOpen] Host received joiner {} request, try TCP connect {}:{}", from, joinerMappedIp, joinerMappedPort);
-        ConnectionFallback hostSimFallback = new ConnectionFallback();
+        ConnectionFallback hostSimFallback = trackFallback(new ConnectionFallback());
         hostSimFallback.tryTcpSimultaneousOpen(joinerMappedIp, joinerMappedPort, hostPort).thenAccept(result -> {
             if (result.success && connectionWon.compareAndSet(false, true)) {
                 VoxLinkMod.LOGGER.info("[TcpSimOpen] Host connected to joiner via TCP SimOpen!");
@@ -2200,6 +2241,17 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
         //debounce 区分阶段提示: cycle0首次STUN探测显示探测中 后续显示打洞中
         if (cycle == 0 && stunProbeResult == null) {
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.probing"));
+            final RoomManager.RoomState probingState = state;
+            scheduler.schedule(() -> {
+                if (roomManager.currentRoom.get() == probingState && !connectionWon.get()) {
+                    Component current = probingState.roomInfo.getConnectionMode();
+                    if (current != null && current.getString()
+                            .equals(Component.translatable("voxlink.connection.probing").getString())) {
+                        probingState.roomInfo.setConnectionMode(
+                            Component.translatable("voxlink.connection.punching"));
+                    }
+                }
+            }, 15, TimeUnit.SECONDS);
         } else {
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.punching"));
         }
@@ -2271,7 +2323,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                 if (hostLocalIp != null && !hostLocalIp.isEmpty() && (sameLan || sameCgnat)) {
                     String reason = sameLan ? "LAN" : "CGNAT同公网IP";
                     VoxLinkMod.LOGGER.info("[Connection] Wave 1: Detected {} (localIp={}), try direct connect", reason, hostLocalIp);
-                    ConnectionFallback lanFallback = new ConnectionFallback();
+                    ConnectionFallback lanFallback = trackFallback(new ConnectionFallback());
                     wave1Futures.add(lanFallback.tryIpv4Direct(hostLocalIp, hostPort).thenAccept(result -> {
                         if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                             VoxLinkMod.LOGGER.info("[Connection] Wave 1: {} direct connect won", reason);
@@ -2285,7 +2337,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                     if (sameCgnat && !sameLan) {
                         int mcPort = state.roomInfo.getHostPort();
                         VoxLinkMod.LOGGER.info("[Connection] Wave 1: CGNAT also try localIp MC port {}:{}", hostLocalIp, mcPort);
-                        ConnectionFallback mcFallback = new ConnectionFallback();
+                        ConnectionFallback mcFallback = trackFallback(new ConnectionFallback());
                         wave1Futures.add(mcFallback.tryIpv4Direct(hostLocalIp, mcPort).thenAccept(result -> {
                             if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                                 VoxLinkMod.LOGGER.info("[Connection] Wave 1: CGNAT localIp MC port won");
@@ -2298,7 +2350,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
 
                 if (hostIpv6 != null && !hostIpv6.isEmpty() && StunDetector.verifyIPv6Connectivity()) {
                     VoxLinkMod.LOGGER.info("[Connection] Wave 1: Parallel try IPv6 direct connect");
-                    ConnectionFallback ipv6Fallback = new ConnectionFallback();
+                    ConnectionFallback ipv6Fallback = trackFallback(new ConnectionFallback());
                     wave1Futures.add(ipv6Fallback.tryIpv6Direct(hostIpv6, hostPort).thenAccept(result -> {
                         if (roomManager.currentRoom.get() == state && result.success && connectionWon.compareAndSet(false, true)) {
                             VoxLinkMod.LOGGER.info("[Connection] Wave 1: IPv6 direct connect won");
@@ -2382,7 +2434,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                 java.util.List<CompletableFuture<ConnectionFallback.ConnectResult>> wave2Futures = new java.util.ArrayList<>();
 
                 if (hostMappedIp != null && !hostMappedIp.isEmpty() && hostMappedPort > 0) {
-                    ConnectionFallback tcpSimFallback = new ConnectionFallback();
+                    ConnectionFallback tcpSimFallback = trackFallback(new ConnectionFallback());
                     int simLocalPort = P2PBridge.getHostPort() > 0 ? P2PBridge.getHostPort() : hostPort;
                     String myMappedIp = state.roomInfo.getMyMappedIp();
                     int myMappedPort = state.roomInfo.getMyMappedPort();
@@ -2399,14 +2451,14 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                 }
 
                 if (hostMappedIp != null && !hostMappedIp.isEmpty() && hostMappedPort > 0) {
-                    ConnectionFallback tcpMappedFallback = new ConnectionFallback();
+                    ConnectionFallback tcpMappedFallback = trackFallback(new ConnectionFallback());
                     // TCP直连也用bridge端口
                     int tcpDirectPort = hostPort > 0 ? hostPort : hostMappedPort;
                     wave2Futures.add(tcpMappedFallback.tryIpv4Direct(hostMappedIp, tcpDirectPort));
                 }
 
                 if (hostIp != null && !hostIp.isEmpty()) {
-                    ConnectionFallback ipv4Fallback = new ConnectionFallback();
+                    ConnectionFallback ipv4Fallback = trackFallback(new ConnectionFallback());
                     final String fDirectIp = hostIp;
                     final int fDirectPort = hostPort;
                     wave2Futures.add(ipv4Fallback.tryIpv4Direct(hostIp, hostPort).whenComplete((result, ex) -> {
@@ -2422,11 +2474,11 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                     String hostLocalIp2 = state.roomInfo.getHostLocalIp();
                     if (hostLocalIp2 != null && !hostLocalIp2.isEmpty()) {
                         VoxLinkMod.LOGGER.info("[Connection] Wave 2: CGNAT scenario try hostLocalIp {}:{}", hostLocalIp2, hostPort);
-                        ConnectionFallback localFallback = new ConnectionFallback();
+                        ConnectionFallback localFallback = trackFallback(new ConnectionFallback());
                         wave2Futures.add(localFallback.tryIpv4Direct(hostLocalIp2, hostPort));
                         int mcPort = state.roomInfo.getHostPort();
                         VoxLinkMod.LOGGER.info("[Connection] Wave 2: CGNAT scenario try localIp MC port {}:{}", hostLocalIp2, mcPort);
-                        ConnectionFallback mcLocalFallback = new ConnectionFallback();
+                        ConnectionFallback mcLocalFallback = trackFallback(new ConnectionFallback());
                         wave2Futures.add(mcLocalFallback.tryIpv4Direct(hostLocalIp2, mcPort));
                     }
                 }
@@ -2434,7 +2486,7 @@ if (joinerMappedPortDelta != 0 && joinerMappedPort > 0) {
                 // Wave 2也尝试IPv6（如果Wave 1没成功的话）
                 if (hostIpv6 != null && !hostIpv6.isEmpty() && StunDetector.verifyIPv6Connectivity()) {
                     VoxLinkMod.LOGGER.info("[Connection] Wave 2: Try IPv6 direct connection");
-                    ConnectionFallback ipv6Fallback2 = new ConnectionFallback();
+                    ConnectionFallback ipv6Fallback2 = trackFallback(new ConnectionFallback());
                     wave2Futures.add(ipv6Fallback2.tryIpv6Direct(hostIpv6, hostPort));
                 }
 
@@ -3140,7 +3192,7 @@ int hostMappedPortDelta = state.roomInfo.getHostMappedPortDelta();
         // 修复6: 使用socket数组复用, 避免每次新建84 socket + 84次STUN
         // 30秒窗口内复用cached数组, STUN只对前4个socket做(取基线), 其余复用结果
         CompletableFuture.supplyAsync(() ->
-                getOrCreateUdpArray(socketCount, isEasySym, StunDetector.getAllStunUrls().get(0))
+                getOrCreateUdpArray(socketCount, isEasySym, StunDetector.getAllStunUrls())
         ).thenAccept(udpArray -> {
             if (roomManager.currentRoom.get() != state) return;
 
@@ -3486,7 +3538,9 @@ return null;
                             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "disconnect", new JsonObject(), "host");
-                            handleConnectViaBridgeFailed(state);
+                            if (!dualRaceActive) {
+                                handleConnectViaBridgeFailed(state);
+                            }
                             notifyDualVoxlinkBridge(false);
                         }
                     });
@@ -3506,7 +3560,9 @@ return null;
                             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
                             signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(),
                                     false, "disconnect", new JsonObject(), "host");
-                            handleConnectViaBridgeFailed(state);
+                            if (!dualRaceActive) {
+                                handleConnectViaBridgeFailed(state);
+                            }
                             notifyDualVoxlinkBridge(false);
                         }
                     });
@@ -3556,6 +3612,7 @@ return null;
     //debounce 持续重试: 双方1.0.7+支持CAP_CONTINUOUS_RETRY时 重置cycle=0无限重试到玩家取消
     //复用savedConnection参数 超时/advanceToNextCycle/runConnectionCycle三处入口共用
     private boolean enterContinuousRetryRound(RoomManager.RoomState state) {
+        if (connectionWon.get()) return false;
         if (!shouldContinuousRetry(state)) return false;
         if (savedConnectionState != state) {
             VoxLinkMod.LOGGER.warn("[Connection] Persistent retry aborted: saved params mismatch current room");
@@ -3581,6 +3638,7 @@ return null;
 
     public void showConnectFailed(RoomManager.RoomState state) {
         if (roomManager.currentRoom.get() != state || state == RoomManager.PENDING) return;
+        if (connectionWon.get()) return;
         //debounce 持续重试优先: 双方支持CAP_CONTINUOUS_RETRY时 重置cycle无限重试 不走relay/final
         //用户原话: 在玩家未自己取消前, 一直持续打洞
         if (enterContinuousRetryRound(state)) return;
@@ -3979,15 +4037,18 @@ return null;
                     connectionWon.get(), voxlinkWon, terracottaWon, bridgePort);
             return;
         }
+        //debounce 无限重试规范: 持续重试中一律不显示失败/不退房 仅玩家取消或对端cancel才停
+        //注: 对端cancel路径(handleCancelConnection)已先置continuousRetryCancelled=true 不会误伤
+        if (continuousRetryRound.get() > 0 && !continuousRetryCancelled.get()) {
+            if (state != null && state.roomInfo != null) {
+                state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.retrying"));
+            }
+            return;
+        }
         //debounce 双P2P模式 VoxLink侧失败只记失败状态 不leaveRoom 不影响Terracotta
         if (dualRaceActive && !terracottaWon) {
-            //debounce 更新UI状态 防止永久卡在"正在探测网络环境..."
             if (state != null && state.roomInfo != null) {
                 state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.cannot_establish"));
-            }
-            //debounce 持续重试中不记失败 让无限重试继续 直到玩家取消或对端cancel
-            if (continuousRetryRound.get() > 0 && !continuousRetryCancelled.get()) {
-                return;
             }
             voxlinkSideDisabled = true;
             if (dualResultRef != null && dualFailedCount.incrementAndGet() >= 2) {
@@ -4072,6 +4133,8 @@ return null;
         activeUdpTransports.clear();
         for (ReliableUdpTransport t : oldUdpTransports.values()) { try { t.close(); } catch (Exception ignored) {} }
         oldUdpTransports.clear();
+        //debounce 统一停TCP兜底 避免残留重试空打
+        cancelAllFallbacks();
         hostPunching = false;
         lastPunchInfoId = "";
     }
@@ -4396,7 +4459,10 @@ return null;
         dualVoxlinkBridgeFuture = new CompletableFuture<>();
         final CompletableFuture<Void> bridgeFuture = dualVoxlinkBridgeFuture;
         scheduler.schedule(() -> {
-            if (!bridgeFuture.isDone()) bridgeFuture.completeExceptionally(new RuntimeException("VoxLink桥建立超时"));
+            //debounce 持续重试中不判VoxLink侧失败 无限重试期间桥迟早会建 120s超时只约束无持续重试场景
+            if (!bridgeFuture.isDone() && !isPersistentRetrying()) {
+                bridgeFuture.completeExceptionally(new RuntimeException("VoxLink桥建立超时"));
+            }
         }, DUAL_VOXLINK_BRIDGE_TIMEOUT_SEC, TimeUnit.SECONDS);
         //debounce joinRoom先完成 获取陶瓦房间号 后并行: VoxLink打洞 + 陶瓦join
         CompletableFuture<Void> joinFuture = startVoxLinkP2P(roomCode, password);
@@ -4419,8 +4485,18 @@ return null;
                             statusCallback.accept("terracotta", "voxlink.dual.status_cancelled");
                             dualResult.complete(null);
                             resetDualRaceState();
+                        } else {
+                            voxlinkSideDisabled = true;
+                            killAllConnectionAttempts("voxlink");
+                            P2PBridge.disconnect();
+                            statusCallback.accept("voxlink", "voxlink.dual.status_cancelled");
                         }
                 } else if (!won.get()) {
+                    //debounce 无限重试规范: 持续重试中VoxLink侧不判失败 不设禁用标志 等无限重试继续
+                    if (isPersistentRetrying()) {
+                        VoxLinkMod.LOGGER.info("[DualP2P] VoxLink bridge failed but persistent retrying, keep retrying (round={})", continuousRetryRound.get());
+                        return;
+                    }
                     statusCallback.accept("voxlink", "voxlink.dual.channel_failed");
                     //debounce VoxLink侧失败 设禁用标志 防止handleHolePunchOffer重启
                     voxlinkSideDisabled = true;
@@ -4522,6 +4598,11 @@ return null;
     }
 
     public void startUdpPunchBridge(RoomManager.RoomState state, ReliableUdpTransport transport) {
+        if (terracottaWon || voxlinkSideDisabled) {
+            try { transport.close(); } catch (Exception ignored) {}
+            notifyDualVoxlinkBridge(false);
+            return;
+        }
         int localPort = P2PBridge.startUdpJoinerBridge(transport);
         if (localPort > 0) {
             //debounce joiner桥建立 停所有打洞 不发cancel 不清transport 避免误杀已建桥
@@ -4539,11 +4620,13 @@ return null;
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
             sendDisconnectOnFailure(state);
             notifyDualVoxlinkBridge(false);
-            scheduler.execute(() -> {
-                if (roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
-                    roomManager.leaveRoom();
-                }
-            });
+            if (!dualRaceActive) {
+                scheduler.execute(() -> {
+                    if (roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
+                        roomManager.leaveRoom();
+                    }
+                });
+            }
         }
     }
 

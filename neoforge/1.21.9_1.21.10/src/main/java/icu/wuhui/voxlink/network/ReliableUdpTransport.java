@@ -55,7 +55,10 @@ public class ReliableUdpTransport implements AutoCloseable {
     private static final int POLL_INTERVAL_MS = 50;
 
     private final DatagramSocket socket;
-    private final InetSocketAddress remoteAddress;
+    //debounce 对称NAT对端端口会漂: 打洞层拿到的端口常是对端败北socket的映射 必须可重绑定
+    private volatile InetSocketAddress remoteAddress;
+    //debounce 首包锁定: 一旦从当前remote收到过包即锁定 防ICE池旧transport残留包把地址劫回死端口
+    private volatile boolean remoteConfirmed = false;
     private volatile boolean running = true;
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile long lastRecvTime = System.currentTimeMillis();
@@ -164,6 +167,23 @@ public class ReliableUdpTransport implements AutoCloseable {
         } catch (IOException ignored) {}
     }
 
+    //debounce 同IP端口漂移才重绑定 防随机垃圾包劫持会话; 漂移常见于一端对称NAT多socket打洞
+    //锁定语义: 当前remote从未收到包时才允许漂移到首个真实来包端口 收到过即锁死
+    private void maybeRebindRemote(DatagramPacket packet) {
+        InetSocketAddress cur = remoteAddress;
+        if (cur == null) return;
+        boolean fromCurrent = packet.getPort() == cur.getPort() && packet.getAddress().equals(cur.getAddress());
+        if (fromCurrent) {
+            remoteConfirmed = true;
+            return;
+        }
+        if (remoteConfirmed) return;
+        if (!packet.getAddress().equals(cur.getAddress())) return;
+        remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
+        remoteConfirmed = true;
+        LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
+    }
+
     private void receiveLoop() {
         byte[] buf = new byte[MAX_PAYLOAD + HEADER_SIZE + PAYLOAD_LEN_SIZE + EXTRA_HEADER_BYTES];
         DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -172,6 +192,10 @@ public class ReliableUdpTransport implements AutoCloseable {
                 socket.receive(packet);
                 if (packet.getLength() < HEADER_SIZE) continue;
                 if (buf[0] != MAGIC[0] || buf[1] != MAGIC[1]) continue;
+
+                //debounce 对称NAT: 对端胜出socket的映射端口常与打洞期观测端口不同
+                //同IP合法传输包到达即重绑定到实际来源端口 否则数据发死端口永远无ACK
+                maybeRebindRemote(packet);
 
                 byte type = buf[2];
                 int seq = readInt32(buf, 3);
@@ -585,11 +609,6 @@ public class ReliableUdpTransport implements AutoCloseable {
 
         if (recvThread != null) {
             recvThread.interrupt();
-            try {
-                recvThread.join(2000);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
         }
 
         try {
@@ -597,16 +616,6 @@ public class ReliableUdpTransport implements AutoCloseable {
                 socket.close();
             }
         } catch (Exception ignored) {
-        }
-        //debounce 若close在retransmitCheck中被调用 当前线程就是scheduler线程
-        //awaitTermination会等自己结束 卡2秒 sendLock也卡住 整体清理被拖延
-        boolean inSchedulerThread = Thread.currentThread().getName().equals("VoxLink-Retransmit");
-        if (!inSchedulerThread) {
-            try {
-                scheduler.awaitTermination(2, TimeUnit.SECONDS);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
         }
         //debounce 删除越权调用 UdpHolePuncher.cancel/close已自行cancel自己的timeoutFuture
         //transport清空全局列表会拖累其他正在打洞的puncher

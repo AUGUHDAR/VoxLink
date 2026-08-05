@@ -87,25 +87,19 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
     private static final int SUCCESS_CODE_H = 9;
     private static final int SUCCESS_SMALL_GAP = 12;
     private static final int SUCCESS_MED_GAP = 14;
-    //颜色常量
-    private static final int COLOR_ERROR_RGB = 0xFF5555;
-    private static final int COLOR_SUCCESS_RGB = 0x55FF55;
-    private static final int COLOR_SUCCESS = 0xFF55FF55;
-    private static final int COLOR_TITLE = 0xFFFFFFFF;
-    private static final int COLOR_INFO = 0xFFAAAAFF;
     private static final int DEFAULT_MAX_PLAYERS = 20;
     private static final int MIN_MAX_PLAYERS = 2;
     private static final int MAX_MAX_PLAYERS = 100;
 
     private static final Map<String, String> DEFAULT_CATEGORIES = new java.util.LinkedHashMap<>() {{
-        put("survival", "voxlink.category.survival");
-        put("creative", "voxlink.category.creative");
-        put("redstone", "voxlink.category.redstone");
-        put("pvp", "voxlink.category.pvp");
-        put("rpg", "voxlink.category.rpg");
-        put("minigame", "voxlink.category.minigame");
-        put("social", "voxlink.category.social");
-        put("other", "voxlink.category.other");
+            put("survival", "voxlink.category.survival");
+            put("creative", "voxlink.category.creative");
+            put("redstone", "voxlink.category.redstone");
+            put("pvp", "voxlink.category.pvp");
+            put("rpg", "voxlink.category.rpg");
+            put("minigame", "voxlink.category.minigame");
+            put("social", "voxlink.category.social");
+            put("other", "voxlink.category.other");
     }};
 
     private enum AuthType {
@@ -127,7 +121,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         if (createdRoom != null) {
             int centerX = this.width / 2;
             this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), button -> goBack())
-                    .bounds(centerX - BTN_W / 2, this.height / 2 + SUCCESS_OFFSET_Y, BTN_W, BTN_H).build());
+            .bounds(centerX - BTN_W / 2, this.height / 2 + SUCCESS_OFFSET_Y, BTN_W, BTN_H).build());
             return;
         }
 
@@ -212,25 +206,25 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
         if (TerracottaManager.isBinaryReady()) {
             addRenderableWidget(Button.builder(
-                    Component.translatable("voxlink.terracotta.toggle",
-                            Component.translatable(VoxLinkMod.getConfig().isParallelP2P()
-                                    ? "voxlink.terracotta.on" : "voxlink.terracotta.off")),
-                    button -> {
-                        boolean v = !VoxLinkMod.getConfig().isParallelP2P();
-                        VoxLinkMod.getConfig().setParallelP2P(v);
-                        VoxLinkMod.getConfig().save();
-                        button.setMessage(Component.translatable("voxlink.terracotta.toggle",
-                                Component.translatable(v ? "voxlink.terracotta.on" : "voxlink.terracotta.off")));
-                    }
+            Component.translatable("voxlink.terracotta.toggle",
+            Component.translatable(VoxLinkMod.getConfig().isParallelP2P()
+            ? "voxlink.terracotta.on" : "voxlink.terracotta.off")),
+            button -> {
+                boolean v = !VoxLinkMod.getConfig().isParallelP2P();
+                VoxLinkMod.getConfig().setParallelP2P(v);
+                VoxLinkMod.getConfig().save();
+                button.setMessage(Component.translatable("voxlink.terracotta.toggle",
+                Component.translatable(v ? "voxlink.terracotta.on" : "voxlink.terracotta.off")));
+            }
             ).bounds(centerX + PAIR_BTN_OFFSET, advY + ADV_ROW2_OFFSET_Y, HALF_BTN_W, BTN_H).build());
         }
 
         createButton = Button.builder(Component.translatable("voxlink.create_room"), button -> createRoom())
-                .bounds(centerX - BTN_W / 2, advY + ADV_ROW3_OFFSET_Y, HALF_BTN_W, BTN_H).build();
+        .bounds(centerX - BTN_W / 2, advY + ADV_ROW3_OFFSET_Y, HALF_BTN_W, BTN_H).build();
         this.addRenderableWidget(createButton);
 
         backButton = Button.builder(Component.translatable("voxlink.back"), button ->
-                Minecraft.getInstance().setScreen(parent)
+        Minecraft.getInstance().setScreen(parent)
         ).bounds(centerX + PAIR_BTN_OFFSET, advY + ADV_ROW3_OFFSET_Y, HALF_BTN_W, BTN_H).build();
         this.addRenderableWidget(backButton);
 
@@ -320,33 +314,33 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
     private Component getLabelComponentForKey(String key, boolean bold) {
         net.minecraft.network.chat.MutableComponent label = DEFAULT_CATEGORIES.containsKey(key)
-                ? Component.translatable(DEFAULT_CATEGORIES.get(key))
-                : Component.literal(categoryMap.getOrDefault(key, key));
+        ? Component.translatable(DEFAULT_CATEGORIES.get(key))
+        : Component.literal(categoryMap.getOrDefault(key, key));
         return bold ? label.withStyle(Style.EMPTY.withBold(true)) : label;
     }
 
     private void fetchCategories() {
         VoxLinkMod.getSignalingClient().getCategories()
-                .thenAccept(response -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    mc.execute(() -> {
-                        if (removed || createdRoom != null) return;
-                        try {
-                            if (response.success && response.data != null && response.data.isJsonObject()) {
-                                JsonObject obj = response.data.getAsJsonObject();
-                                categoryMap.clear();
-                                for (String k : obj.keySet()) {
-                                    if (!DEFAULT_CATEGORIES.containsKey(k)) {
-                                        categoryMap.put(k, obj.get(k).getAsString());
-                                    }
-                                }
-                                categoriesFetched = true;
-                                buildCategoryButtons(this.width / 2, Math.max(FORM_MIN_Y, (this.height - FORM_HEIGHT) / 2) + CATEGORY_OFFSET_Y);
+        .thenAccept(response -> {
+            Minecraft mc = Minecraft.getInstance();
+            mc.execute(() -> {
+                if (removed || createdRoom != null) return;
+                try {
+                    if (response.success && response.data != null && response.data.isJsonObject()) {
+                        JsonObject obj = response.data.getAsJsonObject();
+                        categoryMap.clear();
+                        for (String k : obj.keySet()) {
+                            if (!DEFAULT_CATEGORIES.containsKey(k)) {
+                                categoryMap.put(k, obj.get(k).getAsString());
                             }
-                        } catch (Exception ignored) {}
-                    });
-                })
-                .exceptionally(e -> null);
+                        }
+                        categoriesFetched = true;
+                        buildCategoryButtons(this.width / 2, Math.max(FORM_MIN_Y, (this.height - FORM_HEIGHT) / 2) + CATEGORY_OFFSET_Y);
+                    }
+                } catch (Exception ignored) {}
+            });
+        })
+        .exceptionally(e -> null);
     }
 
     private void updateVisibleForPassword() {
@@ -362,8 +356,8 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         if (visibleButton != null) {
             visibleButton.active = !hasPassword;
             visibleButton.setMessage(hasPassword
-                    ? Component.translatable("voxlink.visible.password_hidden").withStyle(ChatFormatting.RED)
-                    : buildVisibleLabel());
+            ? Component.translatable("voxlink.visible.password_hidden").withStyle(ChatFormatting.RED)
+            : buildVisibleLabel());
         }
     }
 
@@ -377,7 +371,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
     private Component buildGuestOpLabel() {
         return guestOp ? Component.translatable("voxlink.guest_op.on")
-                : Component.translatable("voxlink.guest_op.off");
+        : Component.translatable("voxlink.guest_op.off");
     }
 
     private Component buildGameTypeLabel() {
@@ -386,7 +380,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
     private Component buildHostOpLabel() {
         return hostOp ? Component.translatable("voxlink.host_op.on")
-                : Component.translatable("voxlink.host_op.off");
+        : Component.translatable("voxlink.host_op.off");
     }
 
     private String resolveCategory() {
@@ -434,7 +428,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         var mc = Minecraft.getInstance();
         if (mc.getSingleplayerServer() == null) {
             if (mc.player != null) {
-                mc.player.displayClientMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(COLOR_ERROR_RGB)), false);
+                mc.player.displayClientMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)), false);
             }
             return;
         }
@@ -484,7 +478,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             if (!published) {
                 creating = false;
                 if (mc.player != null) {
-                    mc.player.displayClientMessage(Component.translatable("voxlink.create_room.lan_failed").withStyle(style -> style.withColor(COLOR_ERROR_RGB)), false);
+                    mc.player.displayClientMessage(Component.translatable("voxlink.create_room.lan_failed").withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)), false);
                 }
                 createButton.active = true;
                 return;
@@ -501,47 +495,47 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
         String categoryText = resolveCategory();
 
         VoxLinkMod.getRoomManager().createRoom(roomName, password.isEmpty() ? null : password, maxPlayers, effectivePort, visible, authType.name(), categoryText)
-                .thenAccept(roomInfo -> {
-                    mc.execute(() -> {
-                        if (cancelled) return;
-                        createStartTime = 0;
-                        if (roomInfo == null) {
-                            creating = false;
-                            closeLan();
-                            if (mc.player != null) {
-                                mc.player.displayClientMessage(
-                                        Component.translatable("voxlink.chat.error_prefix").withStyle(ChatFormatting.RED)
-                                                .append(Component.translatable("voxlink.create_room.timeout")), false);
-                            }
-                            mc.setScreen(CreateRoomScreen.this);
-                        } else {
-                            creating = false;
-                            createdRoom = roomInfo;
-                            roomInfo.setGuestOp(guestOp);
-                            roomInfo.setGameType(gameType);
-                            roomInfo.setHostOp(hostOp);
-                            sendChatMessages(mc, roomInfo);
-                            mc.setScreen(CreateRoomScreen.this);
-                        }
-                    });
-                })
-                .exceptionally(e -> {
-                    Throwable cause = e;
-                    while (cause.getCause() != null) cause = cause.getCause();
-                    String msg = cause.getMessage();
-                    final String displayMsg = simplifyError(msg);
-                    mc.execute(() -> {
-                        if (cancelled) return;
-                        createStartTime = 0;
-                        creating = false;
-                        closeLan();
-                        if (mc.player != null) {
-                            mc.player.displayClientMessage(Component.translatable("voxlink.chat.error", displayMsg).withStyle(ChatFormatting.RED), false);
-                        }
-                        mc.setScreen(CreateRoomScreen.this);
-                    });
-                    return null;
-                });
+        .thenAccept(roomInfo -> {
+            mc.execute(() -> {
+                if (cancelled) return;
+                createStartTime = 0;
+                if (roomInfo == null) {
+                    creating = false;
+                    closeLan();
+                    if (mc.player != null) {
+                        mc.player.displayClientMessage(
+                        Component.translatable("voxlink.chat.error_prefix").withStyle(ChatFormatting.RED)
+                        .append(Component.translatable("voxlink.create_room.timeout")), false);
+                    }
+                    mc.setScreen(CreateRoomScreen.this);
+                } else {
+                    creating = false;
+                    createdRoom = roomInfo;
+                    roomInfo.setGuestOp(guestOp);
+                    roomInfo.setGameType(gameType);
+                    roomInfo.setHostOp(hostOp);
+                    sendChatMessages(mc, roomInfo);
+                    mc.setScreen(CreateRoomScreen.this);
+                }
+            });
+        })
+        .exceptionally(e -> {
+            Throwable cause = e;
+            while (cause.getCause() != null) cause = cause.getCause();
+            String msg = cause.getMessage();
+            final String displayMsg = simplifyError(msg);
+            mc.execute(() -> {
+                if (cancelled) return;
+                createStartTime = 0;
+                creating = false;
+                closeLan();
+                if (mc.player != null) {
+                    mc.player.displayClientMessage(Component.translatable("voxlink.chat.error", displayMsg).withStyle(ChatFormatting.RED), false);
+                }
+                mc.setScreen(CreateRoomScreen.this);
+            });
+            return null;
+        });
     }
 
     private String simplifyError(String msg) {
@@ -562,24 +556,24 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
         String code = roomInfo.getCode();
         mc.player.displayClientMessage(
-                Component.translatable("voxlink.chat.room_created").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
-                false
+        Component.translatable("voxlink.chat.room_created").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
+        false
         );
         mc.player.displayClientMessage(
-                Component.translatable("voxlink.chat.room_code_label").withStyle(ChatFormatting.YELLOW)
-                        .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
-                                        + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
-                                .withStyle(ChatCompat.styleWithCopy(code,
-                                        Component.translatable("voxlink.chat.click_to_copy")))),
-                false
+        Component.translatable("voxlink.chat.room_code_label").withStyle(ChatFormatting.YELLOW)
+        .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
+        + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
+        .withStyle(ChatCompat.styleWithCopy(code,
+        Component.translatable("voxlink.chat.click_to_copy")))),
+        false
         );
         mc.player.displayClientMessage(
-                Component.translatable("voxlink.chat.friends_install_hint").withStyle(ChatFormatting.DARK_GRAY),
-                false
+        Component.translatable("voxlink.chat.friends_install_hint").withStyle(ChatFormatting.DARK_GRAY),
+        false
         );
         mc.player.displayClientMessage(
-                Component.translatable("voxlink.create_room.recommend_voxlink"),
-                false
+        Component.translatable("voxlink.create_room.recommend_voxlink"),
+        false
         );
 
         String hostIp = roomInfo.getHostIp();
@@ -592,17 +586,17 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             if (hasV4) {
                 String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
                 addrLine.append(Component.translatable("voxlink.chat.ipv4_label")
-                        .withStyle(ChatCompat.styleWithCopy(addr,
-                                Component.translatable("voxlink.chat.copy_for_non_voxlink"))
-                                .withColor(COLOR_SUCCESS_RGB)));
+                .withStyle(ChatCompat.styleWithCopy(addr,
+                Component.translatable("voxlink.chat.copy_for_non_voxlink"))
+                .withColor(VoxLinkColors.SUCCESS_RGB)));
             }
             if (hasV4 && hasV6) addrLine.append(Component.literal(" "));
             if (hasV6) {
                 String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
                 addrLine.append(Component.translatable("voxlink.chat.ipv6_label")
-                        .withStyle(ChatCompat.styleWithCopy(ipv6Addr,
-                                Component.translatable("voxlink.chat.copy_for_non_voxlink"))
-                                .withColor(COLOR_SUCCESS_RGB)));
+                .withStyle(ChatCompat.styleWithCopy(ipv6Addr,
+                Component.translatable("voxlink.chat.copy_for_non_voxlink"))
+                .withColor(VoxLinkColors.SUCCESS_RGB)));
             }
             mc.player.displayClientMessage(addrLine, false);
         }
@@ -671,28 +665,28 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             successClickLabels.clear();
             net.minecraft.client.gui.Font font = Minecraft.getInstance().font;
             int y = Math.max(SUCCESS_MIN_Y, this.height / 2 - SUCCESS_OFFSET_Y);
-            drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.success").getString(), centerX, y, COLOR_SUCCESS);
+            drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.success").getString(), centerX, y, VoxLinkColors.SUCCESS);
             y += SUCCESS_LINE_H;
             //debounce 不显示明文 只显示标签 点击复制
             String code = createdRoom.getCode();
             Component codeLine = Component.translatable("voxlink.chat.room_code_label").withStyle(ChatFormatting.YELLOW)
-                    .append(Component.literal("[").append(Component.translatable("voxlink.chat.click_to_copy")).append("]")
-                            .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
-            drawCenteredComponent(graphics, codeLine, centerX, y, COLOR_TITLE);
+            .append(Component.literal("[").append(Component.translatable("voxlink.chat.click_to_copy")).append("]")
+            .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+            drawCenteredComponent(graphics, codeLine, centerX, y, VoxLinkColors.TITLE);
             int codeW = fontWidth(codeLine);
             successClickAreas.add(new int[]{centerX - codeW / 2, y, codeW, SUCCESS_CODE_H});
             successClickTexts.add(code);
             successClickLabels.add(Component.translatable("voxlink.chat.room_code_label").getString());
             y += SUCCESS_SMALL_GAP;
-            drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.recommend_voxlink").getString(), centerX, y, COLOR_INFO);
+            drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.recommend_voxlink").getString(), centerX, y, VoxLinkColors.INFO);
             y += SUCCESS_MED_GAP;
             //陶瓦房间号 (异步获取, 可能为空) 不显示明文
             String tc = createdRoom.getTerracottaCode();
             if (tc != null && !tc.isEmpty()) {
                 Component tcLine = Component.translatable("voxlink.chat.terracotta_code_label", " ")
-                        .append(Component.literal("[").append(Component.translatable("voxlink.chat.click_to_copy")).append("]")
-                                .withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
-                drawCenteredComponent(graphics, tcLine, centerX, y, COLOR_TITLE);
+                .append(Component.literal("[").append(Component.translatable("voxlink.chat.click_to_copy")).append("]")
+                .withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
+                drawCenteredComponent(graphics, tcLine, centerX, y, VoxLinkColors.TITLE);
                 int tcW = fontWidth(tcLine);
                 successClickAreas.add(new int[]{centerX - tcW / 2, y, tcW, SUCCESS_CODE_H});
                 successClickTexts.add(tc);
@@ -715,21 +709,21 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                 int totalW = labelW + v4W + spaceW + v6W;
                 int startX = centerX - totalW / 2;
 
-                drawString(graphics, addrLabel, startX, y, COLOR_TITLE);
+                drawString(graphics, addrLabel, startX, y, VoxLinkColors.TITLE);
                 int curX = startX + labelW;
                 if (hasV4) {
-                    drawString(graphics, ChatFormatting.GREEN.toString() + v4Label + ChatFormatting.RESET.toString(), curX, y, COLOR_SUCCESS);
+                    drawString(graphics, ChatFormatting.GREEN.toString() + v4Label + ChatFormatting.RESET.toString(), curX, y, VoxLinkColors.SUCCESS);
                     successClickAreas.add(new int[]{curX, y, v4W, SUCCESS_CODE_H});
                     successClickTexts.add((hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort);
                     successClickLabels.add(v4Label);
                     curX += v4W;
                 }
                 if (hasV4 && hasV6) {
-                    drawString(graphics, " ", curX, y, COLOR_TITLE);
+                    drawString(graphics, " ", curX, y, VoxLinkColors.TITLE);
                     curX += spaceW;
                 }
                 if (hasV6) {
-                    drawString(graphics, ChatFormatting.GREEN.toString() + v6Label + ChatFormatting.RESET.toString(), curX, y, COLOR_SUCCESS);
+                    drawString(graphics, ChatFormatting.GREEN.toString() + v6Label + ChatFormatting.RESET.toString(), curX, y, VoxLinkColors.SUCCESS);
                     successClickAreas.add(new int[]{curX, y, v6W, SUCCESS_CODE_H});
                     successClickTexts.add("[" + hostIpv6 + "]:" + hostPort);
                     successClickLabels.add(v6Label);
@@ -739,7 +733,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             return;
         }
 
-        drawCenteredClipped(graphics, this.title.getString(), centerX, TITLE_Y, COLOR_TITLE);
+        drawCenteredClipped(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.TITLE);
     }
 
     protected boolean handleSuccessClick(double mx, double my) {
@@ -752,7 +746,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                     Minecraft.getInstance().keyboardHandler.setClipboard(text);
                     if (Minecraft.getInstance().player != null) {
                         Minecraft.getInstance().player.displayClientMessage(
-                            Component.translatable("voxlink.chat.copied_to_clipboard", label).withStyle(ChatFormatting.GREEN), false);
+                        Component.translatable("voxlink.chat.copied_to_clipboard", label).withStyle(ChatFormatting.GREEN), false);
                     }
                     return true;
                 }

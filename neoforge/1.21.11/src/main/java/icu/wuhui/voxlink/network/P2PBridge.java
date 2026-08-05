@@ -27,8 +27,6 @@ public class P2PBridge {
     private static final int KEEPALIVE_SOCKET_TIMEOUT_MS = 60000;
     private static final int MAX_THREADS = 16;
     private static final long KEEPALIVE_TIME_SEC = 60L;
-    private static final int AWAIT_SEC = 3;
-    private static final int AWAIT_FINAL_SEC = 1;
     private static final int RETRY_DELAY_MS = 500;
 
     private static final AtomicBoolean running = new AtomicBoolean(false);
@@ -532,18 +530,7 @@ public class P2PBridge {
         bridgeExecutor = null;
         if (oldExecutor != null && !oldExecutor.isShutdown()) {
             oldExecutor.shutdown();
-            try {
-                if (!oldExecutor.awaitTermination(AWAIT_SEC, TimeUnit.SECONDS)) {
-                    LOGGER.warn("bridge executor not stopped in 3s, force kill");
-                    oldExecutor.shutdownNow();
-                    if (!oldExecutor.awaitTermination(AWAIT_FINAL_SEC, TimeUnit.SECONDS)) {
-                        LOGGER.warn("bridge executor still running after force kill :(");
-                    }
-                }
-            } catch (InterruptedException e) {
-                oldExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
+            oldExecutor.shutdownNow();
         }
     }
 
@@ -676,16 +663,28 @@ public class P2PBridge {
         running.set(true);
 
         getOrCreateExecutor().execute(() -> {
-            final Socket[] mcSocketRef = new Socket[1];
             final Runnable onCloseFinal = onClose;
+            Socket mcSocket = null;
             try {
-                Socket mcSocket = new Socket();
-                mcSocketRef[0] = mcSocket;
+                //debounce 懒连接: 先等joiner首包(MC握手)到达 再连MC服务器
+                //打洞成功即空连MC会被服务端30s读超时踢掉 导致整个通道被误拆
+                InputStream udpIn = transport.getInputStream();
+                byte[] firstBuf = new byte[BUFFER_SIZE];
+                int firstLen = udpIn.read(firstBuf);
+                if (firstLen <= 0) {
+                    throw new IOException("UDP stream closed before first packet (read=" + firstLen + ")");
+                }
+
+                mcSocket = new Socket();
                 mcSocket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), mcPort), CONNECT_TIMEOUT);
                 mcSocket.setTcpNoDelay(true);
                 mcSocket.setSendBufferSize(BUFFER_SIZE);
                 mcSocket.setReceiveBufferSize(BUFFER_SIZE);
-                LOGGER.info("UDP host bridge for client {} connected to MC server on port {}", clientId, mcPort);
+                //debounce 首包立即转发 握手零等待 MC侧读超时从有数据才开始计时
+                OutputStream mcOut = mcSocket.getOutputStream();
+                mcOut.write(firstBuf, 0, firstLen);
+                mcOut.flush();
+                LOGGER.info("UDP host bridge for client {} connected to MC server on port {} (lazy, first packet {} bytes)", clientId, mcPort, firstLen);
 
                 ExecutorService exec = getOrCreateExecutor();
                 final Socket mcSocketFinal = mcSocket;
@@ -694,8 +693,7 @@ public class P2PBridge {
             } catch (IOException e) {
                 LOGGER.error("UDP host bridge for client {} failed to connect to MC server: {}", clientId, e.getMessage());
                 try { transport.close(); } catch (Exception ignored) {}
-                Socket s = mcSocketRef[0];
-                if (s != null) try { s.close(); } catch (IOException ignored) {}
+                if (mcSocket != null) try { mcSocket.close(); } catch (IOException ignored) {}
                 activeUdpTransports.remove(transport);
                 if (onCloseFinal != null) onCloseFinal.run();
             }

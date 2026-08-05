@@ -20,7 +20,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
     private Button authButton;
     private Button saveButton;
     private String statusMessage = "";
-    private int statusColor = COLOR_TITLE;
+    private int statusColor = VoxLinkColors.TITLE;
 
     //布局常量
     private static final int BTN_W = 200;
@@ -37,11 +37,6 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
     private static final int STATUS_OFFSET_Y = 186;
     private static final int TITLE_Y = 8;
     //颜色常量
-    private static final int COLOR_TITLE = 0xFFFFFFFF;
-    private static final int COLOR_ERROR = 0xFFFF5555;
-    private static final int COLOR_WARNING = 0xFFFFFF55;
-    private static final int COLOR_SUCCESS = 0xFF55FF55;
-    private static final int COLOR_SUCCESS_RGB = 0x55FF55;
     private static final int MIN_MAX_PLAYERS = 2;
     private static final int MAX_MAX_PLAYERS = 100;
 
@@ -53,9 +48,9 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
     private volatile boolean saving = false;
     private static final String[] CATEGORIES = {"survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"};
     private static final String[] CATEGORY_TRANSLATION_KEYS = {
-            "voxlink.category.survival", "voxlink.category.creative", "voxlink.category.redstone",
-            "voxlink.category.pvp", "voxlink.category.rpg", "voxlink.category.minigame",
-            "voxlink.category.social", "voxlink.category.other"
+        "voxlink.category.survival", "voxlink.category.creative", "voxlink.category.redstone",
+        "voxlink.category.pvp", "voxlink.category.rpg", "voxlink.category.minigame",
+        "voxlink.category.social", "voxlink.category.other"
     };
 
     private enum AuthType {
@@ -131,7 +126,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
         this.addRenderableWidget(authButton);
 
         this.addRenderableWidget(saveButton = Button.builder(Component.translatable("voxlink.manage_room.save_and_back"), button -> {
-                saveSettings(() -> Minecraft.getInstance().gui.setScreen(parent));
+            saveSettings(() -> Minecraft.getInstance().gui.setScreen(parent));
         }).bounds(centerX - BTN_W / 2, advY + SAVE_BTN_OFFSET_Y, BTN_W, BTN_H).build());
 
         if (saving) {
@@ -169,8 +164,8 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
         if (visibleButton != null) {
             visibleButton.active = !hasPassword;
             visibleButton.setMessage(hasPassword
-                    ? Component.translatable("voxlink.visible.password_hidden").withStyle(ChatFormatting.RED)
-                    : buildVisibleLabel());
+            ? Component.translatable("voxlink.visible.password_hidden").withStyle(ChatFormatting.RED)
+            : buildVisibleLabel());
         }
     }
 
@@ -187,7 +182,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
         String name = nameField.getValue().trim();
         if (name.isEmpty()) {
             statusMessage = ChatFormatting.RED.toString() + Component.translatable("voxlink.manage_room.enter_name").getString();
-            statusColor = COLOR_ERROR;
+            statusColor = VoxLinkColors.ERROR;
             return;
         }
 
@@ -207,7 +202,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
 
         saving = true;
         statusMessage = Component.translatable("voxlink.manage_room.saving").getString();
-        statusColor = COLOR_WARNING;
+        statusColor = VoxLinkColors.WARNING;
         saveButton.active = false;
 
         if (mc.player != null) {
@@ -215,9 +210,9 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
         }
 
         VoxLinkMod.getRoomManager().updateRoom(
-                roomInfo.getCode(), roomInfo.getToken(),
-                name, passwordToSend,
-                maxPlayers, visible, authType.name(), CATEGORIES[categoryIdx]
+        roomInfo.getCode(), roomInfo.getToken(),
+        name, passwordToSend,
+        maxPlayers, visible, authType.name(), CATEGORIES[categoryIdx]
         ).thenAccept(updated -> {
             mc.execute(() -> {
                 if (mc.gui.screen() != ManageRoomScreen.this) {
@@ -229,10 +224,10 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                 if (updated != null && !updated.isNameApproved()) {
                     //debounce 审核异步进行,不在此处下结论,避免与后续信号矛盾
                     statusMessage = ChatFormatting.YELLOW.toString() + Component.translatable("voxlink.manage_room.name_pending_review").getString();
-                    statusColor = COLOR_WARNING;
+                    statusColor = VoxLinkColors.WARNING;
                 } else {
                     statusMessage = ChatFormatting.GREEN.toString() + Component.translatable("voxlink.manage_room.saved").getString();
-                    statusColor = COLOR_SUCCESS;
+                    statusColor = VoxLinkColors.SUCCESS;
                 }
 
                 roomInfo.setVisible(visible);
@@ -242,14 +237,14 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                 if (mc.player != null) {
                     String code = roomInfo.getCode();
                     mc.player.sendSystemMessage(
-                            Component.translatable("voxlink.chat.room_settings_updated").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+                    Component.translatable("voxlink.chat.room_settings_updated").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
                     //debounce 不显示明文房间号
                     mc.player.sendSystemMessage(
-                            Component.translatable("voxlink.chat.room_code_label")
-                                    .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
-                                                    + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
-                                            .withStyle(ChatCompat.styleWithCopy(code,
-                                                    Component.translatable("voxlink.chat.click_to_copy")))));
+                    Component.translatable("voxlink.chat.room_code_label")
+                    .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
+                    + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
+                    .withStyle(ChatCompat.styleWithCopy(code,
+                    Component.translatable("voxlink.chat.click_to_copy")))));
                     String hostIp = roomInfo.getHostIp();
                     int hostPort = roomInfo.getHostPort();
                     String hostIpv6 = roomInfo.getHostIpv6();
@@ -260,17 +255,17 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                         if (hasV4) {
                             String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
                             addrLine.append(Component.translatable("voxlink.chat.ipv4_label")
-                                    .withStyle(ChatCompat.styleWithCopy(addr,
-                                            Component.translatable("voxlink.chat.copy_for_non_voxlink"))
-                                            .withColor(COLOR_SUCCESS_RGB)));
+                            .withStyle(ChatCompat.styleWithCopy(addr,
+                            Component.translatable("voxlink.chat.copy_for_non_voxlink"))
+                            .withColor(VoxLinkColors.SUCCESS_RGB)));
                         }
                         if (hasV4 && hasV6) addrLine.append(Component.literal(" "));
                         if (hasV6) {
                             String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
                             addrLine.append(Component.translatable("voxlink.chat.ipv6_label")
-                                    .withStyle(ChatCompat.styleWithCopy(ipv6Addr,
-                                            Component.translatable("voxlink.chat.copy_for_non_voxlink"))
-                                            .withColor(COLOR_SUCCESS_RGB)));
+                            .withStyle(ChatCompat.styleWithCopy(ipv6Addr,
+                            Component.translatable("voxlink.chat.copy_for_non_voxlink"))
+                            .withColor(VoxLinkColors.SUCCESS_RGB)));
                         }
                         mc.player.sendSystemMessage(addrLine);
                     }
@@ -290,7 +285,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                 saving = false;
                 saveButton.active = true;
                 statusMessage = ChatFormatting.RED.toString() + finalMsg;
-                statusColor = COLOR_ERROR;
+                statusColor = VoxLinkColors.ERROR;
                 if (mc.player != null) {
                     mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", finalMsg));
                 }
@@ -303,7 +298,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
         int centerX = this.width / 2;
-        drawCenteredClipped(graphics, this.title.getString(), centerX, TITLE_Y, COLOR_TITLE);
+        drawCenteredClipped(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.TITLE);
 
         if (!statusMessage.isEmpty()) {
             String clipped = statusMessage;

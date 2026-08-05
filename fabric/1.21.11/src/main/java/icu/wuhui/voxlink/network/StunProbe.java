@@ -391,14 +391,7 @@ public class StunProbe {
 
     public static void shutdown() {
         STUN_EXECUTOR.shutdown();
-        try {
-            if (!STUN_EXECUTOR.awaitTermination(2, TimeUnit.SECONDS)) {
-                STUN_EXECUTOR.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            STUN_EXECUTOR.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        STUN_EXECUTOR.shutdownNow();
     }
 
     private static final class CacheEntry {

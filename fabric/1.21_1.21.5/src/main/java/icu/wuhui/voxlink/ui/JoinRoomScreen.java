@@ -21,18 +21,13 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
     private static final int HINT_Y_OFFSET = 6;
     private static final int STATUS_Y_OFFSET = 32;
     private static final int TITLE_Y = 15;
-    private static final int COLOR_WHITE = 0xFFFFFFFF;
-    private static final int COLOR_ERROR = 0xFFFF5555;
-    private static final int COLOR_INFO = 0xFFAAAAFF;
     private static final int TERRACOTTA_HINT_Y_OFFSET = 18;
-    private static final int COLOR_MUTED = 0xFFAAAAAA;
-
     private final Screen parent;
     private EditBox codeField;
     private EditBox passwordField;
     private Button joinButton;
     private String statusMessage = "";
-    private int statusColor = COLOR_WHITE;
+    private int statusColor = VoxLinkColors.WHITE;
     private String savedCode = "";
     private String savedPassword = "";
 
@@ -102,18 +97,18 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
         String code = codeField.getValue().trim().toUpperCase();
         if (code.isEmpty()) {
             statusMessage = Component.translatable("voxlink.join_room.enter_code").getString();
-            statusColor = COLOR_ERROR;
+            statusColor = VoxLinkColors.ERROR;
             return;
         }
         if (!RoomCodeRouter.isVoxLinkCode(code) && !RoomCodeRouter.isTerracottaCode(code)) {
             statusMessage = Component.translatable("voxlink.error.invalid_room_code").getString();
-            statusColor = COLOR_ERROR;
+            statusColor = VoxLinkColors.ERROR;
             return;
         }
         //陶瓦码需要陶瓦就绪
         if (RoomCodeRouter.isTerracottaCode(code) && !TerracottaManager.isBinaryReady()) {
             statusMessage = Component.translatable("voxlink.join.terracotta_not_ready").getString();
-            statusColor = COLOR_ERROR;
+            statusColor = VoxLinkColors.ERROR;
             return;
         }
         savedCode = code;
@@ -130,11 +125,11 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
         int startY = Math.max(40, (this.height - formHeight) / 2);
         int backY = startY + (BTN_H + GAP + FIELD_SPACING) * 2 + BTN_H + GAP;
 
-        drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, COLOR_WHITE);
-        drawCenteredString(graphics, Component.translatable("voxlink.join.recommend_voxlink").getString(), centerX, backY + BTN_H + HINT_Y_OFFSET, COLOR_INFO);
+        drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.WHITE);
+        drawCenteredString(graphics, Component.translatable("voxlink.join.recommend_voxlink").getString(), centerX, backY + BTN_H + HINT_Y_OFFSET, VoxLinkColors.INFO);
         drawCenteredString(graphics,
                 Component.translatable("voxlink.join.terracotta_code_hint").getString(),
-                centerX, backY + BTN_H + TERRACOTTA_HINT_Y_OFFSET, COLOR_MUTED);
+                centerX, backY + BTN_H + TERRACOTTA_HINT_Y_OFFSET, VoxLinkColors.MUTED);
 
         if (!statusMessage.isEmpty()) {
             drawCenteredClipped(graphics, statusMessage, centerX, backY + BTN_H + STATUS_Y_OFFSET, statusColor);

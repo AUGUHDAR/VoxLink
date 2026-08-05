@@ -103,14 +103,7 @@ public class PeerServer {
         //debounce 关闭executor 避免反复启停累积虚拟线程
         if (peerExecutor != null) {
             peerExecutor.shutdown();
-            try {
-                if (!peerExecutor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)) {
-                    peerExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                peerExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
+            peerExecutor.shutdownNow();
             peerExecutor = null;
         }
     }

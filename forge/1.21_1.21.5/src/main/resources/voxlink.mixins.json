@@ -1,0 +1,19 @@
+{
+    "required": false,
+    "minVersion": "0.8",
+    "package": "icu.wuhui.voxlink.mixin",
+    "compatibilityLevel": "JAVA_21",
+    "client": [
+        "PauseMenuMixin",
+        "TitleScreenMixin",
+        "IntegratedServerMixin",
+        "DirectConnectMixin"
+    ],
+    "mixins": [
+        "UUIDUtilMixin",
+        "CommandNodeAccessor"
+    ],
+    "injectors": {
+        "defaultRequire": 0
+    }
+}

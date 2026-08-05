@@ -646,9 +646,6 @@ public final class TerracottaManager {
         synchronized (TerracottaManager.class) {
             if (downloadExecutor != null) {
                 downloadExecutor.shutdownNow();
-                //debounce 等待下载线程退出 防止与后续deleteBinary竞态写文件
-                try { downloadExecutor.awaitTermination(2, TimeUnit.SECONDS); }
-                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 downloadExecutor = null;
             }
         }
