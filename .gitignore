@@ -1,0 +1,59 @@
+# ===== VoxLink .gitignore =====
+# 服务端（不上传）
+server/
+
+# 构建产物与缓存
+build/
+bin/
+.gradle/
+.gradle-home/
+**/build/
+**/bin/
+**/.gradle/
+
+# 日志与崩溃转储
+*.log
+hs_err_pid*.log
+replay_pid*.log
+
+# IDE / 工具目录
+.claude/
+.qoder/
+.trae/
+.workbuddy/
+.vscode/
+.idea/
+*.iml
+
+# 打包产物
+成品/
+客户端测试/
+*.zip
+*.jar
+!**/src/**/*.jar
+
+# 临时脚本 / 临时文件
+_*.py
+_*.ps1
+_*.java
+_*.patch
+*.tmp
+*.bak
+
+# ForgeGradle 本地依赖 / 编译辅助产物
+fg-7.0.*/
+mcmeta/
+net/
+.tmp-jar-extract/
+.tmp-sources-extract/
+**/.tmp-jar-extract/
+**/.tmp-sources-extract/
+*.class
+!**/src/**/*.class
+
+# 独立应用（非 mod 本体）
+voxlink-app/
+voxlink-app-rs/
+
+# 参考资料（非项目源码）
+相关MOD参考/
