@@ -1,187 +1,228 @@
 package icu.wuhui.voxlink.network;
 
-import icu.wuhui.voxlink.VoxLinkMod;
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
-
+import icu.wuhui.voxlink.room.ConnectionManager;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/**
- * P2P玩家互助中继: 当两个对称NAT玩家无法直连时, 通过房间内非对称NAT玩家中转数据。
- * 服务器零负载, 中转节点可开关, 支持多中继负载分拆。
- * 
- * 架构:
- *   Sym1 ──(P2P)──► Relay(Cone) ──(P2P)──► Sym2
- *   RelayBridge 在 Relay 侧把两个 transport 的流互相转发
- */
 public class RelayBridge {
-    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("VoxLink-Relay");
-    private static final int MONITOR_INITIAL_DELAY_SEC = 5;
-    private static final int MONITOR_INTERVAL_SEC = 5;
-    private static final int RELAY_BUFFER_SIZE = 65536;
+   private static final Logger LOGGER = LoggerFactory.getLogger("VoxLink-Relay");
+   private static final int MONITOR_INITIAL_DELAY_SEC = 5;
+   private static final int MONITOR_INTERVAL_SEC = 5;
+   private static final int RELAY_BUFFER_SIZE = 65536;
+   private final ScheduledExecutorService scheduler;
+   private final Map<String, RelayBridge.RelaySession> activeRelays = new ConcurrentHashMap<>();
+   private final AtomicBoolean running = new AtomicBoolean(false);
+   private ScheduledFuture<?> monitorTask;
+   private static volatile RelayBridge instance;
 
-    private final ScheduledExecutorService scheduler;
-    private final Map<String, RelaySession> activeRelays = new ConcurrentHashMap<>();
-    private final AtomicBoolean running = new AtomicBoolean(false);
-    private ScheduledFuture<?> monitorTask;
-
-    private static volatile RelayBridge instance;
-
-    public static RelayBridge getInstance(ScheduledExecutorService scheduler) {
-        if (instance == null) {
-            synchronized (RelayBridge.class) {
-                if (instance == null) {
-                    instance = new RelayBridge(scheduler);
-                }
+   public static RelayBridge getInstance(ScheduledExecutorService scheduler) {
+      if (instance == null) {
+         synchronized (RelayBridge.class) {
+            if (instance == null) {
+               instance = new RelayBridge(scheduler);
             }
-        }
-        return instance;
-    }
+         }
+      }
 
-    private RelayBridge(ScheduledExecutorService scheduler) {
-        this.scheduler = scheduler;
-    }
+      return instance;
+   }
 
-    /**
-     * 作为中转节点: 在两个已连接的peer之间转发数据
-     */
-    public void startRelay(String peerAId, String peerBId,
-                           ReliableUdpTransport transportA, ReliableUdpTransport transportB) {
-        String relayKey = peerAId + "<->" + peerBId;
-        RelaySession session = new RelaySession(peerAId, peerBId, transportA, transportB);
-        if (activeRelays.putIfAbsent(relayKey, session) != null) {
+   private RelayBridge(ScheduledExecutorService scheduler) {
+      this.scheduler = scheduler;
+   }
+
+   public void startRelay(String peerAId, String peerBId, ReliableUdpTransport transportA, ReliableUdpTransport transportB) {
+      if (peerAId != null && peerBId != null && !peerAId.equals(peerBId) && transportA != null && transportB != null && transportA != transportB) {
+         String relayKey = peerAId.compareTo(peerBId) < 0 ? peerAId + "<->" + peerBId : peerBId + "<->" + peerAId;
+         RelayBridge.RelaySession session = new RelayBridge.RelaySession(peerAId, peerBId, transportA, transportB);
+         if (this.activeRelays.putIfAbsent(relayKey, session) != null) {
             LOGGER.info("[Relay] Relay session already exists: {}", relayKey);
-            return;
-        }
-        session.startForwarding();
-        LOGGER.info("[Relay] Relay started: {} (A={}, B={})", relayKey, peerAId, peerBId);
-
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) {
-            mc.player.displayClientMessage(Component.translatable("voxlink.relay.started").withStyle(ChatFormatting.YELLOW), false);
-        }
-
-        if (running.compareAndSet(false, true)) {
-            monitorTask = scheduler.scheduleAtFixedRate(this::monitorRelays, MONITOR_INITIAL_DELAY_SEC, MONITOR_INTERVAL_SEC, TimeUnit.SECONDS);
-        }
-    }
-
-    public int getRelayCountForPeer(String peerId) {
-        int count = 0;
-        for (RelaySession session : activeRelays.values()) {
-            if (session.peerAId.equals(peerId) || session.peerBId.equals(peerId)) {
-                count++;
+         } else {
+            session.startForwarding();
+            LOGGER.info("[Relay] Relay started: {} (A={}, B={})", new Object[]{relayKey, peerAId, peerBId});
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player != null) {
+               mc.player.displayClientMessage(Component.translatable("voxlink.relay.started"), false);
             }
-        }
-        return count;
-    }
 
-    private void monitorRelays() {
-        java.util.List<String> deadRelays = new java.util.ArrayList<>();
-        activeRelays.entrySet().removeIf(entry -> {
-            RelaySession s = entry.getValue();
-            if (!s.transportA.isConnected() || !s.transportB.isConnected()) {
-                LOGGER.warn("[Relay] Relay session disconnected: {}", entry.getKey());
-                deadRelays.add(entry.getKey());
-                s.stop();
-                return true;
+            if (this.running.compareAndSet(false, true)) {
+               this.monitorTask = this.scheduler.scheduleAtFixedRate(this::monitorRelays, 5L, 5L, TimeUnit.SECONDS);
             }
+         }
+      } else {
+         LOGGER.warn("[Relay] Reject invalid relay session: {} <-> {}", peerAId, peerBId);
+      }
+   }
+
+   public int getRelayCountForPeer(String peerId) {
+      int count = 0;
+
+      for (RelayBridge.RelaySession session : this.activeRelays.values()) {
+         if (session.peerAId.equals(peerId) || session.peerBId.equals(peerId)) {
+            count++;
+         }
+      }
+
+      return count;
+   }
+
+   public void stopAllRelays() {
+      if (!this.activeRelays.isEmpty()) {
+         LOGGER.info("[Relay] Stopping {} relay sessions", this.activeRelays.size());
+
+         for (RelayBridge.RelaySession s : this.activeRelays.values()) {
+            try {
+               s.stop();
+            } catch (Exception var4) {
+            }
+         }
+
+         this.activeRelays.clear();
+         if (this.running.compareAndSet(true, false) && this.monitorTask != null) {
+            this.monitorTask.cancel(false);
+            this.monitorTask = null;
+         }
+      }
+   }
+
+   private void monitorRelays() {
+      List<String> deadRelays = new ArrayList<>();
+      this.activeRelays.entrySet().removeIf(entry -> {
+         RelayBridge.RelaySession s = entry.getValue();
+         if (s.transportA.isConnected() && s.transportB.isConnected()) {
             return false;
-        });
+         }
 
-        if (activeRelays.isEmpty() && running.compareAndSet(true, false)) {
-            if (monitorTask != null) {
-                monitorTask.cancel(false);
-                monitorTask = null;
+         LOGGER.warn("[Relay] Relay session disconnected: {}", entry.getKey());
+         deadRelays.add(entry.getKey());
+         s.stop();
+         return true;
+      });
+      if (this.activeRelays.isEmpty() && this.running.compareAndSet(true, false)) {
+         if (this.monitorTask != null) {
+            this.monitorTask.cancel(false);
+            this.monitorTask = null;
+         }
+
+         LOGGER.info("[Relay] No relay sessions, monitor stopped");
+      }
+
+      if (!deadRelays.isEmpty()) {
+         for (String key : deadRelays) {
+            String[] parts = key.split("<->");
+            if (parts.length == 2) {
+               try {
+                  ConnectionManager cm = ConnectionManager.getInstance();
+                  if (cm != null) {
+                     cm.onRelayDisconnected(parts[0], parts[1]);
+                  }
+               } catch (Exception var6) {
+               }
             }
-            LOGGER.info("[Relay] No relay sessions, monitor stopped");
-        }
+         }
+      }
+   }
 
-        // 通知 ConnectionManager 中继断开（触发自动切换）
-        if (!deadRelays.isEmpty()) {
-            for (String key : deadRelays) {
-                String[] parts = key.split("<->");
-                if (parts.length == 2) {
-                    try {
-                        icu.wuhui.voxlink.room.ConnectionManager cm = icu.wuhui.voxlink.room.ConnectionManager.getInstance();
-                        if (cm != null) cm.onRelayDisconnected(parts[0], parts[1]);
-                    } catch (Exception ignored) {}
-                }
+   private static class RelaySession {
+      final String peerAId;
+      final String peerBId;
+      final ReliableUdpTransport transportA;
+      final ReliableUdpTransport transportB;
+      volatile boolean forwarding = true;
+      Thread threadAB;
+      Thread threadBA;
+
+      RelaySession(String peerAId, String peerBId, ReliableUdpTransport transportA, ReliableUdpTransport transportB) {
+         this.peerAId = peerAId;
+         this.peerBId = peerBId;
+         this.transportA = transportA;
+         this.transportB = transportB;
+      }
+
+      void startForwarding() {
+         InputStream inA = this.transportA.getInputStream();
+         OutputStream outA = this.transportA.getOutputStream();
+         InputStream inB = this.transportB.getInputStream();
+         OutputStream outB = this.transportB.getOutputStream();
+         this.threadAB = new Thread(() -> {
+            byte[] buf = new byte[65536];
+
+            while (this.forwarding) {
+               try {
+                  int n = inA.read(buf);
+                  if (n > 0) {
+                     outB.write(buf, 0, n);
+                  } else if (n < 0) {
+                     break;
+                  }
+               } catch (Exception e) {
+                  if (this.forwarding) {
+                     RelayBridge.LOGGER.debug("[Relay] A->B exception: {}", e.getMessage());
+                  }
+                  break;
+               }
             }
-        }
-    }
 
-    private static class RelaySession {
-        final String peerAId;
-        final String peerBId;
-        final ReliableUdpTransport transportA;
-        final ReliableUdpTransport transportB;
-        volatile boolean forwarding = true;
-        Thread threadAB;
-        Thread threadBA;
+            this.forwarding = false;
+         }, "VoxLink-Relay-A2B");
+         this.threadAB.setDaemon(true);
+         this.threadBA = new Thread(() -> {
+            byte[] buf = new byte[65536];
 
-        RelaySession(String peerAId, String peerBId,
-                     ReliableUdpTransport transportA, ReliableUdpTransport transportB) {
-            this.peerAId = peerAId;
-            this.peerBId = peerBId;
-            this.transportA = transportA;
-            this.transportB = transportB;
-        }
+            while (this.forwarding) {
+               try {
+                  int n = inB.read(buf);
+                  if (n > 0) {
+                     outA.write(buf, 0, n);
+                  } else if (n < 0) {
+                     break;
+                  }
+               } catch (Exception e) {
+                  if (this.forwarding) {
+                     RelayBridge.LOGGER.debug("[Relay] B->A exception: {}", e.getMessage());
+                  }
+                  break;
+               }
+            }
 
-        void startForwarding() {
-            InputStream inA = transportA.getInputStream();
-            OutputStream outA = transportA.getOutputStream();
-            InputStream inB = transportB.getInputStream();
-            OutputStream outB = transportB.getOutputStream();
+            this.forwarding = false;
+         }, "VoxLink-Relay-B2A");
+         this.threadBA.setDaemon(true);
+         this.threadAB.start();
+         this.threadBA.start();
+      }
 
-            threadAB = new Thread(() -> {
-                byte[] buf = new byte[RELAY_BUFFER_SIZE];
-                while (forwarding) {
-                    try {
-                        int n = inA.read(buf);
-                        if (n > 0) outB.write(buf, 0, n);
-                        else if (n < 0) break;
-                    } catch (Exception e) {
-                        if (forwarding) LOGGER.debug("[Relay] A->B exception: {}", e.getMessage());
-                        break;
-                    }
-                }
-                forwarding = false;
-            }, "VoxLink-Relay-A2B");
-            threadAB.setDaemon(true);
+      void stop() {
+         this.forwarding = false;
+         if (this.threadAB != null) {
+            this.threadAB.interrupt();
+         }
 
-            threadBA = new Thread(() -> {
-                byte[] buf = new byte[RELAY_BUFFER_SIZE];
-                while (forwarding) {
-                    try {
-                        int n = inB.read(buf);
-                        if (n > 0) outA.write(buf, 0, n);
-                        else if (n < 0) break;
-                    } catch (Exception e) {
-                        if (forwarding) LOGGER.debug("[Relay] B->A exception: {}", e.getMessage());
-                        break;
-                    }
-                }
-                forwarding = false;
-            }, "VoxLink-Relay-B2A");
-            threadBA.setDaemon(true);
+         if (this.threadBA != null) {
+            this.threadBA.interrupt();
+         }
 
-            threadAB.start();
-            threadBA.start();
-        }
+         try {
+            this.transportA.close();
+         } catch (Exception var3) {
+         }
 
-        void stop() {
-            forwarding = false;
-            if (threadAB != null) threadAB.interrupt();
-            if (threadBA != null) threadBA.interrupt();
-        }
-    }
+         try {
+            this.transportB.close();
+         } catch (Exception var2) {
+         }
+      }
+   }
 }
