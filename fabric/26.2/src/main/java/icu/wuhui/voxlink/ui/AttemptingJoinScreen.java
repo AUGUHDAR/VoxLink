@@ -3,6 +3,16 @@ package icu.wuhui.voxlink.ui;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.network.ConnectionHelper;
 import icu.wuhui.voxlink.room.RoomInfo;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -11,438 +21,545 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 public class AttemptingJoinScreen extends VoxLinkScreenBase {
-    private static final int BTN_W = 200;
-    private static final int HALF_BTN_W = 100;
-    private static final int BTN_H = 20;
-    private static final int BTN_Y_OFFSET = 45;
-    private static final int TITLE_Y = 15;
-    private static final int ROOM_CODE_Y_OFFSET = 30;
-    private static final int STATUS_MARGIN = 20;
-    //debounce 删掉上方提示行 VoxLink/陶瓦两行上移到中间
-    private static final int VOXLINK_STATUS_Y_OFFSET = 0;
-    private static final int TERRACOTTA_STATUS_Y_OFFSET = 14;
-    private static final int TICK_INTERVAL_MS = 500;
-    private static final int RELAY_BTN_GAP = 4;
-    private static final int RELAY_FAILED_MSG_MS = 3000;
+   private static final int BTN_W = 200;
+   private static final int HALF_BTN_W = 100;
+   private static final int BTN_H = 20;
+   private static final int BTN_Y_OFFSET = 45;
+   private static final int TITLE_Y = 15;
+   private static final int ROOM_CODE_Y_OFFSET = 30;
+   private static final int STATUS_MARGIN = 20;
+   private static final int VOXLINK_STATUS_Y_OFFSET = 0;
+   private static final int TERRACOTTA_STATUS_Y_OFFSET = 14;
+   private static final int TICK_INTERVAL_MS = 500;
+   private static final int MAX_MONITOR_TICKS_DUAL = 260;
+   private static final int RELAY_BTN_GAP = 4;
+   private static final int RELAY_FAILED_MSG_MS = 3000;
+   private static final int TIP_SWITCH_MS = 5000;
+   private static final String[] TIP_KEYS = new String[]{
+      "voxlink.tip.wait",
+      "voxlink.tip.punch_luck",
+      "voxlink.tip.website",
+      "voxlink.tip.author_id",
+      "voxlink.tip.server",
+      "voxlink.tip.donate",
+      "voxlink.tip.issues",
+      "voxlink.tip.share",
+      "voxlink.tip.knowledge_restart",
+      "voxlink.tip.knowledge_terracotta",
+      "voxlink.tip.knowledge_network",
+      "voxlink.tip.knowledge_fallback",
+      "voxlink.tip.turn_future",
+      "voxlink.tip.edge_terracotta",
+      "voxlink.tip.reverse_relay"
+   };
+   private final List<String> tipQueue = new ArrayList<>();
+   private String currentTipKey = "";
+   private long tipLastSwitchTime = 0L;
+   private final Screen parent;
+   private final String roomCode;
+   private final String password;
+   private String voxlinkStatusText = "";
+   private int voxlinkStatusColor = -5592406;
+   private volatile boolean voxlinkFinal = false;
+   private volatile long voxlinkStatusLastUpdate = 0L;
+   private String terracottaStatusText = "";
+   private int terracottaStatusColor = -5592406;
+   private volatile boolean terracottaFinal = false;
+   private volatile boolean active = false;
+   private boolean joinApiDone = false;
+   private volatile boolean joinCompleted = false;
+   private volatile ScheduledExecutorService connectionScheduler;
+   private ScheduledFuture<?> connectionFuture;
+   private int monitorTicks = 0;
+   private static final int MAX_MONITOR_TICKS = 360;
+   private static final int BRIDGE_HANDSHAKE_TICKS = 120;
+   private int bridgeEstablishedAtTick = -1;
+   private volatile boolean relayButtonVisible = false;
+   private volatile long relayFailedMsgTime = 0L;
+   private volatile boolean lastManualRelayInProgress = false;
 
-    private final Screen parent;
-    private final String roomCode;
-    private final String password;
-    //debounce 上方statusMessage已删除 只保留双P2P两行
-    //双P2P状态 (text直接存显示文本 monitor轮询connectionMode动态更新VoxLink行)
-    private String voxlinkStatusText = "";
-    private int voxlinkStatusColor = VoxLinkColors.MUTED;
-    private volatile boolean voxlinkFinal = false;
-    private String terracottaStatusText = "";
-    private int terracottaStatusColor = VoxLinkColors.MUTED;
-    private volatile boolean terracottaFinal = false;
-    private volatile boolean active = false;
-    private boolean joinApiDone = false;
-    private volatile boolean joinCompleted = false;
-    private volatile java.util.concurrent.ScheduledExecutorService connectionScheduler;
-    private java.util.concurrent.ScheduledFuture<?> connectionFuture;
-    private int monitorTicks = 0;
-    private static final int MAX_MONITOR_TICKS = 120;
-    private int bridgeEstablishedAtTick = -1;
-    private volatile boolean relayButtonVisible = false;
-    private volatile long relayFailedMsgTime = 0;
-    private volatile boolean lastManualRelayInProgress = false;
+   public AttemptingJoinScreen(Screen parent, String roomCode, String password) {
+      super(Component.translatable("voxlink.attempting_join"));
+      this.parent = parent;
+      this.roomCode = roomCode != null ? roomCode : "";
+      this.password = password;
+   }
 
-    public AttemptingJoinScreen(Screen parent, String roomCode, String password) {
-        super(Component.translatable("voxlink.attempting_join"));
-        this.parent = parent;
-        this.roomCode = roomCode != null ? roomCode : "";
-        this.password = password;
-    }
+   @Override
+   protected void init() {
+      super.init();
+      RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
+      boolean bridgeReady = room != null && room.getLocalBridgePort() > 0 && ConnectionHelper.isMcTrulyConnected();
+      if (bridgeReady) {
+         this.active = false;
+         room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+         this.voxlinkFinal = true;
+         this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
+         this.voxlinkStatusColor = -11141291;
+      } else if (room != null && room.isConnectionFailed()) {
+         this.active = false;
+         this.voxlinkFinal = true;
+         this.voxlinkStatusText = Component.translatable("voxlink.connection.all_failed").getString();
+         this.voxlinkStatusColor = -43691;
+      } else if (room != null && room.getLocalBridgePort() > 0) {
+         this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
+         this.voxlinkStatusColor = -171;
+      }
 
-    @Override
-    protected void init() {
-        super.init();
-
-        RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
-        //debounce 用真实MC连接状态判定 不再用localBridgePort>0作"已连接"
-        boolean bridgeReady = room != null && room.getLocalBridgePort() > 0 && ConnectionHelper.isMcTrulyConnected();
-        if (bridgeReady) {
-            active = false;
-            //debounce 真连上了 把房间状态改成已连接
-            room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
-            voxlinkFinal = true;
-            voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-            voxlinkStatusColor = VoxLinkColors.SUCCESS;
-        } else if (room != null && room.isConnectionFailed()) {
-            active = false;
-            voxlinkFinal = true;
-            voxlinkStatusText = Component.translatable("voxlink.connection.all_failed").getString();
-            voxlinkStatusColor = VoxLinkColors.ERROR;
-        } else if (room != null && room.getLocalBridgePort() > 0) {
-            //debounce 桥已建 但MC还在握手
-            voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-            voxlinkStatusColor = VoxLinkColors.WARNING;
-        }
-
-        int centerX = this.width / 2;
-        int btnY = this.height / 2 + BTN_Y_OFFSET;
-
-        if (!bridgeReady) {
-            if (!joinApiDone || active) {
-                this.addRenderableWidget(Button.builder(
-                        Component.translatable("voxlink.cancel"),
-                        button -> cancelJoin()
-                ).bounds(centerX - HALF_BTN_W, btnY, BTN_W, BTN_H).build());
-                //debounce 手动relay按钮: 打洞失败N轮后显示 玩家点击触发中继
-                if (active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton()) {
-                    relayButtonVisible = true;
-                    this.addRenderableWidget(Button.builder(
-                            Component.translatable("voxlink.relay.use_player_relay"),
-                            button -> onRelayButtonClicked()
-                    ).bounds(centerX - HALF_BTN_W, btnY + BTN_H + RELAY_BTN_GAP, BTN_W, BTN_H).build());
-                } else {
-                    relayButtonVisible = false;
-                }
+      int centerX = this.width / 2;
+      int btnY = this.height / 2 + 45;
+      if (!bridgeReady) {
+         if (this.joinApiDone && !this.active) {
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.back"), button -> this.goBack()).bounds(centerX - 100, btnY, 200, 20).build()
+            );
+         } else {
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY, 200, 20).build()
+            );
+            if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton()) {
+               this.relayButtonVisible = true;
+               this.addRenderableWidget(
+                  Button.builder(Component.translatable("voxlink.relay.use_player_relay"), button -> this.onRelayButtonClicked())
+                     .bounds(centerX - 100, btnY + 20 + 4, 200, 20)
+                     .build()
+               );
             } else {
-                this.addRenderableWidget(Button.builder(
-                        Component.translatable("voxlink.back"),
-                        button -> goBack()
-                ).bounds(centerX - HALF_BTN_W, btnY, BTN_W, BTN_H).build());
+               this.relayButtonVisible = false;
             }
-        }
+         }
+      }
 
-        if (!joinApiDone) {
-            joinApiDone = true;
-            startJoin();
-        }
-    }
+      if (!this.joinApiDone) {
+         this.joinApiDone = true;
+         this.startJoin();
+      }
+   }
 
-    @Override
-    public boolean shouldCloseOnEsc() {
-        return !active;
-    }
+   public boolean shouldCloseOnEsc() {
+      return !this.active;
+   }
 
-    @Override
-    public void onClose() {
-        if (active) {
-            cancelJoin();
-        } else {
-            goBack();
-        }
-    }
+   public void onClose() {
+      if (this.active) {
+         this.cancelJoin();
+      } else {
+         this.goBack();
+      }
+   }
 
-    private void goBack() {
-        if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
-            VoxLinkMod.getRoomManager().leaveRoom();
-        }
-        Minecraft.getInstance().gui.setScreen(parent);
-    }
+   private void goBack() {
+      if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
+         VoxLinkMod.getRoomManager().leaveRoom();
+      }
 
-    private void cancelJoin() {
-        active = false;
-        VoxLinkMod.getRoomManager().leaveRoom();
-        Minecraft.getInstance().gui.setScreen(parent);
-    }
+      Minecraft.getInstance().gui.setScreen(this.parent);
+   }
 
-    private void onRelayButtonClicked() {
-        relayButtonVisible = false;
-        lastManualRelayInProgress = true;
-        clearOurWidgets();
-        init();
-        VoxLinkMod.getRoomManager().getConnectionManager().triggerManualRelay();
-    }
+   private void cancelJoin() {
+      this.active = false;
+      VoxLinkMod.getRoomManager().leaveRoom();
+      Minecraft.getInstance().gui.setScreen(this.parent);
+   }
 
-    private void startJoin() {
-        active = true;
+   private void onRelayButtonClicked() {
+      if (VoxLinkMod.getConfig().isRelayEnabled()) {
+         this.relayButtonVisible = false;
+         this.lastManualRelayInProgress = true;
+         this.clearOurWidgets();
+         this.init();
+         VoxLinkMod.getRoomManager().getConnectionManager().triggerManualRelay();
+      }
+   }
 
-        Minecraft mc = Minecraft.getInstance();
-        String playerName = mc.getUser().getName();
-        //双P2P: 房间码路由 + 并行竞速
-        java.util.concurrent.CompletableFuture<Void> joinFuture = VoxLinkMod.getRoomManager().getConnectionManager().startDualP2P(roomCode, playerName, password, (channel, statusKey) -> {
-            mc.execute(() -> {
-                if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                int color = colorForStatus(statusKey);
-                String text = Component.translatable(statusKey).getString();
-                if ("voxlink".equals(channel)) {
-                    voxlinkStatusText = text;
-                    voxlinkStatusColor = color;
-                    //debounce 终态后monitor不再覆盖VoxLink行
-                    if (statusKey.endsWith(".p2p_established") || statusKey.endsWith(".channel_failed") || statusKey.endsWith(".status_cancelled")) {
-                        voxlinkFinal = true;
-                    }
-                } else if ("terracotta".equals(channel)) {
-                    terracottaStatusText = text;
-                    terracottaStatusColor = color;
-                    if (statusKey.endsWith(".p2p_established") || statusKey.endsWith(".channel_failed") || statusKey.endsWith(".status_cancelled")) {
-                        terracottaFinal = true;
-                    }
-                }
-            });
-        });
-        //join完成前 monitor跳过房间丢失判定
-        joinFuture.whenComplete((v, e) -> joinCompleted = true);
-        joinFuture
-                .thenAccept(v -> mc.execute(() -> {
-                    if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                }))
-                .exceptionally(e -> {
-                    mc.execute(() -> {
-                        if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                        Throwable cause = e;
-                        while (cause.getCause() != null) cause = cause.getCause();
-                        onFailed(extractErrorMessage(cause.getMessage()));
-                });
-                    return null;
-                });
+   private void startJoin() {
+      this.active = true;
+      Minecraft mc = Minecraft.getInstance();
+      String playerName = mc.getUser().getName();
+      CompletableFuture<Void> joinFuture = VoxLinkMod.getRoomManager()
+         .getConnectionManager()
+         .startDualP2P(this.roomCode, playerName, this.password, (channel, statusKey) -> mc.execute(() -> {
+            if (mc.gui.screen() == this) {
+               int color = this.colorForStatus(statusKey);
+               String text = Component.translatable(statusKey).getString();
+               if ("voxlink".equals(channel)) {
+                  this.voxlinkStatusText = text;
+                  this.voxlinkStatusColor = color;
+                  if (statusKey.endsWith(".p2p_established") || statusKey.endsWith(".channel_failed") || statusKey.endsWith(".status_cancelled")) {
+                     this.voxlinkFinal = true;
+                  }
+               } else if ("terracotta".equals(channel)) {
+                  this.terracottaStatusText = text;
+                  this.terracottaStatusColor = color;
+                  if (statusKey.endsWith(".p2p_established") || statusKey.endsWith(".channel_failed") || statusKey.endsWith(".status_cancelled")) {
+                     this.terracottaFinal = true;
+                  }
+               }
+            }
+         }));
+      joinFuture.whenComplete((v, e) -> this.joinCompleted = true);
+      joinFuture.thenAccept(v -> mc.execute(() -> {
+         if (mc.gui.screen() == this) {
+            ;
+         }
+      })).exceptionally(e -> {
+         mc.execute(() -> {
+            if (mc.gui.screen() == this) {
+               Throwable cause = e;
 
-        startConnectionMonitor();
-    }
+               while (cause.getCause() != null) {
+                  cause = cause.getCause();
+               }
 
+               this.onFailed(this.extractErrorMessage(cause.getMessage()));
+            }
+         });
+         return null;
+      });
+      this.startConnectionMonitor();
+   }
 
-    //状态颜色映射
-    private int colorForStatus(String statusKey) {
-        if (statusKey == null) return VoxLinkColors.MUTED;
-        if (statusKey.endsWith(".connected") || statusKey.endsWith(".p2p_established")) return VoxLinkColors.SUCCESS;
-        if (statusKey.endsWith(".all_failed") || statusKey.endsWith(".channel_failed")) return VoxLinkColors.ERROR;
-        if (statusKey.endsWith(".status_cancelled")) return VoxLinkColors.MUTED;
-        return VoxLinkColors.WARNING;
-    }
+   private int colorForStatus(String statusKey) {
+      if (statusKey == null) {
+         return -5592406;
+      } else if (statusKey.endsWith(".connected") || statusKey.endsWith(".p2p_established")) {
+         return -11141291;
+      } else if (statusKey.endsWith(".all_failed") || statusKey.endsWith(".channel_failed")) {
+         return -43691;
+      } else {
+         return statusKey.endsWith(".status_cancelled") ? -5592406 : -171;
+      }
+   }
 
-    private void onFailed(String msg) {
-        //debounce 失败信息显示到VoxLink行(上方statusMessage已删除)
-        voxlinkFinal = true;
-        voxlinkStatusText = msg;
-        voxlinkStatusColor = VoxLinkColors.ERROR;
-        active = false;
-        stopConnectionMonitor();
-        RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
-        if (room == null || room.getLocalBridgePort() <= 0) {
-            VoxLinkMod.getRoomManager().leaveRoom();
-        }
-        clearOurWidgets();
-        init();
-    }
+   private void onFailed(String msg) {
+      this.voxlinkFinal = true;
+      this.voxlinkStatusText = msg;
+      this.voxlinkStatusColor = -43691;
+      this.active = false;
+      this.stopConnectionMonitor();
+      VoxLinkMod.getRoomManager().getConnectionManager().killAllConnectionAttempts();
+      this.clearOurWidgets();
+      this.init();
+   }
 
-    private void stopConnectionMonitor() {
-        if (connectionFuture != null) {
-            connectionFuture.cancel(false);
-            connectionFuture = null;
-        }
-        if (connectionScheduler != null && !connectionScheduler.isShutdown()) {
-            connectionScheduler.shutdownNow();
-            connectionScheduler = null;
-        }
-    }
+   public void onRoomLost() {
+      this.stopConnectionMonitor();
+      this.active = false;
+   }
 
-    private String extractErrorMessage(String msg) {
-        if (msg == null) return Component.translatable("voxlink.error.unknown").getString();
-        if (msg.contains("ROOM_NOT_FOUND")) return Component.translatable("voxlink.join_room.error.not_found").getString();
-        if (msg.contains("ROOM_FULL")) return Component.translatable("voxlink.error.room_full").getString();
-        if (msg.contains("WRONG_PASSWORD")) return Component.translatable("voxlink.error.wrong_password").getString();
-        if (msg.contains("RATE_LIMITED")) return Component.translatable("voxlink.join_room.error.rate_limited").getString();
-        if (msg.contains("NETWORK_ERROR")) return Component.translatable("voxlink.join_room.error.network").getString();
-        if (msg.contains("ALREADY_IN_ROOM")) return Component.translatable("voxlink.error.already_in_room").getString();
-        if (msg.contains("INVALID_ROOM_CODE")) return Component.translatable("voxlink.error.invalid_room_code").getString();
-        if (msg.contains("QUEUED")) return Component.translatable("voxlink.join_room.error.server_busy").getString();
-        return msg;
-    }
+   private void stopConnectionMonitor() {
+      if (this.connectionFuture != null) {
+         this.connectionFuture.cancel(false);
+         this.connectionFuture = null;
+      }
 
-    private void startConnectionMonitor() {
-        stopConnectionMonitor();
-        monitorTicks = 0;
-        final java.util.concurrent.atomic.AtomicBoolean monitorActive = new java.util.concurrent.atomic.AtomicBoolean(true);
-        connectionScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "VoxLink-JoinConnMonitor");
-            t.setDaemon(true);
-            return t;
-        });
-        Runnable monitor = new Runnable() {
-            @Override
-            public void run() {
-                if (!monitorActive.get()) return;
-                try {
-                    Minecraft mc = Minecraft.getInstance();
-                    monitorTicks++;
-                    RoomInfo roomInfo = VoxLinkMod.getRoomManager().getCurrentRoom();
-                    if (roomInfo == null) {
-                        if (!joinCompleted) {
-                            if (connectionFuture != null) connectionFuture.cancel(false);
-                            if (monitorActive.get() && connectionScheduler != null && !connectionScheduler.isShutdown()) {
-                                connectionFuture = connectionScheduler.schedule(() -> mc.execute(this), TICK_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
-                            }
-                            return;
+      if (this.connectionScheduler != null && !this.connectionScheduler.isShutdown()) {
+         this.connectionScheduler.shutdownNow();
+         this.connectionScheduler = null;
+      }
+   }
+
+   private String extractErrorMessage(String msg) {
+      if (msg == null) {
+         return Component.translatable("voxlink.error.unknown").getString();
+      } else if (msg.contains("ROOM_NOT_FOUND")) {
+         return Component.translatable("voxlink.join_room.error.not_found").getString();
+      } else if (msg.contains("ROOM_FULL")) {
+         return Component.translatable("voxlink.error.room_full").getString();
+      } else if (msg.contains("WRONG_PASSWORD")) {
+         return Component.translatable("voxlink.error.wrong_password").getString();
+      } else if (msg.contains("RATE_LIMITED")) {
+         return Component.translatable("voxlink.join_room.error.rate_limited").getString();
+      } else if (msg.contains("NETWORK_ERROR")) {
+         return Component.translatable("voxlink.join_room.error.network").getString();
+      } else if (msg.contains("ALREADY_IN_ROOM")) {
+         return Component.translatable("voxlink.error.already_in_room").getString();
+      } else if (msg.contains("INVALID_ROOM_CODE")) {
+         return Component.translatable("voxlink.error.invalid_room_code").getString();
+      } else {
+         return msg.contains("QUEUED") ? Component.translatable("voxlink.join_room.error.server_busy").getString() : msg;
+      }
+   }
+
+   private void startConnectionMonitor() {
+      this.stopConnectionMonitor();
+      this.monitorTicks = 0;
+      final AtomicBoolean monitorActive = new AtomicBoolean(true);
+      this.connectionScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+         Thread t = new Thread(r, "VoxLink-JoinConnMonitor");
+         t.setDaemon(true);
+         return t;
+      });
+      Runnable monitor = new Runnable() {
+         @Override
+         public void run() {
+            if (monitorActive.get()) {
+               try {
+                  Minecraft mc = Minecraft.getInstance();
+                  AttemptingJoinScreen.this.monitorTicks++;
+                  RoomInfo roomInfo = VoxLinkMod.getRoomManager().getCurrentRoom();
+                  if (roomInfo == null) {
+                     if (!AttemptingJoinScreen.this.joinCompleted) {
+                        if (AttemptingJoinScreen.this.connectionFuture != null) {
+                           AttemptingJoinScreen.this.connectionFuture.cancel(false);
                         }
-                        monitorActive.set(false);
-                        mc.execute(() -> {
-                            if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                            onFailed(Component.translatable("voxlink.room_lost").getString());
-                        });
-                        if (connectionScheduler != null && !connectionScheduler.isShutdown()) connectionScheduler.shutdownNow();
+
+                        if (monitorActive.get()
+                           && AttemptingJoinScreen.this.connectionScheduler != null
+                           && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                           AttemptingJoinScreen.this.connectionFuture = AttemptingJoinScreen.this.connectionScheduler
+                              .schedule(() -> mc.execute(this), 500L, TimeUnit.MILLISECONDS);
+                        }
+
                         return;
-                    }
-                    if (roomInfo.getLocalBridgePort() > 0) {
-                        if (bridgeEstablishedAtTick < 0) {
-                            bridgeEstablishedAtTick = monitorTicks;
+                     }
+
+                     monitorActive.set(false);
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           AttemptingJoinScreen.this.onFailed(Component.translatable("voxlink.room_lost").getString());
                         }
-                        //debounce 桥已建 等待MC真正握手成功
-                        if (ConnectionHelper.isMcTrulyConnected()) {
-                            monitorActive.set(false);
-                            //debounce 清理和状态更新不需要在屏幕线程
-                            ConnectionHelper.clearConnectInitiated();
-                            roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
-                            mc.execute(() -> {
-                                if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                                voxlinkFinal = true;
-                                voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-                                voxlinkStatusColor = VoxLinkColors.SUCCESS;
-                                active = false;
-                            });
-                            if (connectionScheduler != null && !connectionScheduler.isShutdown()) connectionScheduler.shutdownNow();
-                            return;
-                        }
-                        //debounce MC连接被拒
-                        if (ConnectionHelper.isConnectionRejected()) {
-                            monitorActive.set(false);
-                            ConnectionHelper.clearConnectInitiated();
-                            mc.execute(() -> {
-                                if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                                onFailed(Component.translatable("voxlink.connection.all_failed").getString());
-                            });
-                            if (connectionScheduler != null && !connectionScheduler.isShutdown()) connectionScheduler.shutdownNow();
-                            return;
-                        }
-                        //debounce 桥已建 但还在握手 显示隧道建立中到VoxLink行
-                        mc.execute(() -> {
-                            if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                            if (!voxlinkFinal) {
-                                voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-                                voxlinkStatusColor = VoxLinkColors.WARNING;
-                            }
-                        });
-                    }
-                    boolean bridgeBuiltNow = roomInfo.getLocalBridgePort() > 0;
-                    boolean handshakeTimeout = bridgeBuiltNow && bridgeEstablishedAtTick >= 0
-                            ? (monitorTicks - bridgeEstablishedAtTick >= MAX_MONITOR_TICKS)
-                            : (monitorTicks >= MAX_MONITOR_TICKS);
-                    //debounce 无限重试规范: 底层持续重试中不因UI硬超时判失败 仅底层终态(玩家取消/对端cancel)才失败
-                    boolean persistentRetrying = VoxLinkMod.getRoomManager().getConnectionManager().isPersistentRetrying();
-                    if (roomInfo.isConnectionFailed() || (handshakeTimeout && !persistentRetrying)) {
+                     });
+                     if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                        AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                     }
+
+                     return;
+                  }
+
+                  if (roomInfo.getLocalBridgePort() > 0) {
+                     if (AttemptingJoinScreen.this.bridgeEstablishedAtTick < 0) {
+                        AttemptingJoinScreen.this.bridgeEstablishedAtTick = AttemptingJoinScreen.this.monitorTicks;
+                     }
+
+                     if (ConnectionHelper.isMcTrulyConnected()) {
                         monitorActive.set(false);
-                        if (handshakeTimeout) {
-                            //握手超时 清理MC连接发起状态
-                            ConnectionHelper.clearConnectInitiated();
+                        ConnectionHelper.clearConnectInitiated();
+                        roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+                        mc.execute(() -> {
+                           if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                              AttemptingJoinScreen.this.voxlinkFinal = true;
+                              AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
+                              AttemptingJoinScreen.this.voxlinkStatusColor = -11141291;
+                              AttemptingJoinScreen.this.active = false;
+                           }
+                        });
+                        if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                           AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
                         }
-                        mc.execute(() -> {
-                            if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                            onFailed(Component.translatable("voxlink.connection.all_failed").getString());
-                        });
-                        if (connectionScheduler != null && !connectionScheduler.isShutdown()) connectionScheduler.shutdownNow();
+
                         return;
-                    }
-                    //debounce VoxLink行未到终态时 用connectionMode(探测/打洞/重试)动态更新
-                    Component connMode = roomInfo.getConnectionMode();
-                    if (connMode != null && !connMode.getString().isEmpty()) {
+                     }
+
+                     if (ConnectionHelper.isConnectionRejected()) {
+                        monitorActive.set(false);
+                        ConnectionHelper.clearConnectInitiated();
                         mc.execute(() -> {
-                            if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                            if (!voxlinkFinal) {
-                                voxlinkStatusText = connMode.getString();
-                                voxlinkStatusColor = VoxLinkColors.WARNING;
-                            }
+                           if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                              AttemptingJoinScreen.this.onFailed(Component.translatable("voxlink.connection.all_failed").getString());
+                           }
                         });
-                    }
-                    //debounce 检测relay按钮显示状态变化 轮次达到时动态显示按钮
-                    boolean shouldShowRelay = active && VoxLinkMod.getRoomManager()
-                            .getConnectionManager().canShowRelayButton();
-                    if (shouldShowRelay != relayButtonVisible) {
-                        mc.execute(() -> {
-                            if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                            clearOurWidgets();
-                            init();
-                        });
-                    }
-                    //debounce 检测relay失败: manualRelayInProgress从true变false时显示3秒提示
-                    boolean currentRelayInProgress = VoxLinkMod.getRoomManager()
-                            .getConnectionManager().isManualRelayInProgress();
-                    if (lastManualRelayInProgress && !currentRelayInProgress) {
-                        relayFailedMsgTime = System.currentTimeMillis();
-                    }
-                    lastManualRelayInProgress = currentRelayInProgress;
-                    if (connectionFuture != null) {
-                        connectionFuture.cancel(false);
-                    }
-                    if (monitorActive.get() && connectionScheduler != null && !connectionScheduler.isShutdown()) {
-                        connectionFuture = connectionScheduler.schedule(() -> mc.execute(this), TICK_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
-                    }
-                } catch (Exception e) {
-                    Minecraft mc = Minecraft.getInstance();
-                    mc.execute(() -> {
-                        if (mc.gui.screen() != AttemptingJoinScreen.this) return;
-                        onFailed(Component.translatable("voxlink.connection.monitor_error").getString());
-                    });
-                }
+                        if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                           AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                        }
+
+                        return;
+                     }
+
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           if (!AttemptingJoinScreen.this.voxlinkFinal) {
+                              AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
+                              AttemptingJoinScreen.this.voxlinkStatusColor = -171;
+                           }
+                        }
+                     });
+                  }
+
+                  boolean bridgeBuiltNow = roomInfo.getLocalBridgePort() > 0;
+                  int maxTicks = VoxLinkMod.getRoomManager().getConnectionManager().isDualRaceActive() ? 260 : 360;
+                  boolean handshakeTimeout = bridgeBuiltNow && AttemptingJoinScreen.this.bridgeEstablishedAtTick >= 0
+                     ? AttemptingJoinScreen.this.monitorTicks - AttemptingJoinScreen.this.bridgeEstablishedAtTick >= 120
+                     : AttemptingJoinScreen.this.monitorTicks >= maxTicks;
+                  boolean persistentRetrying = VoxLinkMod.getRoomManager().getConnectionManager().isPersistentRetrying();
+                  if (roomInfo.isConnectionFailed() || handshakeTimeout && !persistentRetrying) {
+                     monitorActive.set(false);
+                     if (handshakeTimeout) {
+                        ConnectionHelper.clearConnectInitiated();
+                     }
+
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           Component connModex = roomInfo.getConnectionMode();
+                           String failReason;
+                           if (roomInfo.isConnectionFailed() && connModex != null && !connModex.getString().isEmpty()) {
+                              failReason = connModex.getString();
+                           } else if (handshakeTimeout) {
+                              failReason = Component.translatable("voxlink.connection.timeout_retry").getString();
+                           } else {
+                              failReason = Component.translatable("voxlink.connection.all_failed").getString();
+                           }
+
+                           AttemptingJoinScreen.this.onFailed(failReason);
+                        }
+                     });
+                     if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                        AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                     }
+
+                     return;
+                  }
+
+                  Component connMode = roomInfo.getConnectionMode();
+                  if (connMode != null && !connMode.getString().isEmpty()) {
+                     mc.execute(
+                        () -> {
+                           if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                              if (!AttemptingJoinScreen.this.voxlinkFinal) {
+                                 long now = System.currentTimeMillis();
+                                 String newText = connMode.getString();
+                                 if (!newText.equals(AttemptingJoinScreen.this.voxlinkStatusText)
+                                    && now - AttemptingJoinScreen.this.voxlinkStatusLastUpdate < 2000L) {
+                                    return;
+                                 }
+
+                                 AttemptingJoinScreen.this.voxlinkStatusText = newText;
+                                 AttemptingJoinScreen.this.voxlinkStatusColor = -171;
+                                 AttemptingJoinScreen.this.voxlinkStatusLastUpdate = now;
+                              }
+                           }
+                        }
+                     );
+                  }
+
+                  boolean shouldShowRelay = AttemptingJoinScreen.this.active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton();
+                  if (shouldShowRelay != AttemptingJoinScreen.this.relayButtonVisible) {
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           AttemptingJoinScreen.this.clearOurWidgets();
+                           AttemptingJoinScreen.this.init();
+                        }
+                     });
+                  }
+
+                  boolean currentRelayInProgress = VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress();
+                  if (AttemptingJoinScreen.this.lastManualRelayInProgress && !currentRelayInProgress) {
+                     AttemptingJoinScreen.this.relayFailedMsgTime = System.currentTimeMillis();
+                  }
+
+                  AttemptingJoinScreen.this.lastManualRelayInProgress = currentRelayInProgress;
+                  if (AttemptingJoinScreen.this.connectionFuture != null) {
+                     AttemptingJoinScreen.this.connectionFuture.cancel(false);
+                  }
+
+                  if (monitorActive.get()
+                     && AttemptingJoinScreen.this.connectionScheduler != null
+                     && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                     AttemptingJoinScreen.this.connectionFuture = AttemptingJoinScreen.this.connectionScheduler
+                        .schedule(() -> mc.execute(this), 500L, TimeUnit.MILLISECONDS);
+                  }
+               } catch (Exception e) {
+                  Minecraft mc = Minecraft.getInstance();
+                  mc.execute(() -> {
+                     if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                        AttemptingJoinScreen.this.onFailed(Component.translatable("voxlink.connection.monitor_error").getString());
+                     }
+                  });
+               }
             }
-        };
-        connectionFuture = connectionScheduler.schedule(() -> Minecraft.getInstance().execute(monitor), TICK_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
-    }
+         }
+      };
+      this.connectionFuture = this.connectionScheduler.schedule(() -> Minecraft.getInstance().execute(monitor), 500L, TimeUnit.MILLISECONDS);
+   }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        int centerX = this.width / 2;
+   public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+      int centerX = this.width / 2;
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, -1);
+      this.drawCenteredString(
+         graphics,
+         ChatFormatting.YELLOW.toString() + ChatFormatting.BOLD.toString() + Component.translatable("voxlink.chat.room_code_label").getString().trim(),
+         centerX,
+         this.height / 2 - 30,
+         -171
+      );
+      if (this.relayFailedMsgTime > 0L) {
+         long elapsed = System.currentTimeMillis() - this.relayFailedMsgTime;
+         if (elapsed < 3000L) {
+            this.drawCenteredString(graphics, Component.translatable("voxlink.relay.failed_retry_punch").getString(), centerX, this.height / 2 - 30 - 12, -171);
+         } else {
+            this.relayFailedMsgTime = 0L;
+         }
+      }
 
-        drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.WHITE);
-
-        //debounce 不显示明文房间号 只画一个标签
-        drawCenteredString(graphics, ChatFormatting.YELLOW.toString() + ChatFormatting.BOLD.toString()
-                + Component.translatable("voxlink.chat.room_code_label").getString().trim(), centerX, this.height / 2 - ROOM_CODE_Y_OFFSET, VoxLinkColors.WARNING);
-
-        //debounce 中继失败3秒提示 显示在房间号上方
-        if (relayFailedMsgTime > 0) {
-            long elapsed = System.currentTimeMillis() - relayFailedMsgTime;
-            if (elapsed < RELAY_FAILED_MSG_MS) {
-                drawCenteredString(graphics,
-                        Component.translatable("voxlink.relay.failed_retry_punch").getString(),
-                        centerX, this.height / 2 - ROOM_CODE_Y_OFFSET - 12, VoxLinkColors.WARNING);
-            } else {
-                relayFailedMsgTime = 0;
+      if (!this.voxlinkStatusText.isEmpty()) {
+         String label = Component.translatable("voxlink.dual.voxlink_label").getString();
+         String clipped = this.voxlinkStatusText;
+         int maxWidth = this.width - 20;
+         if (this.fontWidth(label + ": " + clipped) > maxWidth) {
+            while (this.fontWidth(label + ": " + clipped + "...") > maxWidth && clipped.length() > 0) {
+               clipped = clipped.substring(0, clipped.length() - 1);
             }
-        }
 
-        //debounce 上方statusMessage已删除 只保留双P2P两行(已上移到中间)
-        //双P2P状态行
-        if (!voxlinkStatusText.isEmpty()) {
-            String label = Component.translatable("voxlink.dual.voxlink_label").getString();
-            String clipped = voxlinkStatusText;
-            int maxWidth = this.width - STATUS_MARGIN;
-            if (fontWidth(label + ": " + clipped) > maxWidth) {
-                while (fontWidth(label + ": " + clipped + "...") > maxWidth && clipped.length() > 0) {
-                    clipped = clipped.substring(0, clipped.length() - 1);
-                }
-                clipped = clipped + "...";
-            }
-            drawCenteredString(graphics, label + ": " + clipped, centerX, this.height / 2 + VOXLINK_STATUS_Y_OFFSET, voxlinkStatusColor);
-        }
-        if (!terracottaStatusText.isEmpty()) {
-            String label = Component.translatable("voxlink.dual.terracotta_label").getString();
-            String clipped = terracottaStatusText;
-            int maxWidth = this.width - STATUS_MARGIN;
-            if (fontWidth(label + ": " + clipped) > maxWidth) {
-                while (fontWidth(label + ": " + clipped + "...") > maxWidth && clipped.length() > 0) {
-                    clipped = clipped.substring(0, clipped.length() - 1);
-                }
-                clipped = clipped + "...";
-            }
-            drawCenteredString(graphics, label + ": " + clipped, centerX, this.height / 2 + TERRACOTTA_STATUS_Y_OFFSET, terracottaStatusColor);
-        }
-    }
+            clipped = clipped + "...";
+         }
 
-    @Override
-    public void removed() {
-        super.removed();
-        stopConnectionMonitor();
-        RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
-        //debounce 桥已建就不取消 MC正在接管连接
-        boolean bridgeBuilt = room != null && room.getLocalBridgePort() > 0;
-        if (active && !bridgeBuilt) {
-            cancelJoin();
-        } else {
-            active = false;
-        }
-    }
+         this.drawCenteredString(graphics, label + ": " + clipped, centerX, this.height / 2 + 0, this.voxlinkStatusColor);
+      }
+
+      if (!this.terracottaStatusText.isEmpty()) {
+         String label = Component.translatable("voxlink.dual.terracotta_label").getString();
+         String clipped = this.terracottaStatusText;
+         int maxWidth = this.width - 20;
+         if (this.fontWidth(label + ": " + clipped) > maxWidth) {
+            while (this.fontWidth(label + ": " + clipped + "...") > maxWidth && clipped.length() > 0) {
+               clipped = clipped.substring(0, clipped.length() - 1);
+            }
+
+            clipped = clipped + "...";
+         }
+
+         this.drawCenteredString(graphics, label + ": " + clipped, centerX, this.height / 2 + 14, this.terracottaStatusColor);
+      }
+
+      long now = System.currentTimeMillis();
+      if (this.currentTipKey.isEmpty() || now - this.tipLastSwitchTime >= 5000L) {
+         if (this.tipQueue.isEmpty()) {
+            this.refillTipQueue();
+         }
+
+         this.currentTipKey = this.tipQueue.remove(0);
+         this.tipLastSwitchTime = now;
+      }
+
+      String tipText = Component.translatable("voxlink.tip.prefix").getString() + Component.translatable(this.currentTipKey).getString();
+      int tipMaxWidth = this.width - 8;
+      if (this.fontWidth(tipText) > tipMaxWidth) {
+         while (this.fontWidth(tipText + "...") > tipMaxWidth && tipText.length() > 0) {
+            tipText = tipText.substring(0, tipText.length() - 1);
+         }
+
+         tipText = tipText + "...";
+      }
+
+      this.drawString(graphics, tipText, 4, this.height - 12, -5592406);
+   }
+
+   private void refillTipQueue() {
+      this.tipQueue.addAll(Arrays.asList(TIP_KEYS));
+      Collections.shuffle(this.tipQueue);
+   }
+
+   public void removed() {
+      super.removed();
+      this.stopConnectionMonitor();
+      RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
+      boolean bridgeBuilt = room != null && room.getLocalBridgePort() > 0;
+      if (this.active && !bridgeBuilt) {
+         this.active = false;
+         VoxLinkMod.getRoomManager().getConnectionManager().killAllConnectionAttempts();
+      } else {
+         this.active = false;
+      }
+   }
 }
