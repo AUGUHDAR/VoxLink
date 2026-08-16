@@ -33,8 +33,9 @@ public final class PunchProfile {
    public final int socketStunCount;
    public final int socketCreateIntervalMs;
    private static final PunchProfile.SendParams SEND_DEFAULT = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 3, 3, 1, 10);
+   private static final PunchProfile.SendParams SEND_DEFAULT_FAST = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 1, 2, 1, 5);
    public static final PunchProfile DEFAULT = new PunchProfile(
-      "DEFAULT", 8000, 20, 20, new int[]{4, 8, 15, 20}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
+      "DEFAULT", 8000, 20, 20, new int[]{4, 8, 15, 20}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT_FAST
    );
    public static final PunchProfile AGGRESSIVE = new PunchProfile(
       "AGGRESSIVE", 20000, 50, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT

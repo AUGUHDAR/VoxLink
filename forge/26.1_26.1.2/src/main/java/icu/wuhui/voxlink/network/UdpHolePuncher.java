@@ -800,9 +800,16 @@ public class UdpHolePuncher {
 
             while (this.punching.get() && !this.holeOpen.get() && cyclesPerformed < maxTotalCycles) {
                if (portPrediction) {
-                  int currentRange = portRange > 0 ? portRange : this.effectivePortRange();
-                  if (cyclesPerformed > 0) {
-                     currentRange = Math.min(currentRange, 20);
+                  int currentRange;
+                  if (useFixedRange) {
+                     currentRange = portRange;
+                  } else {
+                     int rangeIdx = cyclesPerformed / this.profile().cyclesPerRange;
+                     if (rangeIdx >= this.profile().progressiveRanges.length) {
+                        rangeIdx = this.profile().progressiveRanges.length - 1;
+                     }
+
+                     currentRange = Math.min(this.profile().progressiveRanges[rangeIdx], portRange > 0 ? portRange : this.effectivePortRange());
                   }
 
                   if (debugSendCount < 5) {
