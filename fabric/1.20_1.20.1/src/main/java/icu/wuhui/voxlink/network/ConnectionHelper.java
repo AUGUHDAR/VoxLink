@@ -3,17 +3,6 @@ package icu.wuhui.voxlink.network;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.compat.ViaCompat;
 import icu.wuhui.voxlink.room.RoomInfo;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.DisconnectedScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.chat.Component;
-
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -21,158 +10,213 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.DisconnectedScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.Connection;
+import net.minecraft.network.chat.Component;
 
 public final class ConnectionHelper {
-    private ConnectionHelper() {}
+   private static final int CONNECT_RESET_SEC = 30;
+   private static final AtomicBoolean connecting = new AtomicBoolean(false);
+   private static volatile LocalPlayer prevPlayerStrong = null;
+   private static volatile long connectInitiatedAt = 0L;
+   private static volatile ScheduledFuture<?> resetTask = null;
+   private static final ScheduledExecutorService RESET_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+      Thread t = new Thread(r, "VoxLink-ConnReset");
+      t.setDaemon(true);
+      return t;
+   });
 
-    private static final int CONNECT_RESET_SEC = 30;
-    private static final java.util.concurrent.atomic.AtomicBoolean connecting = new java.util.concurrent.atomic.AtomicBoolean(false);
+   private ConnectionHelper() {
+   }
 
-    //debounce 记录发起startConnecting前的player引用 用于判断真正切换到新连接
-    //改强引用 WeakReference会被GC回收导致误判 cur==prev 短路返回true
-    private static volatile LocalPlayer prevPlayerStrong = null;
-    private static volatile long connectInitiatedAt = 0;
-    //debounce 30s超时任务改字段 clearConnectInitiated能取消 避免旧任务污染新连接
-    private static volatile ScheduledFuture<?> resetTask = null;
+   public static void resetConnecting() {
+      connecting.set(false);
+   }
 
-    private static final ScheduledExecutorService RESET_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "VoxLink-ConnReset");
-        t.setDaemon(true);
-        return t;
-    });
+   public static boolean isConnecting() {
+      return connecting.get();
+   }
 
-    public static void resetConnecting() {
-        connecting.set(false);
-    }
-
-    public static boolean isConnecting() {
-        return connecting.get();
-    }
-
-    //debounce 真正连上对方MC: cpl非null + socket活着 + player非null + player引用已变化
-    public static boolean isMcTrulyConnected() {
-        if (connectInitiatedAt == 0) return false;
-        //至少等200ms 让startConnecting生效
-        if (System.currentTimeMillis() - connectInitiatedAt < 200) return false;
-        Minecraft mc = Minecraft.getInstance();
-        ClientPacketListener cpl = mc.getConnection();
-        if (cpl == null) return false;
-        net.minecraft.network.Connection conn = cpl.getConnection();
-        if (conn == null || !conn.isConnected()) return false;
-        LocalPlayer cur = mc.player;
-        if (cur == null) return false;
-        //如果发起前player非null 必须等player引用变化才算新连接
-        if (prevPlayerStrong != null && cur == prevPlayerStrong) return false;
-        return true;
-    }
-
-    //debounce 连接被对方拒绝或断开 (出现DisconnectedScreen)
-    public static boolean isConnectionRejected() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.screen instanceof DisconnectedScreen) return true;
-        ClientPacketListener cpl = mc.getConnection();
-        if (cpl != null && !cpl.getConnection().isConnected()) {
-            if (!(mc.screen instanceof ConnectScreen)) return true;
-        }
-        return false;
-    }
-
-    //debounce 连接已完成 进入世界后清除发起状态 同时重置connecting避免CAS挡后续连接
-    public static void clearConnectInitiated() {
-        connectInitiatedAt = 0;
-        prevPlayerStrong = null;
-        connecting.set(false);
-        //debounce 取消挂起的resetTask 避免旧任务把新连接的connecting误置false
-        ScheduledFuture<?> t = resetTask;
-        if (t != null) { t.cancel(false); resetTask = null; }
-    }
-
-    public static void connectToServer(int localPort, RoomInfo roomInfo) {
-        Minecraft mc = Minecraft.getInstance();
-        mc.execute(() -> {
-            if (localPort > 0) {
-                if (!connecting.compareAndSet(false, true)) {
-                    VoxLinkMod.LOGGER.warn("[ConnectionHelper] Already connecting, ignore duplicate call");
-                    return;
-                }
-                try {
-                    //记录发起前的player引用 用于后续真实连接判定
-                    prevPlayerStrong = mc.player;
-                    final long myStartAt = System.currentTimeMillis();
-                    connectInitiatedAt = myStartAt;
-                    roomInfo.setLocalBridgePort(localPort);
-                    String addr = ViaCompat.buildViaAddress("127.0.0.1", localPort, roomInfo.getServerProtocolVersion());
-                    ServerData serverData = createServerData(roomInfo.getName(), addr);
-                    invokeStartConnecting(mc.screen, mc, addr, serverData);
-
-                    //防卡住 owner校验防旧任务污染新连接
-                    resetTask = RESET_SCHEDULER.schedule(() -> {
-                        if (connecting.get() && connectInitiatedAt == myStartAt) {
-                            VoxLinkMod.LOGGER.info("[ConnectionHelper] 30s timeout, auto reset connecting flag");
-                            connecting.set(false);
-                        }
-                    }, CONNECT_RESET_SEC, TimeUnit.SECONDS);
-                } catch (Exception e) {
-                    connecting.set(false);
-                    clearConnectInitiated();
-                    VoxLinkMod.LOGGER.error("[ConnectionHelper] Connection failed: {}", e.getMessage());
-                    String mode = roomInfo.getConnectionMode().getString();
-                    sendError(mc, Component.translatable("voxlink.chat.connection_failed_detail", mode == null || mode.isEmpty() ? Component.translatable("voxlink.connection.cannot_establish").getString() : mode).getString());
-                    VoxLinkMod.getRoomManager().leaveRoom();
-                }
+   public static boolean isMcTrulyConnected() {
+      if (connectInitiatedAt == 0L) {
+         return false;
+      } else if (System.currentTimeMillis() - connectInitiatedAt < 200L) {
+         return false;
+      } else {
+         Minecraft mc = Minecraft.getInstance();
+         ClientPacketListener cpl = mc.getConnection();
+         if (cpl == null) {
+            return false;
+         } else {
+            Connection conn = cpl.getConnection();
+            if (conn != null && conn.isConnected()) {
+               LocalPlayer cur = mc.player;
+               return cur == null ? false : prevPlayerStrong == null || cur != prevPlayerStrong;
             } else {
-                connecting.set(false);
-                clearConnectInitiated();
-                String mode = roomInfo.getConnectionMode().getString();
-                sendError(mc, Component.translatable("voxlink.chat.connection_failed_detail", mode == null || mode.isEmpty() ? Component.translatable("voxlink.connection.cannot_establish").getString() : mode).getString());
-                VoxLinkMod.getRoomManager().leaveRoom();
+               return false;
             }
-        });
-    }
+         }
+      }
+   }
 
-    //1.20/1.20.1构造为(String,String,boolean)无Type内部类
-    private static ServerData createServerData(String name, String ip) throws Exception {
-        Constructor<?>[] ctors = ServerData.class.getDeclaredConstructors();
-        for (Constructor<?> c : ctors) {
-            Class<?>[] p = c.getParameterTypes();
-            if (p.length == 3 && p[0] == String.class && p[1] == String.class && p[2] == boolean.class) {
-                c.setAccessible(true);
-                return (ServerData) c.newInstance(name, ip, false);
+   public static boolean isConnectionRejected() {
+      Minecraft mc = Minecraft.getInstance();
+      if (mc.screen instanceof DisconnectedScreen) {
+         return true;
+      }
+
+      ClientPacketListener cpl = mc.getConnection();
+      return cpl != null && !cpl.getConnection().isConnected() && !(mc.screen instanceof ConnectScreen);
+   }
+
+   public static void clearConnectInitiated() {
+      connectInitiatedAt = 0L;
+      prevPlayerStrong = null;
+      connecting.set(false);
+      ScheduledFuture<?> t = resetTask;
+      if (t != null) {
+         t.cancel(false);
+         resetTask = null;
+      }
+   }
+
+   public static void connectToServer(int localPort, RoomInfo roomInfo) {
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(
+         () -> {
+            if (localPort > 0) {
+               if (!connecting.compareAndSet(false, true)) {
+                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] Already connecting, ignore duplicate call");
+                  return;
+               }
+
+               try {
+                  prevPlayerStrong = mc.player;
+                  long myStartAt = System.currentTimeMillis();
+                  connectInitiatedAt = myStartAt;
+                  roomInfo.setLocalBridgePort(localPort);
+                  String addr = ViaCompat.buildViaAddress("127.0.0.1", localPort, roomInfo.getServerProtocolVersion());
+                  ServerData serverData = createServerData(roomInfo.getName(), addr);
+                  invokeStartConnecting(mc.screen, mc, addr, serverData);
+                  resetTask = RESET_SCHEDULER.schedule(() -> {
+                     if (connecting.get() && connectInitiatedAt == myStartAt) {
+                        VoxLinkMod.LOGGER.info("[ConnectionHelper] 30s timeout, auto reset connecting flag");
+                        connecting.set(false);
+                     }
+                  }, 30L, TimeUnit.SECONDS);
+               } catch (Exception e) {
+                  connecting.set(false);
+                  clearConnectInitiated();
+                  VoxLinkMod.LOGGER.error("[ConnectionHelper] Connection failed: {}", e.getMessage());
+                  String mode = roomInfo.getConnectionMode().getString();
+                  sendError(
+                     mc,
+                     Component.translatable(
+                           "voxlink.chat.connection_failed_detail",
+                           new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                        )
+                        .getString()
+                  );
+                  VoxLinkMod.getRoomManager().leaveRoom("连接失败");
+               }
+            } else {
+               connecting.set(false);
+               clearConnectInitiated();
+               String mode = roomInfo.getConnectionMode().getString();
+               sendError(
+                  mc,
+                  Component.translatable(
+                        "voxlink.chat.connection_failed_detail",
+                        new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                     )
+                     .getString()
+               );
+               VoxLinkMod.getRoomManager().leaveRoom("连接失败");
             }
-        }
-        throw new RuntimeException("ServerData 构造函数未找到");
-    }
+         }
+      );
+   }
 
-    //跨版本反射调ConnectScreen.startConnecting, 兼容1.20~26.x签名变化
-    private static void invokeStartConnecting(Screen parent, Minecraft mc, String addr, ServerData serverData) throws Exception {
-        ServerAddress serverAddress = ServerAddress.parseString(addr);
-        for (Method m : ConnectScreen.class.getDeclaredMethods()) {
-            //方法名生产环境为notch/intermediary 改用静态修饰+参数类型匹配
-            if (!Modifier.isStatic(m.getModifiers())) continue;
-            Class<?>[] p = m.getParameterTypes();
-            if (p.length < 4) continue;
-            if (p[0] != Screen.class || p[1] != Minecraft.class) continue;
-            if (p[2] != ServerAddress.class || !p[3].isAssignableFrom(serverData.getClass())) continue;
+   private static ServerData createServerData(String name, String ip) throws Exception {
+      Class<?> typeClass = null;
+      Object otherType = null;
+      try {
+         typeClass = Class.forName("net.minecraft.client.multiplayer.ServerData$Type");
+         otherType = Enum.valueOf((Class<? extends Enum>)typeClass, "OTHER");
+      } catch (Throwable var20) {
+      }
+      Constructor<?>[] ctors = ServerData.class.getDeclaredConstructors();
+
+      for (Constructor<?> c : ctors) {
+         Class<?>[] p = c.getParameterTypes();
+         if (p.length >= 3 && p[0] == String.class && p[1] == String.class && (typeClass != null ? typeClass.isAssignableFrom(p[2]) : p[2] == boolean.class)) {
             Object[] args = new Object[p.length];
-            args[0] = parent; args[1] = mc; args[2] = serverAddress; args[3] = serverData;
-            for (int i = 4; i < p.length; i++) {
-                args[i] = p[i] == boolean.class ? false : null;
-            }
-            m.setAccessible(true);
-            try {
-                m.invoke(null, args);
-                VoxLinkMod.LOGGER.info("[ConnectionHelper] startConnecting success, signature param count={}", p.length);
-                return;
-            } catch (Exception e) {
-                VoxLinkMod.LOGGER.warn("[ConnectionHelper] startConnecting signature matched but call failed: {}", e.getMessage());
-            }
-        }
-        throw new RuntimeException("ConnectScreen.startConnecting 未找到匹配签名");
-    }
+            args[0] = name;
+            args[1] = ip;
+            args[2] = typeClass != null ? otherType : false;
 
-    private static void sendError(Minecraft mc, String msg) {
-        if (mc.player != null) {
-            mc.player.displayClientMessage(Component.literal(msg).withStyle(ChatFormatting.RED), false);
-        }
-    }
+            for (int i = 3; i < p.length; i++) {
+               args[i] = p[i] == boolean.class ? false : null;
+            }
+
+            c.setAccessible(true);
+
+            try {
+               return (ServerData)c.newInstance(args);
+            } catch (Exception var12) {
+            }
+         }
+      }
+
+      throw new RuntimeException("ServerData 构造函数未找到");
+   }
+
+   private static void invokeStartConnecting(Screen parent, Minecraft mc, String addr, ServerData serverData) throws Exception {
+      ServerAddress serverAddress = ServerAddress.parseString(addr);
+
+      for (Method m : ConnectScreen.class.getDeclaredMethods()) {
+         if (Modifier.isStatic(m.getModifiers())) {
+            Class<?>[] p = m.getParameterTypes();
+            if (p.length >= 4 && p[0] == Screen.class && p[1] == Minecraft.class && p[2] == ServerAddress.class && p[3].isAssignableFrom(serverData.getClass())
+               )
+             {
+               Object[] args = new Object[p.length];
+               args[0] = parent;
+               args[1] = mc;
+               args[2] = serverAddress;
+               args[3] = serverData;
+
+               for (int i = 4; i < p.length; i++) {
+                  args[i] = p[i] == boolean.class ? false : null;
+               }
+
+               m.setAccessible(true);
+
+               try {
+                  m.invoke(null, args);
+                  VoxLinkMod.LOGGER.info("[ConnectionHelper] startConnecting success, signature param count={}", p.length);
+                  return;
+               } catch (Exception e) {
+                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] startConnecting signature matched but call failed: {}", e.getMessage());
+               }
+            }
+         }
+      }
+
+      throw new RuntimeException("ConnectScreen.startConnecting 未找到匹配签名");
+   }
+
+   private static void sendError(Minecraft mc, String msg) {
+      if (mc.player != null) {
+         mc.player.displayClientMessage(Component.literal(msg), false);
+      }
+   }
 }

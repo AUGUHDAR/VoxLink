@@ -3,120 +3,211 @@ package icu.wuhui.voxlink.network;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-//debounce 打洞参数档位: DEFAULT适合大部分场景(8s快失败快切换), AGGRESSIVE适合极端硬对称NAT(20s长超时100端口范围)
 public final class PunchProfile {
-    private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-punch");
+   private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-punch");
+   public final String name;
+   public final int punchTimeoutMs;
+   public final int firewallDetectCycles;
+   public final int portPredictionMaxRange;
+   public final int[] progressiveRanges;
+   public final int cyclesPerRange;
+   public final int easySymDualSocketCount;
+   public final int easySymDualPortRange;
+   public final int defaultPortRange;
+   public final int widePortRange;
+   public final int maxPortRange;
+   public final int minPortRange;
+   public final int easySymPortRange;
+   public final int hostMultiSocketCount;
+   public final int hostMultiMinSocketCount;
+   public final int hostMultiBaseSocketCount;
+   public final int hardSymSocketCount;
+   public final int birthdaySocketCount;
+   public final int joinerSymSocketCount;
+   public final int relaySocketCount;
+   public final PunchProfile.SendParams send;
+   public final int socketStunCount;
+   public final int socketCreateIntervalMs;
+   private static final PunchProfile.SendParams SEND_DEFAULT = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 3, 3, 1, 10);
+   public static final PunchProfile DEFAULT = new PunchProfile(
+      "DEFAULT", 8000, 20, 20, new int[]{4, 8, 15, 20}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+   );
+   public static final PunchProfile AGGRESSIVE = new PunchProfile(
+      "AGGRESSIVE", 20000, 50, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+   );
+   public static final PunchProfile HARDSYM = new PunchProfile(
+      "HARDSYM", 25000, 60, 500, new int[]{20, 50, 100, 200, 500}, 2, 25, 20, 30, 50, 500, 3, 20, 84, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+   );
+   public static final PunchProfile EASY_SYM_DUAL = new PunchProfile(
+      "EASY_SYM_DUAL", 12000, 30, 50, new int[]{5, 10, 20, 30, 50}, 2, 25, 50, 20, 50, 50, 3, 20, 25, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+   );
+   public static final PunchProfile V100 = new PunchProfile(
+      "V100", 8000, 38, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 84, 20, 3, 84, 84, 50, 5, 2, 50, SEND_DEFAULT
+   );
+   private static volatile PunchProfile current = DEFAULT;
+   private static volatile String switchReason = "initial";
+   private static volatile PunchParams dynamicOverride;
 
-    public final String name;
-    public final int punchTimeoutMs;
-    public final int firewallDetectCycles;
-    public final int portPredictionMaxRange;
-    public final int[] progressiveRanges;
-    public final int cyclesPerRange;
-    public final int easySymDualSocketCount;
-    public final int easySymDualPortRange;
+   private PunchProfile(
+      String name,
+      int punchTimeoutMs,
+      int firewallDetectCycles,
+      int portPredictionMaxRange,
+      int[] progressiveRanges,
+      int cyclesPerRange,
+      int easySymDualSocketCount,
+      int easySymDualPortRange,
+      int defaultPortRange,
+      int widePortRange,
+      int maxPortRange,
+      int minPortRange,
+      int easySymPortRange,
+      int hostMultiSocketCount,
+      int hostMultiMinSocketCount,
+      int hostMultiBaseSocketCount,
+      int hardSymSocketCount,
+      int birthdaySocketCount,
+      int joinerSymSocketCount,
+      int relaySocketCount,
+      int socketStunCount,
+      int socketCreateIntervalMs,
+      PunchProfile.SendParams send
+   ) {
+      this.name = name;
+      this.punchTimeoutMs = punchTimeoutMs;
+      this.firewallDetectCycles = firewallDetectCycles;
+      this.portPredictionMaxRange = portPredictionMaxRange;
+      this.progressiveRanges = progressiveRanges;
+      this.cyclesPerRange = cyclesPerRange;
+      this.easySymDualSocketCount = easySymDualSocketCount;
+      this.easySymDualPortRange = easySymDualPortRange;
+      this.defaultPortRange = defaultPortRange;
+      this.widePortRange = widePortRange;
+      this.maxPortRange = maxPortRange;
+      this.minPortRange = minPortRange;
+      this.easySymPortRange = easySymPortRange;
+      this.hostMultiSocketCount = hostMultiSocketCount;
+      this.hostMultiMinSocketCount = hostMultiMinSocketCount;
+      this.hostMultiBaseSocketCount = hostMultiBaseSocketCount;
+      this.hardSymSocketCount = hardSymSocketCount;
+      this.birthdaySocketCount = birthdaySocketCount;
+      this.joinerSymSocketCount = joinerSymSocketCount;
+      this.relaySocketCount = relaySocketCount;
+      this.socketStunCount = socketStunCount;
+      this.socketCreateIntervalMs = socketCreateIntervalMs;
+      this.send = send;
+   }
 
-    private PunchProfile(String name, int punchTimeoutMs, int firewallDetectCycles,
-                         int portPredictionMaxRange, int[] progressiveRanges, int cyclesPerRange,
-                         int easySymDualSocketCount, int easySymDualPortRange) {
-        this.name = name;
-        this.punchTimeoutMs = punchTimeoutMs;
-        this.firewallDetectCycles = firewallDetectCycles;
-        this.portPredictionMaxRange = portPredictionMaxRange;
-        this.progressiveRanges = progressiveRanges;
-        this.cyclesPerRange = cyclesPerRange;
-        this.easySymDualSocketCount = easySymDualSocketCount;
-        this.easySymDualPortRange = easySymDualPortRange;
-    }
+   public static void applyDynamicParams(PunchParams p) {
+      dynamicOverride = p;
+   }
 
-    //debounce DEFAULT=1.0.7当前参数 大部分场景快速失败快速切换
-    public static final PunchProfile DEFAULT = new PunchProfile(
-            "DEFAULT",
-            8000,
-            20,
-            20,
-            new int[]{4, 8, 15, 20},
-            2,
-            25,
-            20
-    );
+   public static void clearDynamicParams() {
+      dynamicOverride = null;
+   }
 
-    //debounce AGGRESSIVE=1.0.1风格参数 极端硬对称NAT场景给足映射建立时间
-    public static final PunchProfile AGGRESSIVE = new PunchProfile(
-            "AGGRESSIVE",
-            20000,
-            50,
-            100,
-            new int[]{10, 25, 50, 75, 100},
-            2,
-            25,
-            20
-    );
+   public static int effectiveTimeoutMs() {
+      PunchParams p = dynamicOverride;
+      return p != null && p.timeoutMs > 0 ? p.timeoutMs : current.punchTimeoutMs;
+   }
 
-    // HardSym×HardSym 专用: 指数扩展 range 20→50→100→200→500, 避免全 65535 端口扫导致流量暴涨/被运营商误判DDoS
-    // 对齐 EasyTier 的 max_k2 衰减思想, 但限制最大 range=500 (约覆盖 1000 端口), 在成功率和流量间取平衡
-    public static final PunchProfile HARDSYM = new PunchProfile(
-            "HARDSYM",
-            25000,
-            60,
-            500,
-            new int[]{20, 50, 100, 200, 500},
-            2,
-            25,
-            20
-    );
+   public static int effectivePortRange() {
+      PunchParams p = dynamicOverride;
+      return p != null && p.portRange > 0 ? p.portRange : current.portPredictionMaxRange;
+   }
 
-    //debounce EASY_SYM_DUAL=EasySym×EasySym中间档 侧重端口预测 12s/±50
-    public static final PunchProfile EASY_SYM_DUAL = new PunchProfile(
-            "EASY_SYM_DUAL",
-            12000,
-            30,
-            50,
-            new int[]{5, 10, 20, 30, 50},
-            2,
-            25,
-            50
-    );
+   public static int effectiveSendInterval() {
+      PunchParams p = dynamicOverride;
+      return p != null && p.sendInterval > 0 ? p.sendInterval : current.send.intervalMs;
+   }
 
-    //debounce 当前激活档位 默认DEFAULT 由ConnectionManager根据场景切换
-    private static volatile PunchProfile current = DEFAULT;
-    private static volatile String switchReason = "initial";
+   public static boolean effectiveSkipDirectPunch() {
+      PunchParams p = dynamicOverride;
+      return p != null && p.skipDirectPunch;
+   }
 
-    public static PunchProfile current() {
-        return current;
-    }
+   public static PunchProfile current() {
+      return current;
+   }
 
-    public static boolean isAggressive() {
-        return current == AGGRESSIVE;
-    }
+   public static boolean isAggressive() {
+      return current == AGGRESSIVE;
+   }
 
-    public static void switchTo(PunchProfile target, String reason) {
-        if (target == null || target == current) return;
-        PunchProfile old = current;
-        current = target;
-        switchReason = reason;
-        LOGGER.info("[PunchProfile] Switch: {} -> {} reason: {}", old.name, target.name, reason);
-    }
+   public static void switchTo(PunchProfile target, String reason) {
+      if (target != null && target != current) {
+         PunchProfile old = current;
+         current = target;
+         switchReason = reason;
+         LOGGER.info("[PunchProfile] Switch: {} -> {} reason: {}", new Object[]{old.name, target.name, reason});
+      }
+   }
 
-    public static void switchToAggressive(String reason) {
-        switchTo(AGGRESSIVE, reason);
-    }
+   public static void switchToAggressive(String reason) {
+      switchTo(AGGRESSIVE, reason);
+   }
 
-    public static void switchToHardSym(String reason) {
-        switchTo(HARDSYM, reason);
-    }
+   public static void switchToHardSym(String reason) {
+      switchTo(HARDSYM, reason);
+   }
 
-    public static void switchToEasySymDual(String reason) {
-        switchTo(EASY_SYM_DUAL, reason);
-    }
+   public static void switchToEasySymDual(String reason) {
+      switchTo(EASY_SYM_DUAL, reason);
+   }
 
-    public static void switchToDefault(String reason) {
-        switchTo(DEFAULT, reason);
-    }
+   public static void switchToDefault(String reason) {
+      switchTo(DEFAULT, reason);
+   }
 
-    public static String describe() {
-        return current.name + "(timeout=" + current.punchTimeoutMs
-                + "ms, cycles=" + current.firewallDetectCycles
-                + ", range=" + current.portPredictionMaxRange + ")";
-    }
+   public static void switchToV100(String reason) {
+      switchTo(V100, reason);
+   }
+
+   public static String describe() {
+      return current.name
+         + "(timeout="
+         + current.punchTimeoutMs
+         + "ms, cycles="
+         + current.firewallDetectCycles
+         + ", range="
+         + current.portPredictionMaxRange
+         + ")";
+   }
+
+   public static final class SendParams {
+      public final int intervalMs;
+      public final int socketTimeoutMs;
+      public final int extraWaitMs;
+      public final int extraWaitLongMs;
+      public final int jitterBaseMs;
+      public final int jitterRangeMs;
+      public final int minRounds;
+      public final int minPass;
+      public final int sleepShortMs;
+      public final int sleepLongMs;
+
+      public SendParams(
+         int intervalMs,
+         int socketTimeoutMs,
+         int extraWaitMs,
+         int extraWaitLongMs,
+         int jitterBaseMs,
+         int jitterRangeMs,
+         int minRounds,
+         int minPass,
+         int sleepShortMs,
+         int sleepLongMs
+      ) {
+         this.intervalMs = intervalMs;
+         this.socketTimeoutMs = socketTimeoutMs;
+         this.extraWaitMs = extraWaitMs;
+         this.extraWaitLongMs = extraWaitLongMs;
+         this.jitterBaseMs = jitterBaseMs;
+         this.jitterRangeMs = jitterRangeMs;
+         this.minRounds = minRounds;
+         this.minPass = minPass;
+         this.sleepShortMs = sleepShortMs;
+         this.sleepLongMs = sleepLongMs;
+      }
+   }
 }
