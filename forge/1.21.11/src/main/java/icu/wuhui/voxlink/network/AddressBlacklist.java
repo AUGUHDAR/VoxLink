@@ -3,43 +3,54 @@ package icu.wuhui.voxlink.network;
 import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
-//地址黑名单: UDP连续失败3次拉黑1h, 直连失败拉黑5min
 public final class AddressBlacklist {
-    private static final long UDP_BLACKLIST_MS = 3600_000L; //1h
-    private static final long DIRECT_BLACKLIST_MS = 300_000L; //5min
-    private static final int UDP_FAIL_THRESHOLD = 3;
+   private static final long UDP_BLACKLIST_MS = 3600000L;
+   private static final long DIRECT_BLACKLIST_MS = 300000L;
+   private static final int UDP_FAIL_THRESHOLD = 3;
+   private static final long FAIL_WINDOW_MS = 600000L;
+   private final Map<InetSocketAddress, Long> expireAt = new ConcurrentHashMap<>();
+   private final Map<InetSocketAddress, long[]> udpFailState = new ConcurrentHashMap<>();
 
-    private final Map<InetSocketAddress, Long> expireAt = new ConcurrentHashMap<>();
-    private final Map<InetSocketAddress, AtomicInteger> udpFailCount = new ConcurrentHashMap<>();
-
-    public boolean isBlacklisted(InetSocketAddress addr) {
-        if (addr == null) return false;
-        Long exp = expireAt.get(addr);
-        if (exp == null) return false;
-        if (System.currentTimeMillis() >= exp) {
-            expireAt.remove(addr, exp);
+   public boolean isBlacklisted(InetSocketAddress addr) {
+      if (addr == null) {
+         return false;
+      } else {
+         Long exp = this.expireAt.get(addr);
+         if (exp == null) {
             return false;
-        }
-        return true;
-    }
+         } else if (System.currentTimeMillis() >= exp) {
+            this.expireAt.remove(addr, exp);
+            return false;
+         } else {
+            return true;
+         }
+      }
+   }
 
-    //连续3次才拉黑1h
-    public void recordUdpFailure(InetSocketAddress addr) {
-        if (addr == null) return;
-        AtomicInteger c = udpFailCount.computeIfAbsent(addr, k -> new AtomicInteger(0));
-        int n = c.incrementAndGet();
-        if (n >= UDP_FAIL_THRESHOLD) {
-            expireAt.put(addr, System.currentTimeMillis() + UDP_BLACKLIST_MS);
-            udpFailCount.remove(addr);
-        }
-    }
+   public void recordUdpFailure(InetSocketAddress addr) {
+      if (addr != null) {
+         long now = System.currentTimeMillis();
+         this.udpFailState.compute(addr, (k, st) -> {
+            if (st == null || now - st[1] > 600000L) {
+               st = new long[]{0L, now};
+            }
 
-    //直接拉黑5min
-    public void recordDirectFailure(InetSocketAddress addr) {
-        if (addr == null) return;
-        expireAt.put(addr, System.currentTimeMillis() + DIRECT_BLACKLIST_MS);
-        udpFailCount.remove(addr);
-    }
+            st[0]++;
+            if (st[0] >= 3L) {
+               this.expireAt.put(addr, now + 3600000L);
+               return null;
+            } else {
+               return (long[])st;
+            }
+         });
+      }
+   }
+
+   public void recordDirectFailure(InetSocketAddress addr) {
+      if (addr != null) {
+         this.expireAt.put(addr, System.currentTimeMillis() + 300000L);
+         this.udpFailState.remove(addr);
+      }
+   }
 }

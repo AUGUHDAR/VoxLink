@@ -1,356 +1,459 @@
 package icu.wuhui.voxlink.network;
 
-import net.minecraft.network.chat.Component;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
-import java.net.InetAddress;
+import java.net.ConnectException;
 import java.net.Inet6Address;
-import java.net.NetworkInterface;
-import java.net.Socket;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
+import java.net.NoRouteToHostException;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.Enumeration;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.network.chat.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ConnectionFallback {
-    private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-fallback");
-    private static final ExecutorService FALLBACK_EXECUTOR = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "VoxLink-Fallback");
-        t.setDaemon(true);
-        return t;
-    });
-    private static final int SOCKET_TIMEOUT = 3000;
-    private static final int SOCKET_CONNECT_TIMEOUT_MS = 2000;
-    //对齐EasyTier: 10s窗口, 最多5次, 每次3s超时, 10-100ms退避
-    private static final int TCP_SIMOPEN_WINDOW_MS = 10000;
-    private static final int TCP_SIMOPEN_MAX_ATTEMPTS = 5;
+   private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-fallback");
+   private static final ExecutorService FALLBACK_EXECUTOR = Executors.newCachedThreadPool(r -> {
+      Thread t = new Thread(r, "VoxLink-Fallback");
+      t.setDaemon(true);
+      return t;
+   });
+   private static final int SOCKET_TIMEOUT = 3000;
+   private static final int SOCKET_CONNECT_TIMEOUT_MS = 2000;
+   private static final int TCP_SIMOPEN_WINDOW_MS = 10000;
+   private static final int TCP_SIMOPEN_MAX_ATTEMPTS = 5;
+   private final AtomicBoolean cancelled = new AtomicBoolean(false);
+   private final AtomicBoolean settled = new AtomicBoolean(false);
+   private final AtomicBoolean won = new AtomicBoolean(false);
+   private volatile Component statusText = Component.empty();
+   private static volatile Boolean ipv6ConnectivityCached = null;
+   private static volatile long ipv6ConnectivityCheckTime = 0L;
+   private static final long IPV6_CHECK_CACHE_MS = 60000L;
 
-    public static void shutdown() {
-        FALLBACK_EXECUTOR.shutdown();
-        try {
-            if (!FALLBACK_EXECUTOR.awaitTermination(2, TimeUnit.SECONDS)) {
-                FALLBACK_EXECUTOR.shutdownNow();
-            }
-        } catch (InterruptedException e) {
+   public static void shutdown() {
+      FALLBACK_EXECUTOR.shutdown();
+
+      try {
+         if (!FALLBACK_EXECUTOR.awaitTermination(2L, TimeUnit.SECONDS)) {
             FALLBACK_EXECUTOR.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-    }
+         }
+      } catch (InterruptedException e) {
+         FALLBACK_EXECUTOR.shutdownNow();
+         Thread.currentThread().interrupt();
+      }
+   }
 
-    public enum ConnectionMode {
-        IPV6_DIRECT("voxlink.mode.ipv6_direct"),
-        IPV4_DIRECT("voxlink.mode.ipv4_direct"),
-        UDP_PUNCH("voxlink.mode.udp_punch");
+   public void cancel() {
+      this.cancelled.set(true);
+   }
 
-        public final String translationKey;
-        ConnectionMode(String translationKey) { this.translationKey = translationKey; }
-    }
+   public Component getStatusText() {
+      return this.statusText;
+   }
 
-    private final AtomicBoolean cancelled = new AtomicBoolean(false);
-    private final AtomicBoolean settled = new AtomicBoolean(false);
-    //debounce 专表"我赢了" 取代误用的cancelled语义
-    private final java.util.concurrent.atomic.AtomicBoolean won = new java.util.concurrent.atomic.AtomicBoolean(false);
-    private volatile Component statusText = Component.empty();
+   public boolean isSettled() {
+      return this.settled.get();
+   }
 
-    public void cancel() { cancelled.set(true); }
-    public Component getStatusText() { return statusText; }
-    public boolean isSettled() { return settled.get(); }
-    public boolean isCancelled() { return cancelled.get(); }
+   public boolean isCancelled() {
+      return this.cancelled.get();
+   }
 
-    public CompletableFuture<ConnectResult> tryIpv6Direct(String hostIpv6, int hostPort) {
-        if (hostIpv6 == null || hostIpv6.isEmpty()) {
-            return CompletableFuture.completedFuture(ConnectResult.failed("NO_IPV6", "没有IPv6地址"));
-        }
+   public CompletableFuture<ConnectionFallback.ConnectResult> tryIpv6Direct(String hostIpv6, int hostPort) {
+      if (hostIpv6 != null && !hostIpv6.isEmpty()) {
+         this.statusText = Component.translatable("voxlink.connection.probing");
+         return CompletableFuture.supplyAsync(() -> {
+            if (!this.won.get() && !this.cancelled.get() && !this.settled.get()) {
+               Socket socket = null;
 
-        statusText = Component.translatable("voxlink.connection.probing");
+               try {
+                  socket = new Socket();
+                  socket.setTcpNoDelay(true);
+                  InetAddress addr = InetAddress.getByName(hostIpv6);
+                  socket.connect(new InetSocketAddress(addr, hostPort), 3000);
+                  socket.close();
+                  socket = null;
+                  LOGGER.info("IPv6 connected: [{}]:{}", hostIpv6, hostPort);
+                  this.statusText = Component.translatable("voxlink.connection.bridge_setup");
+                  if (!this.won.compareAndSet(false, true)) {
+                     return ConnectionFallback.ConnectResult.cancelled();
+                  }
 
-        return CompletableFuture.supplyAsync(() -> {
-            //debounce 入口guard加won.get 与tryTcpSimOpen对称 防两通道同时success
-            if (won.get() || cancelled.get() || settled.get()) return ConnectResult.cancelled();
-
-            Socket socket = null;
-            try {
-                socket = new Socket();
-                socket.setTcpNoDelay(true);
-                InetAddress addr = InetAddress.getByName(hostIpv6);
-                socket.connect(new InetSocketAddress(addr, hostPort), SOCKET_TIMEOUT);
-                socket.close();
-                socket = null;
-                LOGGER.info("IPv6 connected: [{}]:{}", hostIpv6, hostPort);
-                statusText = Component.translatable("voxlink.connection.bridge_setup");
-                //debounce won CAS防与tryIpv4/tryTcpSimOpen竞态 两通道同时返回success
-                if (!won.compareAndSet(false, true)) return ConnectResult.cancelled();
-                settled.set(true);
-                return ConnectResult.success("IPv6", hostIpv6, hostPort, ConnectionMode.IPV6_DIRECT);
-            } catch (java.net.SocketTimeoutException e) {
-                LOGGER.info("IPv6 timeout: [{}]:{}", hostIpv6, hostPort);
-                statusText = Component.translatable("voxlink.connection.timeout");
-                return ConnectResult.failed("IPV6_TIMEOUT", "IPv6 timeout");
-            } catch (java.net.NoRouteToHostException e) {
-                LOGGER.info("IPv6 no route: [{}]:{}", hostIpv6, hostPort);
-                statusText = Component.translatable("voxlink.connection.failed");
-                return ConnectResult.failed("IPV6_NO_ROUTE", "IPv6 no route");
-            } catch (java.net.ConnectException e) {
-                String msg = e.getMessage();
-                LOGGER.info("IPv6 connect failed: [{}]:{} - {}", hostIpv6, hostPort, msg);
-                if (msg != null && msg.contains("Connection refused")) {
-                    statusText = Component.translatable("voxlink.connection.failed");
-                    return ConnectResult.failed("IPV6_REFUSED", "IPv6 refused");
-                }
-                statusText = Component.translatable("voxlink.connection.failed");
-                return ConnectResult.failed("IPV6_ERROR", "IPv6 failed");
-            } catch (IOException e) {
-                LOGGER.info("IPv6 exception: [{}]:{} - {}", hostIpv6, hostPort, e.getMessage());
-                statusText = Component.translatable("voxlink.connection.failed");
-                return ConnectResult.failed("IPV6_EXCEPTION", "IPv6 exception: " + e.getMessage());
-            } finally {
-                if (socket != null) try { socket.close(); } catch (Exception ignored) {}
+                  this.settled.set(true);
+                  return ConnectionFallback.ConnectResult.success("IPv6", hostIpv6, hostPort, ConnectionFallback.ConnectionMode.IPV6_DIRECT);
+               } catch (SocketTimeoutException e) {
+                  LOGGER.info("IPv6 timeout: [{}]:{}", hostIpv6, hostPort);
+                  this.statusText = Component.translatable("voxlink.connection.timeout");
+                  return ConnectionFallback.ConnectResult.failed("IPV6_TIMEOUT", "IPv6 timeout");
+               } catch (NoRouteToHostException e) {
+                  LOGGER.info("IPv6 no route: [{}]:{}", hostIpv6, hostPort);
+                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  return ConnectionFallback.ConnectResult.failed("IPV6_NO_ROUTE", "IPv6 no route");
+               } catch (ConnectException e) {
+                  String msg = e.getMessage();
+                  LOGGER.info("IPv6 connect failed: [{}]:{} - {}", new Object[]{hostIpv6, hostPort, msg});
+                  if (msg != null && msg.contains("Connection refused")) {
+                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     return ConnectionFallback.ConnectResult.failed("IPV6_REFUSED", "IPv6 refused");
+                  } else {
+                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     return ConnectionFallback.ConnectResult.failed("IPV6_ERROR", "IPv6 failed");
+                  }
+               } catch (IOException e) {
+                  LOGGER.info("IPv6 exception: [{}]:{} - {}", new Object[]{hostIpv6, hostPort, e.getMessage()});
+                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  return ConnectionFallback.ConnectResult.failed("IPV6_EXCEPTION", "IPv6 exception: " + e.getMessage());
+               } finally {
+                  if (socket != null) {
+                     try {
+                        socket.close();
+                     } catch (Exception var23) {
+                     }
+                  }
+               }
+            } else {
+               return ConnectionFallback.ConnectResult.cancelled();
             }
-        }, FALLBACK_EXECUTOR);
-    }
+         }, FALLBACK_EXECUTOR);
+      } else {
+         return CompletableFuture.completedFuture(ConnectionFallback.ConnectResult.failed("NO_IPV6", "没有IPv6地址"));
+      }
+   }
 
-    public CompletableFuture<ConnectResult> tryIpv4Direct(String hostIp, int hostPort) {
-        if (hostIp == null || hostIp.isEmpty()) {
-            return CompletableFuture.completedFuture(ConnectResult.failed("NO_IPV4", "没有IPv4地址"));
-        }
+   public CompletableFuture<ConnectionFallback.ConnectResult> tryIpv4Direct(String hostIp, int hostPort) {
+      if (hostIp != null && !hostIp.isEmpty()) {
+         this.statusText = Component.translatable("voxlink.connection.probing");
+         return CompletableFuture.supplyAsync(() -> {
+            if (!this.won.get() && !this.cancelled.get() && !this.settled.get()) {
+               Socket socket = null;
 
-        statusText = Component.translatable("voxlink.connection.probing");
+               try {
+                  socket = new Socket();
+                  socket.setTcpNoDelay(true);
+                  InetAddress addr = InetAddress.getByName(hostIp);
+                  socket.connect(new InetSocketAddress(addr, hostPort), 3000);
+                  socket.close();
+                  socket = null;
+                  LOGGER.info("IPv4 connected: {}:{}", hostIp, hostPort);
+                  this.statusText = Component.translatable("voxlink.connection.bridge_setup");
+                  if (!this.won.compareAndSet(false, true)) {
+                     return ConnectionFallback.ConnectResult.cancelled();
+                  }
 
-        return CompletableFuture.supplyAsync(() -> {
-            //debounce 入口guard加won.get 与tryTcpSimOpen对称 防两通道同时success
-            if (won.get() || cancelled.get() || settled.get()) return ConnectResult.cancelled();
-
-            Socket socket = null;
-            try {
-                socket = new Socket();
-                socket.setTcpNoDelay(true);
-                InetAddress addr = InetAddress.getByName(hostIp);
-                socket.connect(new InetSocketAddress(addr, hostPort), SOCKET_TIMEOUT);
-                socket.close();
-                socket = null;
-                LOGGER.info("IPv4 connected: {}:{}", hostIp, hostPort);
-                statusText = Component.translatable("voxlink.connection.bridge_setup");
-                //debounce won CAS防与tryIpv6/tryTcpSimOpen竞态 两通道同时返回success
-                if (!won.compareAndSet(false, true)) return ConnectResult.cancelled();
-                settled.set(true);
-                return ConnectResult.success("IPv4", hostIp, hostPort, ConnectionMode.IPV4_DIRECT);
-            } catch (java.net.SocketTimeoutException e) {
-                LOGGER.info("IPv4 timeout: {}:{}", hostIp, hostPort);
-                statusText = Component.translatable("voxlink.connection.timeout");
-                return ConnectResult.failed("IPV4_TIMEOUT", "IPv4 timeout");
-            } catch (java.net.NoRouteToHostException e) {
-                LOGGER.info("IPv4 no route: {}:{}", hostIp, hostPort);
-                statusText = Component.translatable("voxlink.connection.failed");
-                return ConnectResult.failed("IPV4_NO_ROUTE", "IPv4 no route");
-            } catch (java.net.ConnectException e) {
-                String msg = e.getMessage();
-                LOGGER.info("IPv4 connect failed: {}:{} - {}", hostIp, hostPort, msg);
-                if (msg != null && msg.contains("Connection refused")) {
-                    statusText = Component.translatable("voxlink.connection.failed");
-                    return ConnectResult.failed("IPV4_REFUSED", "IPv4 refused");
-                }
-                statusText = Component.translatable("voxlink.connection.failed");
-                return ConnectResult.failed("IPV4_ERROR", "IPv4 failed");
-            } catch (IOException e) {
-                LOGGER.info("IPv4 exception: {}:{} - {}", hostIp, hostPort, e.getMessage());
-                statusText = Component.translatable("voxlink.connection.failed");
-                return ConnectResult.failed("IPV4_EXCEPTION", "IPv4 exception: " + e.getMessage());
-            } finally {
-                if (socket != null) try { socket.close(); } catch (Exception ignored) {}
+                  this.settled.set(true);
+                  return ConnectionFallback.ConnectResult.success("IPv4", hostIp, hostPort, ConnectionFallback.ConnectionMode.IPV4_DIRECT);
+               } catch (SocketTimeoutException e) {
+                  LOGGER.info("IPv4 timeout: {}:{}", hostIp, hostPort);
+                  this.statusText = Component.translatable("voxlink.connection.timeout");
+                  return ConnectionFallback.ConnectResult.failed("IPV4_TIMEOUT", "IPv4 timeout");
+               } catch (NoRouteToHostException e) {
+                  LOGGER.info("IPv4 no route: {}:{}", hostIp, hostPort);
+                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  return ConnectionFallback.ConnectResult.failed("IPV4_NO_ROUTE", "IPv4 no route");
+               } catch (ConnectException e) {
+                  String msg = e.getMessage();
+                  LOGGER.info("IPv4 connect failed: {}:{} - {}", new Object[]{hostIp, hostPort, msg});
+                  if (msg != null && msg.contains("Connection refused")) {
+                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     return ConnectionFallback.ConnectResult.failed("IPV4_REFUSED", "IPv4 refused");
+                  } else {
+                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     return ConnectionFallback.ConnectResult.failed("IPV4_ERROR", "IPv4 failed");
+                  }
+               } catch (IOException e) {
+                  LOGGER.info("IPv4 exception: {}:{} - {}", new Object[]{hostIp, hostPort, e.getMessage()});
+                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  return ConnectionFallback.ConnectResult.failed("IPV4_EXCEPTION", "IPv4 exception: " + e.getMessage());
+               } finally {
+                  if (socket != null) {
+                     try {
+                        socket.close();
+                     } catch (Exception var23) {
+                     }
+                  }
+               }
+            } else {
+               return ConnectionFallback.ConnectResult.cancelled();
             }
-        }, FALLBACK_EXECUTOR);
-    }
+         }, FALLBACK_EXECUTOR);
+      } else {
+         return CompletableFuture.completedFuture(ConnectionFallback.ConnectResult.failed("NO_IPV4", "没有IPv4地址"));
+      }
+   }
 
-    private static volatile Boolean ipv6ConnectivityCached = null;
-    private static volatile long ipv6ConnectivityCheckTime = 0;
-    private static final long IPV6_CHECK_CACHE_MS = 60_000; // 缓存60秒
+   public static synchronized boolean verifyIPv6Connectivity() {
+      long now = System.currentTimeMillis();
+      if (ipv6ConnectivityCached != null && now - ipv6ConnectivityCheckTime < 60000L) {
+         return ipv6ConnectivityCached;
+      }
 
-    /**
-     * 实际验证IPv6连通性：尝试TCP连接到已知IPv6服务器
-     * 结果缓存60秒，避免重复检查
-     * synchronized保证缓存字段原子 避免check-then-act竞态
-     */
-    public static synchronized boolean verifyIPv6Connectivity() {
-        long now = System.currentTimeMillis();
-        if (ipv6ConnectivityCached != null && (now - ipv6ConnectivityCheckTime) < IPV6_CHECK_CACHE_MS) {
-            return ipv6ConnectivityCached;
-        }
-        if (!hasIPv6Connectivity()) {
-            ipv6ConnectivityCached = false;
+      if (!hasIPv6Connectivity()) {
+         ipv6ConnectivityCached = false;
+         ipv6ConnectivityCheckTime = now;
+         return false;
+      }
+
+      String[] testTargets = new String[]{"2001:4860:4860::8888", "2001:4860:4860::8844"};
+
+      for (String target : testTargets) {
+         try (Socket sock = new Socket()) {
+            sock.connect(new InetSocketAddress(target, 53), 2000);
+            LOGGER.info("[IPv6] Connectivity check success: {}", target);
+            ipv6ConnectivityCached = true;
             ipv6ConnectivityCheckTime = now;
-            return false;
-        }
-        // 尝试连接Google DNS IPv6 (2001:4860:4860::8888) 的53端口
-        String[] testTargets = {"2001:4860:4860::8888", "2001:4860:4860::8844"};
-        for (String target : testTargets) {
-            //debounce try-with-resources 保证异常路径也关socket
-            try (java.net.Socket sock = new java.net.Socket()) {
-                sock.connect(new java.net.InetSocketAddress(target, 53), SOCKET_CONNECT_TIMEOUT_MS);
-                LOGGER.info("[IPv6] Connectivity check success: {}", target);
-                ipv6ConnectivityCached = true;
-                ipv6ConnectivityCheckTime = now;
-                return true;
-            } catch (Exception e) {
-                LOGGER.debug("[IPv6] Connectivity check failed {}: {}", target, e.getMessage());
-            }
-        }
-        LOGGER.info("[IPv6] Connectivity check failed: all targets unreachable");
-        ipv6ConnectivityCached = false;
-        ipv6ConnectivityCheckTime = now;
-        return false;
-    }
+            return true;
+         } catch (Exception e) {
+            LOGGER.debug("[IPv6] Connectivity check failed {}: {}", target, e.getMessage());
+         }
+      }
 
-    public static boolean hasIPv6Connectivity() {
-        try {
-            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-            while (interfaces.hasMoreElements()) {
-                NetworkInterface ni = interfaces.nextElement();
-                if (ni.isLoopback() || !ni.isUp()) continue;
-                Enumeration<InetAddress> addrs = ni.getInetAddresses();
-                while (addrs.hasMoreElements()) {
-                    InetAddress addr = addrs.nextElement();
-                    if (addr instanceof Inet6Address inet6 && !addr.isLoopbackAddress() && !addr.isLinkLocalAddress()) {
-                        String ip = addr.getHostAddress();
-                        int scopeIdx = ip.indexOf('%');
-                        if (scopeIdx >= 0) ip = ip.substring(0, scopeIdx);
-                        LOGGER.info("[IPv6] Found IPv6 addr: {} on interface {} (loopback={}, linkLocal={}, siteLocal={}, ULA={})",
-                                ip, ni.getName(), addr.isLoopbackAddress(), addr.isLinkLocalAddress(),
-                                addr.isSiteLocalAddress(), ip.startsWith("fd") || ip.startsWith("fc"));
-                        if (!ip.startsWith("fd") && !ip.startsWith("fc")) {
-                            return true;
+      LOGGER.info("[IPv6] Connectivity check failed: all targets unreachable");
+      ipv6ConnectivityCached = false;
+      ipv6ConnectivityCheckTime = now;
+      return false;
+   }
+
+   public static boolean hasIPv6Connectivity() {
+      try {
+         Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+
+         while (interfaces.hasMoreElements()) {
+            NetworkInterface ni = interfaces.nextElement();
+            if (!ni.isLoopback() && ni.isUp()) {
+               Enumeration<InetAddress> addrs = ni.getInetAddresses();
+
+               while (addrs.hasMoreElements()) {
+                  InetAddress addr = addrs.nextElement();
+                  if (addr instanceof Inet6Address inet6 && !addr.isLoopbackAddress() && !addr.isLinkLocalAddress()) {
+                     String ip = addr.getHostAddress();
+                     int scopeIdx = ip.indexOf(37);
+                     if (scopeIdx >= 0) {
+                        ip = ip.substring(0, scopeIdx);
+                     }
+
+                     LOGGER.debug(
+                        "[IPv6] Found IPv6 addr: {} on interface {} (loopback={}, linkLocal={}, siteLocal={}, ULA={})",
+                        new Object[]{
+                           ip,
+                           ni.getName(),
+                           addr.isLoopbackAddress(),
+                           addr.isLinkLocalAddress(),
+                           addr.isSiteLocalAddress(),
+                           ip.startsWith("fd") || ip.startsWith("fc")
                         }
-                    }
-                }
+                     );
+                     if (!ip.startsWith("fd") && !ip.startsWith("fc")) {
+                        LOGGER.info("[IPv6] Usable global IPv6 found on {}", ni.getName());
+                        return true;
+                     }
+                  }
+               }
             }
-            LOGGER.info("[IPv6] No usable global IPv6 address found");
-        } catch (Exception e) {
-            LOGGER.warn("[IPv6] Error checking IPv6: {}", e.getMessage());
-        }
-        return false;
-    }
+         }
 
-    public static String getLocalGlobalIpv6() {
-        try {
-            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-            while (interfaces.hasMoreElements()) {
-                NetworkInterface ni = interfaces.nextElement();
-                if (ni.isLoopback() || !ni.isUp()) continue;
-                Enumeration<InetAddress> addrs = ni.getInetAddresses();
-                while (addrs.hasMoreElements()) {
-                    InetAddress addr = addrs.nextElement();
-                    if (addr instanceof Inet6Address && !addr.isLoopbackAddress() && !addr.isLinkLocalAddress()) {
-                        String ipv6 = addr.getHostAddress();
-                        int scopeIdx = ipv6.indexOf('%');
-                        if (scopeIdx >= 0) ipv6 = ipv6.substring(0, scopeIdx);
-                        if (!ipv6.startsWith("fd") && !ipv6.startsWith("fc")) {
-                            return ipv6;
+         LOGGER.info("[IPv6] No usable global IPv6 address found");
+      } catch (Exception e) {
+         LOGGER.warn("[IPv6] Error checking IPv6: {}", e.getMessage());
+      }
+
+      return false;
+   }
+
+   public static String getLocalGlobalIpv6() {
+      try {
+         Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+
+         while (interfaces.hasMoreElements()) {
+            NetworkInterface ni = interfaces.nextElement();
+            if (!ni.isLoopback() && ni.isUp()) {
+               Enumeration<InetAddress> addrs = ni.getInetAddresses();
+
+               while (addrs.hasMoreElements()) {
+                  InetAddress addr = addrs.nextElement();
+                  if (addr instanceof Inet6Address && !addr.isLoopbackAddress() && !addr.isLinkLocalAddress()) {
+                     String ipv6 = addr.getHostAddress();
+                     int scopeIdx = ipv6.indexOf(37);
+                     if (scopeIdx >= 0) {
+                        ipv6 = ipv6.substring(0, scopeIdx);
+                     }
+
+                     if (!ipv6.startsWith("fd") && !ipv6.startsWith("fc")) {
+                        return ipv6;
+                     }
+                  }
+               }
+            }
+         }
+      } catch (Exception var6) {
+      }
+
+      return null;
+   }
+
+   public CompletableFuture<ConnectionFallback.ConnectResult> tryTcpSimultaneousOpen(String remoteIp, int remotePort, int localPort) {
+      if (remoteIp != null && !remoteIp.isEmpty()) {
+         this.statusText = Component.translatable("voxlink.connection.probing");
+         return CompletableFuture.supplyAsync(
+            () -> {
+               if (!this.won.get() && !this.cancelled.get() && !this.settled.get()) {
+                  InetAddress addr;
+                  try {
+                     addr = InetAddress.getByName(remoteIp);
+                  } catch (Exception e) {
+                     return ConnectionFallback.ConnectResult.failed("TCP_SIMOPEN_FAILED", "Bad addr: " + e.getMessage());
+                  }
+
+                  long deadline = System.currentTimeMillis() + 10000L;
+                  int attempts = 0;
+                  Random rng = new Random();
+                  boolean randomPortMode = false;
+
+                  while (System.currentTimeMillis() < deadline && attempts < 5 && !this.won.get() && !this.cancelled.get() && !this.settled.get()) {
+                     attempts++;
+                     Socket clientSocket = null;
+
+                     try {
+                        clientSocket = new Socket();
+                        clientSocket.setTcpNoDelay(true);
+                        clientSocket.setReuseAddress(true);
+
+                        try {
+                           clientSocket.bind(new InetSocketAddress(randomPortMode ? 0 : localPort));
+                        } catch (IOException bindEx) {
+                           if (!randomPortMode) {
+                              randomPortMode = true;
+                              LOGGER.info("TCP SimOpen: local port {} occupied, fallback to random port", localPort);
+                              if (clientSocket != null) {
+                                 try {
+                                    clientSocket.close();
+                                 } catch (Exception var16) {
+                                 }
+                              }
+                              continue;
+                           }
+
+                           LOGGER.info("TCP SimOpen: local port {} occupied, SimOpen will fail", localPort);
+                           if (clientSocket != null) {
+                              try {
+                                 clientSocket.close();
+                              } catch (Exception var15) {
+                              }
+                           }
+
+                           return ConnectionFallback.ConnectResult.failed("TCP_SIMOPEN_BIND_FAIL", "本地端口" + localPort + "被占");
                         }
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
 
-    public CompletableFuture<ConnectResult> tryTcpSimultaneousOpen(String remoteIp, int remotePort, int localPort) {
-        if (remoteIp == null || remoteIp.isEmpty()) {
-            return CompletableFuture.completedFuture(ConnectResult.failed("NO_IP", "No remote IP"));
-        }
+                        LOGGER.info(
+                           "TCP SimOpen: attempt {}/{}, from port {} to {}:{}", new Object[]{attempts, 5, clientSocket.getLocalPort(), remoteIp, remotePort}
+                        );
+                        clientSocket.connect(new InetSocketAddress(addr, remotePort), 3000);
+                        LOGGER.info("TCP SimOpen: attempt {} connected {}:{}", new Object[]{attempts, remoteIp, remotePort});
+                        this.statusText = Component.translatable("voxlink.connection.bridge_setup");
+                        if (!this.won.compareAndSet(false, true)) {
+                           if (clientSocket != null) {
+                              try {
+                                 clientSocket.close();
+                              } catch (Exception var14) {
+                              }
+                           }
 
-        statusText = Component.translatable("voxlink.connection.probing");
+                           return ConnectionFallback.ConnectResult.cancelled();
+                        }
 
-        return CompletableFuture.supplyAsync(() -> {
-            //debounce won取代cancelled 避免后续通道误以为自己被取消
-            if (won.get() || cancelled.get() || settled.get()) return ConnectResult.cancelled();
+                        this.settled.set(true);
+                        clientSocket.close();
+                        return ConnectionFallback.ConnectResult.success("TCP-SimOpen", remoteIp, remotePort, ConnectionFallback.ConnectionMode.IPV4_DIRECT);
+                     } catch (Exception e) {
+                        LOGGER.info("TCP SimOpen attempt {} failed: {}:{} - {}", new Object[]{attempts, remoteIp, remotePort, e.getMessage()});
+                        if (!randomPortMode && e instanceof IOException && String.valueOf(e.getMessage()).contains("Cannot assign requested address")) {
+                           randomPortMode = true;
+                        }
 
-            InetAddress addr;
-            try {
-                addr = InetAddress.getByName(remoteIp);
-            } catch (Exception e) {
-                return ConnectResult.failed("TCP_SIMOPEN_FAILED", "Bad addr: " + e.getMessage());
-            }
+                        if (clientSocket != null) {
+                           try {
+                              clientSocket.close();
+                           } catch (Exception var13) {
+                           }
+                        }
 
-            long deadline = System.currentTimeMillis() + TCP_SIMOPEN_WINDOW_MS;
-            int attempts = 0;
-            java.util.Random rng = new java.util.Random();
+                        if (this.won.get() || this.cancelled.get() || this.settled.get() || System.currentTimeMillis() >= deadline || attempts >= 5) {
+                           break;
+                        }
 
-            //对齐EasyTier try_connect_to_remote: 10s窗口内最多5次, 每次3s超时, 10-100ms退避
-            while (System.currentTimeMillis() < deadline
-                    && attempts < TCP_SIMOPEN_MAX_ATTEMPTS
-                    && !won.get() && !cancelled.get() && !settled.get()) {
-                attempts++;
-                Socket clientSocket = null;
-                try {
-                    clientSocket = new Socket();
-                    clientSocket.setTcpNoDelay(true);
-                    clientSocket.setReuseAddress(true);
-                    try {
-                        clientSocket.bind(new InetSocketAddress(localPort));
-                    } catch (IOException bindEx) {
-                        //debounce 端口被占 SimOpen必失败 直接返回 不浪费5次3s超时
-                        LOGGER.info("TCP SimOpen: local port {} occupied, SimOpen will fail", localPort);
-                        if (clientSocket != null) try { clientSocket.close(); } catch (Exception ignored) {}
-                        return ConnectResult.failed("TCP_SIMOPEN_BIND_FAIL", "本地端口" + localPort + "被占");
-                    }
-                    LOGGER.info("TCP SimOpen: attempt {}/{}, from port {} to {}:{}",
-                            attempts, TCP_SIMOPEN_MAX_ATTEMPTS, clientSocket.getLocalPort(), remoteIp, remotePort);
-                    clientSocket.connect(new InetSocketAddress(addr, remotePort), SOCKET_TIMEOUT);
-                    LOGGER.info("TCP SimOpen: attempt {} connected {}:{}", attempts, remoteIp, remotePort);
-                    statusText = Component.translatable("voxlink.connection.bridge_setup");
-                    //debounce won CAS 与tryIpv6/tryIpv4对称 防两通道同时success
-                    if (!won.compareAndSet(false, true)) {
-                        if (clientSocket != null) try { clientSocket.close(); } catch (Exception ignored) {}
-                        return ConnectResult.cancelled();
-                    }
-                    settled.set(true);
-                    clientSocket.close();
-                    return ConnectResult.success("TCP-SimOpen", remoteIp, remotePort, ConnectionMode.IPV4_DIRECT);
-                } catch (Exception e) {
-                    LOGGER.info("TCP SimOpen attempt {} failed: {}:{} - {}", attempts, remoteIp, remotePort, e.getMessage());
-                    if (clientSocket != null) try { clientSocket.close(); } catch (Exception ignored) {}
-                    if (won.get() || cancelled.get() || settled.get()) break;
-                    if (System.currentTimeMillis() >= deadline || attempts >= TCP_SIMOPEN_MAX_ATTEMPTS) break;
-                    try {
-                        Thread.sleep(10 + rng.nextInt(90));
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
+                        try {
+                           Thread.sleep(10 + rng.nextInt(90));
+                        } catch (InterruptedException ie) {
+                           Thread.currentThread().interrupt();
+                           break;
+                        }
+                     }
+                  }
 
-            statusText = Component.translatable("voxlink.connection.failed");
-            return ConnectResult.failed("TCP_SIMOPEN_FAILED", "TCP SimOpen failed after " + attempts + " attempts");
-        }, FALLBACK_EXECUTOR);
-    }
+                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  return ConnectionFallback.ConnectResult.failed("TCP_SIMOPEN_FAILED", "TCP SimOpen failed after " + attempts + " attempts");
+               } else {
+                  return ConnectionFallback.ConnectResult.cancelled();
+               }
+            },
+            FALLBACK_EXECUTOR
+         );
+      } else {
+         return CompletableFuture.completedFuture(ConnectionFallback.ConnectResult.failed("NO_IP", "No remote IP"));
+      }
+   }
 
-    public static class ConnectResult {
-        public final boolean success;
-        public final String failureReason;
-        public final String errorCode;
-        public final String label;
-        public final String remoteHost;
-        public final int remotePort;
-        public final ConnectionMode mode;
+   public static class ConnectResult {
+      public final boolean success;
+      public final String failureReason;
+      public final String errorCode;
+      public final String label;
+      public final String remoteHost;
+      public final int remotePort;
+      public final ConnectionFallback.ConnectionMode mode;
 
-        private ConnectResult(boolean success, String errorCode, String failureReason, String label, String remoteHost, int remotePort, ConnectionMode mode) {
-            this.success = success; this.errorCode = errorCode; this.failureReason = failureReason;
-            this.label = label; this.remoteHost = remoteHost; this.remotePort = remotePort; this.mode = mode;
-        }
-        public static ConnectResult success(String label, String remoteHost, int remotePort, ConnectionMode mode) {
-            return new ConnectResult(true, null, null, label, remoteHost, remotePort, mode);
-        }
-        public static ConnectResult failed(String errorCode, String reason) {
-            return new ConnectResult(false, errorCode, reason, null, null, 0, null);
-        }
-        public static ConnectResult cancelled() {
-            return new ConnectResult(false, "CANCELLED", "Connection cancelled", null, null, 0, null);
-        }
-    }
+      private ConnectResult(
+         boolean success, String errorCode, String failureReason, String label, String remoteHost, int remotePort, ConnectionFallback.ConnectionMode mode
+      ) {
+         this.success = success;
+         this.errorCode = errorCode;
+         this.failureReason = failureReason;
+         this.label = label;
+         this.remoteHost = remoteHost;
+         this.remotePort = remotePort;
+         this.mode = mode;
+      }
+
+      public static ConnectionFallback.ConnectResult success(String label, String remoteHost, int remotePort, ConnectionFallback.ConnectionMode mode) {
+         return new ConnectionFallback.ConnectResult(true, null, null, label, remoteHost, remotePort, mode);
+      }
+
+      public static ConnectionFallback.ConnectResult failed(String errorCode, String reason) {
+         return new ConnectionFallback.ConnectResult(false, errorCode, reason, null, null, 0, null);
+      }
+
+      public static ConnectionFallback.ConnectResult cancelled() {
+         return new ConnectionFallback.ConnectResult(false, "CANCELLED", "Connection cancelled", null, null, 0, null);
+      }
+   }
+
+   public enum ConnectionMode {
+      IPV6_DIRECT("voxlink.mode.ipv6_direct"),
+      IPV4_DIRECT("voxlink.mode.ipv4_direct"),
+      UDP_PUNCH("voxlink.mode.udp_punch");
+
+      public final String translationKey;
+
+      ConnectionMode(String translationKey) {
+         this.translationKey = translationKey;
+      }
+   }
 }

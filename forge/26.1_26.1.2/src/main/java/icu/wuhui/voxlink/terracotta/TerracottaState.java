@@ -2,177 +2,259 @@ package icu.wuhui.voxlink.terracotta;
 
 import com.google.gson.JsonObject;
 
-//debounce 陶瓦状态机 简化版 普通抽象类避免23版本sealed兼容性差异
 public abstract class TerracottaState {
+   public abstract String name();
 
-    //debounce 状态名取自Terracotta /state响应的state字段 单调index防旧响应覆盖新状态
-    public abstract String name();
+   public static TerracottaState.Ready parseFromState(JsonObject json, int port) {
+      if (json == null) {
+         TerracottaState.Waiting w = new TerracottaState.Waiting();
+         w.index = 0;
+         w.state = "waiting";
+         w.port = port;
+         return w;
+      }
 
-    //启动期占位 单例
-    public static final class Bootstrap extends TerracottaState {
-        public static final Bootstrap INSTANCE = new Bootstrap();
-        @Override public String name() { return "bootstrap"; }
-        @Override public String toString() { return "Bootstrap"; }
-    }
+      String stateName = json.has("state") && !json.get("state").isJsonNull() ? json.get("state").getAsString() : "unknown";
+      int index = json.has("index") && !json.get("index").isJsonNull() ? json.get("index").getAsInt() : 0;
 
-    //进程已拉起 等端口文件
-    public static final class Launching extends TerracottaState {
-        public static final Launching INSTANCE = new Launching();
-        @Override public String name() { return "launching"; }
-        @Override public String toString() { return "Launching"; }
-    }
+      TerracottaState.Ready state = switch (stateName) {
+         case "waiting", "idle" -> new TerracottaState.Waiting();
+         case "host-scanning" -> new TerracottaState.HostScanning();
+         case "host-starting" -> new TerracottaState.HostStarting();
+         case "host-ok" -> {
+            TerracottaState.HostOK h = new TerracottaState.HostOK();
+            h.code = json.has("room") && !json.get("room").isJsonNull() ? json.get("room").getAsString() : null;
+            yield h;
+         }
+         case "guest-connecting" -> new TerracottaState.GuestConnecting();
+         case "guest-starting" -> {
+            TerracottaState.GuestStarting gs = new TerracottaState.GuestStarting();
+            gs.difficulty = json.has("difficulty") && !json.get("difficulty").isJsonNull() ? json.get("difficulty").getAsString() : "UNKNOWN";
+            yield gs;
+         }
+         case "guest-ok" -> {
+            TerracottaState.GuestOK g = new TerracottaState.GuestOK();
+            g.url = json.has("url") && !json.get("url").isJsonNull() ? json.get("url").getAsString() : null;
+            yield g;
+         }
+         case "exception" -> {
+            TerracottaState.Exception e = new TerracottaState.Exception();
+            e.type = json.has("type") && !json.get("type").isJsonNull() && json.get("type").isJsonPrimitive() ? json.get("type").getAsString() : "UNKNOWN";
+            yield e;
+         }
+         default -> {
+            TerracottaState.Waiting w = new TerracottaState.Waiting();
+            yield w;
+         }
+      };
+      state.index = index;
+      state.state = stateName;
+      state.port = port;
+      return state;
+   }
 
-    //未安装
-    public static final class Uninitialized extends TerracottaState {
-        public final boolean hasLegacy;
-        public Uninitialized(boolean hasLegacy) { this.hasLegacy = hasLegacy; }
-        @Override public String name() { return "uninitialized"; }
-        @Override public String toString() { return "Uninitialized[legacy=" + hasLegacy + "]"; }
-    }
+   public static final class Bootstrap extends TerracottaState {
+      public static final TerracottaState.Bootstrap INSTANCE = new TerracottaState.Bootstrap();
 
-    //已知端口的所有状态基类
-    public abstract static class PortSpecific extends TerracottaState {
-        public int port;
-    }
+      @Override
+      public String name() {
+         return "bootstrap";
+      }
 
-    //端口已知 未拉到首份state
-    public static final class Unknown extends PortSpecific {
-        @Override public String name() { return "unknown"; }
-        @Override public String toString() { return "Unknown[port=" + port + "]"; }
-    }
+      @Override
+      public String toString() {
+         return "Bootstrap";
+      }
+   }
 
-    //已就绪状态基类 带单调index
-    public abstract static class Ready extends PortSpecific {
-        public int index;
-        public String state;
-        //debounce index=-1表示UI占位假状态 真状态由守护线程异步替换
-        public boolean isUIFakeState() { return index == -1; }
-    }
+   public static final class Exception extends TerracottaState.Ready {
+      public String type = "UNKNOWN";
 
-    //空闲
-    public static final class Waiting extends Ready {
-        @Override public String name() { return "waiting"; }
-        @Override public String toString() { return "Waiting[index=" + index + "]"; }
-    }
+      @Override
+      public String name() {
+         return "exception";
+      }
 
-    //扫描中继节点
-    public static final class HostScanning extends Ready {
-        @Override public String name() { return "host-scanning"; }
-        @Override public String toString() { return "HostScanning[index=" + index + "]"; }
-    }
+      @Override
+      public String toString() {
+         return "Exception[type=" + this.type + ",index=" + this.index + "]";
+      }
+   }
 
-    //主机启动中
-    public static final class HostStarting extends Ready {
-        @Override public String name() { return "host-starting"; }
-        @Override public String toString() { return "HostStarting[index=" + index + "]"; }
-    }
+   public static final class Fatal extends TerracottaState {
+      public final TerracottaState.Fatal.Type type;
 
-    //主机就绪
-    public static final class HostOK extends Ready {
-        public String code;
-        @Override public String name() { return "host-ok"; }
-        @Override public String toString() { return "HostOK[code=" + code + ",index=" + index + "]"; }
-    }
+      public Fatal(TerracottaState.Fatal.Type type) {
+         this.type = type;
+      }
 
-    //客人连接中
-    public static final class GuestConnecting extends Ready {
-        @Override public String name() { return "guest-connecting"; }
-        @Override public String toString() { return "GuestConnecting[index=" + index + "]"; }
-    }
+      public boolean isRecoverable() {
+         return this.type != TerracottaState.Fatal.Type.UNKNOWN;
+      }
 
-    //客人启动中
-    public static final class GuestStarting extends Ready {
-        public String difficulty;
-        @Override public String name() { return "guest-starting"; }
-        @Override public String toString() { return "GuestStarting[difficulty=" + difficulty + ",index=" + index + "]"; }
-    }
+      @Override
+      public String name() {
+         return "fatal";
+      }
 
-    //客人就绪
-    public static final class GuestOK extends Ready {
-        public String url;
-        @Override public String name() { return "guest-ok"; }
-        @Override public String toString() { return "GuestOK[url=" + url + ",index=" + index + "]"; }
-    }
+      @Override
+      public String toString() {
+         return "Fatal[" + this.type + "]";
+      }
 
-    //Terracotta报告的可恢复异常
-    public static final class Exception extends Ready {
-        public String type = "UNKNOWN";
-        @Override public String name() { return "exception"; }
-        @Override public String toString() { return "Exception[type=" + type + ",index=" + index + "]"; }
-    }
+      public enum Type {
+         OS,
+         NETWORK,
+         INSTALL,
+         TERRACOTTA,
+         UNKNOWN;
+      }
+   }
 
-    //不可恢复致命错误
-    public static final class Fatal extends TerracottaState {
-        public enum Type { OS, NETWORK, INSTALL, TERRACOTTA, UNKNOWN }
-        public final Type type;
-        public Fatal(Type type) { this.type = type; }
-        public boolean isRecoverable() { return type != Type.UNKNOWN; }
-        @Override public String name() { return "fatal"; }
-        @Override public String toString() { return "Fatal[" + type + "]"; }
-    }
+   public static final class GuestConnecting extends TerracottaState.Ready {
+      @Override
+      public String name() {
+         return "guest-connecting";
+      }
 
-    //从JsonObject解析为具体Ready子类
-    public static Ready parseFromState(JsonObject json, int port) {
-        if (json == null) {
-            Waiting w = new Waiting();
-            w.index = 0;
-            w.state = "waiting";
-            w.port = port;
-            return w;
-        }
-        String stateName = json.has("state") && !json.get("state").isJsonNull()
-            ? json.get("state").getAsString() : "unknown";
-        int index = json.has("index") && !json.get("index").isJsonNull()
-            ? json.get("index").getAsInt() : 0;
+      @Override
+      public String toString() {
+         return "GuestConnecting[index=" + this.index + "]";
+      }
+   }
 
-        Ready state;
-        switch (stateName) {
-            case "waiting":
-            case "idle":
-                state = new Waiting();
-                break;
-            case "host-scanning":
-                state = new HostScanning();
-                break;
-            case "host-starting":
-                state = new HostStarting();
-                break;
-            case "host-ok":
-                HostOK h = new HostOK();
-                h.code = json.has("room") && !json.get("room").isJsonNull()
-                    ? json.get("room").getAsString() : null;
-                state = h;
-                break;
-            case "guest-connecting":
-                state = new GuestConnecting();
-                break;
-            case "guest-starting":
-                GuestStarting gs = new GuestStarting();
-                gs.difficulty = json.has("difficulty") && !json.get("difficulty").isJsonNull()
-                    ? json.get("difficulty").getAsString() : "UNKNOWN";
-                state = gs;
-                break;
-            case "guest-ok":
-                GuestOK g = new GuestOK();
-                g.url = json.has("url") && !json.get("url").isJsonNull()
-                    ? json.get("url").getAsString() : null;
-                state = g;
-                break;
-            case "exception":
-                Exception e = new Exception();
-                e.type = json.has("type") && !json.get("type").isJsonNull() && json.get("type").isJsonPrimitive()
-                    ? json.get("type").getAsString() : "UNKNOWN";
-                state = e;
-                break;
-            default:
-                //debounce 未知状态 当Waiting处理 但保留原始state字符串
-                Waiting w = new Waiting();
-                state = w;
-                break;
-        }
-        state.index = index;
-        state.state = stateName;
-        state.port = port;
-        return state;
-    }
+   public static final class GuestOK extends TerracottaState.Ready {
+      public String url;
+
+      @Override
+      public String name() {
+         return "guest-ok";
+      }
+
+      @Override
+      public String toString() {
+         return "GuestOK[url=" + this.url + ",index=" + this.index + "]";
+      }
+   }
+
+   public static final class GuestStarting extends TerracottaState.Ready {
+      public String difficulty;
+
+      @Override
+      public String name() {
+         return "guest-starting";
+      }
+
+      @Override
+      public String toString() {
+         return "GuestStarting[difficulty=" + this.difficulty + ",index=" + this.index + "]";
+      }
+   }
+
+   public static final class HostOK extends TerracottaState.Ready {
+      public String code;
+
+      @Override
+      public String name() {
+         return "host-ok";
+      }
+
+      @Override
+      public String toString() {
+         return "HostOK[code=" + this.code + ",index=" + this.index + "]";
+      }
+   }
+
+   public static final class HostScanning extends TerracottaState.Ready {
+      @Override
+      public String name() {
+         return "host-scanning";
+      }
+
+      @Override
+      public String toString() {
+         return "HostScanning[index=" + this.index + "]";
+      }
+   }
+
+   public static final class HostStarting extends TerracottaState.Ready {
+      @Override
+      public String name() {
+         return "host-starting";
+      }
+
+      @Override
+      public String toString() {
+         return "HostStarting[index=" + this.index + "]";
+      }
+   }
+
+   public static final class Launching extends TerracottaState {
+      public static final TerracottaState.Launching INSTANCE = new TerracottaState.Launching();
+
+      @Override
+      public String name() {
+         return "launching";
+      }
+
+      @Override
+      public String toString() {
+         return "Launching";
+      }
+   }
+
+   public abstract static class PortSpecific extends TerracottaState {
+      public int port;
+   }
+
+   public abstract static class Ready extends TerracottaState.PortSpecific {
+      public int index;
+      public String state;
+
+      public boolean isUIFakeState() {
+         return this.index == -1;
+      }
+   }
+
+   public static final class Uninitialized extends TerracottaState {
+      public final boolean hasLegacy;
+
+      public Uninitialized(boolean hasLegacy) {
+         this.hasLegacy = hasLegacy;
+      }
+
+      @Override
+      public String name() {
+         return "uninitialized";
+      }
+
+      @Override
+      public String toString() {
+         return "Uninitialized[legacy=" + this.hasLegacy + "]";
+      }
+   }
+
+   public static final class Unknown extends TerracottaState.PortSpecific {
+      @Override
+      public String name() {
+         return "unknown";
+      }
+
+      @Override
+      public String toString() {
+         return "Unknown[port=" + this.port + "]";
+      }
+   }
+
+   public static final class Waiting extends TerracottaState.Ready {
+      @Override
+      public String name() {
+         return "waiting";
+      }
+
+      @Override
+      public String toString() {
+         return "Waiting[index=" + this.index + "]";
+      }
+   }
 }

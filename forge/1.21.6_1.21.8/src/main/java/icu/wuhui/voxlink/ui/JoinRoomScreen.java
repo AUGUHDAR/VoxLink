@@ -3,135 +3,123 @@ package icu.wuhui.voxlink.ui;
 import icu.wuhui.voxlink.terracotta.RoomCodeRouter;
 import icu.wuhui.voxlink.terracotta.TerracottaManager;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiGraphics;
 
 public class JoinRoomScreen extends VoxLinkScreenBase {
-    private static final int BTN_W = 200;
-    private static final int BTN_H = 20;
-    private static final int GAP = 4;
-    private static final int BTN_COUNT = 4;
-    private static final int GAP_COUNT = 3;
-    private static final int FORM_EXTRA = 10;
-    private static final int CODE_MIN_LENGTH = 6;
-    private static final int FIELD_SPACING = 10;
-    private static final int HINT_Y_OFFSET = 6;
-    private static final int TERRACOTTA_HINT_Y_OFFSET = 18;
-    private static final int STATUS_Y_OFFSET = 32;
-    private static final int TITLE_Y = 15;
+   private static final int BTN_W = 200;
+   private static final int BTN_H = 20;
+   private static final int GAP = 4;
+   private static final int BTN_COUNT = 4;
+   private static final int GAP_COUNT = 3;
+   private static final int FORM_EXTRA = 10;
+   private static final int CODE_MIN_LENGTH = 6;
+   private static final int FIELD_SPACING = 10;
+   private static final int HINT_Y_OFFSET = 6;
+   private static final int STATUS_Y_OFFSET = 32;
+   private static final int TERRACOTTA_HINT_Y_OFFSET = 18;
+   private static final int TITLE_Y = 15;
+   private final Screen parent;
+   private EditBox codeField;
+   private EditBox passwordField;
+   private Button joinButton;
+   private String statusMessage = "";
+   private int statusColor = -1;
+   private String savedCode = "";
+   private String savedPassword = "";
 
-    private final Screen parent;
-    private EditBox codeField;
-    private EditBox passwordField;
-    private Button joinButton;
-    private String statusMessage = "";
-    private int statusColor = VoxLinkColors.WHITE;
-    private String savedCode = "";
-    private String savedPassword = "";
+   public JoinRoomScreen(Screen parent) {
+      super(Component.translatable("voxlink.join_room"));
+      this.parent = parent;
+   }
 
-    public JoinRoomScreen(Screen parent) {
-        super(Component.translatable("voxlink.join_room"));
-        this.parent = parent;
-    }
+   @Override
+   protected void init() {
+      super.init();
+      int centerX = this.width / 2;
+      int formHeight = 102;
+      int startY = Math.max(40, (this.height - formHeight) / 2);
+      this.codeField = new EditBox(this.font, centerX - 100, startY, 200, 20, Component.translatable("voxlink.room_code"));
+      this.codeField.setMaxLength(25);
+      this.setInputFilter(this.codeField, s -> s.matches("[A-Z0-9uU/\\-]*"));
+      this.codeField.setHint(Component.translatable("voxlink.enter_code"));
+      if (!this.savedCode.isEmpty()) {
+         this.codeField.setValue(this.savedCode);
+      }
 
-    @Override
-    protected void init() {
-        super.init();
+      this.codeField.setResponder(text -> {
+         if (this.joinButton != null) {
+            this.joinButton.active = RoomCodeRouter.isVoxLinkCode(text) || RoomCodeRouter.isTerracottaCode(text);
+         }
 
-        int centerX = this.width / 2;
-        int formHeight = BTN_H * BTN_COUNT + GAP * GAP_COUNT + FORM_EXTRA;
-        int startY = Math.max(40, (this.height - formHeight) / 2);
+         if (text.length() >= 6 && this.passwordField != null && RoomCodeRouter.isVoxLinkCode(text)) {
+            this.setInitialFocus(this.passwordField);
+         }
+      });
+      this.addRenderableWidget(this.codeField);
+      int pwdY = startY + 20 + 4 + 10;
+      this.passwordField = new EditBox(this.font, centerX - 100, pwdY, 200, 20, Component.translatable("voxlink.room_password"));
+      this.passwordField.setMaxLength(32);
+      this.passwordField.setHint(Component.translatable("voxlink.enter_password"));
+      if (!this.savedPassword.isEmpty()) {
+         this.passwordField.setValue(this.savedPassword);
+      }
 
-        codeField = new EditBox(this.font, centerX - BTN_W / 2, startY, BTN_W, BTN_H, Component.translatable("voxlink.room_code"));
-        codeField.setMaxLength(25);
-        codeField.setFilter(s -> s.matches("[A-Z0-9uU/\\-]*"));
-        codeField.setHint(Component.translatable("voxlink.enter_code"));
-        if (!savedCode.isEmpty()) codeField.setValue(savedCode);
-        codeField.setResponder(text -> {
-            if (joinButton != null) {
-                joinButton.active = RoomCodeRouter.isVoxLinkCode(text) || RoomCodeRouter.isTerracottaCode(text);
-            }
-            if (text.length() >= CODE_MIN_LENGTH && passwordField != null && RoomCodeRouter.isVoxLinkCode(text)) {
-                this.setInitialFocus(passwordField);
-            }
-        });
-        this.addRenderableWidget(codeField);
+      this.addRenderableWidget(this.passwordField);
+      int joinY = pwdY + 20 + 4 + 10;
+      this.joinButton = Button.builder(Component.translatable("voxlink.join_room"), button -> this.attemptJoin()).bounds(centerX - 100, joinY, 200, 20).build();
+      this.joinButton.active = !this.savedCode.isEmpty() && (RoomCodeRouter.isVoxLinkCode(this.savedCode) || RoomCodeRouter.isTerracottaCode(this.savedCode));
+      this.addRenderableWidget(this.joinButton);
+      int backY = joinY + 20 + 4;
+      this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), button -> this.goBack()).bounds(centerX - 100, backY, 200, 20).build());
+      this.setInitialFocus(this.codeField);
+   }
 
-        int pwdY = startY + BTN_H + GAP + FIELD_SPACING;
-        passwordField = new EditBox(this.font, centerX - BTN_W / 2, pwdY, BTN_W, BTN_H, Component.translatable("voxlink.room_password"));
-        passwordField.setMaxLength(32);
-        passwordField.setHint(Component.translatable("voxlink.enter_password"));
-        if (!savedPassword.isEmpty()) passwordField.setValue(savedPassword);
-        this.addRenderableWidget(passwordField);
+   public boolean shouldCloseOnEsc() {
+      return true;
+   }
 
-        int joinY = pwdY + BTN_H + GAP + FIELD_SPACING;
-        joinButton = Button.builder(Component.translatable("voxlink.join_room"), button -> attemptJoin())
-                .bounds(centerX - BTN_W / 2, joinY, BTN_W, BTN_H).build();
-        joinButton.active = !savedCode.isEmpty() && (RoomCodeRouter.isVoxLinkCode(savedCode) || RoomCodeRouter.isTerracottaCode(savedCode));
-        this.addRenderableWidget(joinButton);
+   public void onClose() {
+      this.goBack();
+   }
 
-        int backY = joinY + BTN_H + GAP;
-        this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), button -> goBack())
-                .bounds(centerX - BTN_W / 2, backY, BTN_W, BTN_H).build());
+   private void goBack() {
+      Minecraft.getInstance().setScreen(this.parent);
+   }
 
-        this.setInitialFocus(codeField);
-    }
+   private void attemptJoin() {
+      String code = this.codeField.getValue().trim().toUpperCase();
+      if (code.isEmpty()) {
+         this.statusMessage = Component.translatable("voxlink.join_room.enter_code").getString();
+         this.statusColor = -43691;
+      } else if (!RoomCodeRouter.isVoxLinkCode(code) && !RoomCodeRouter.isTerracottaCode(code)) {
+         this.statusMessage = Component.translatable("voxlink.error.invalid_room_code").getString();
+         this.statusColor = -43691;
+      } else if (RoomCodeRouter.isTerracottaCode(code) && !TerracottaManager.isBinaryReady()) {
+         this.statusMessage = Component.translatable("voxlink.join.terracotta_not_ready").getString();
+         this.statusColor = -43691;
+      } else {
+         this.savedCode = code;
+         this.savedPassword = this.passwordField.getValue().trim();
+         String password = this.savedPassword.isEmpty() ? null : this.savedPassword;
+         Minecraft.getInstance().setScreen(new AttemptingJoinScreen(this, code, password));
+      }
+   }
 
-    @Override
-    public boolean shouldCloseOnEsc() {
-        return true;
-    }
-
-    @Override
-    public void onClose() {
-        goBack();
-    }
-
-    private void goBack() {
-        Minecraft.getInstance().setScreen(parent);
-    }
-
-    private void attemptJoin() {
-        String code = codeField.getValue().trim().toUpperCase();
-        if (code.isEmpty()) {
-            statusMessage = Component.translatable("voxlink.join_room.enter_code").getString();
-            statusColor = VoxLinkColors.ERROR;
-            return;
-        }
-        if (!RoomCodeRouter.isVoxLinkCode(code) && !RoomCodeRouter.isTerracottaCode(code)) {
-            statusMessage = Component.translatable("voxlink.error.invalid_room_code").getString();
-            statusColor = VoxLinkColors.ERROR;
-            return;
-        }
-        //陶瓦码需要陶瓦就绪
-        if (RoomCodeRouter.isTerracottaCode(code) && !TerracottaManager.isBinaryReady()) {
-            statusMessage = Component.translatable("voxlink.join.terracotta_not_ready").getString();
-            statusColor = VoxLinkColors.ERROR;
-            return;
-        }
-        savedCode = code;
-        savedPassword = passwordField.getValue().trim();
-        String password = savedPassword.isEmpty() ? null : savedPassword;
-        Minecraft.getInstance().setScreen(new AttemptingJoinScreen(this, code, password));
-    }
-
-    @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        super.render(graphics, mouseX, mouseY, partialTick);
-        int centerX = this.width / 2;
-        int formHeight = BTN_H * BTN_COUNT + GAP * GAP_COUNT + FORM_EXTRA;
-        int startY = Math.max(40, (this.height - formHeight) / 2);
-        int backY = startY + (BTN_H + GAP + FIELD_SPACING) * 2 + BTN_H + GAP;
-
-        drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.WHITE);
-        drawCenteredString(graphics, Component.translatable("voxlink.join.recommend_voxlink").getString(), centerX, backY + BTN_H + HINT_Y_OFFSET, VoxLinkColors.INFO);
-        drawCenteredString(graphics, Component.translatable("voxlink.join.terracotta_code_hint").getString(), centerX, backY + BTN_H + TERRACOTTA_HINT_Y_OFFSET, VoxLinkColors.MUTED);
-
-        if (!statusMessage.isEmpty()) {
-            drawCenteredClipped(graphics, statusMessage, centerX, backY + BTN_H + STATUS_Y_OFFSET, statusColor);
-        }
-    }
+   public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+      super.render(graphics, mouseX, mouseY, partialTick);
+      int centerX = this.width / 2;
+      int formHeight = 102;
+      int startY = Math.max(40, (this.height - formHeight) / 2);
+      int backY = startY + 68 + 20 + 4;
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, -1);
+      this.drawCenteredString(graphics, Component.translatable("voxlink.join.recommend_voxlink").getString(), centerX, backY + 20 + 6, -5592321);
+      this.drawCenteredString(graphics, Component.translatable("voxlink.join.terracotta_code_hint").getString(), centerX, backY + 20 + 18, -5592406);
+      if (!this.statusMessage.isEmpty()) {
+         this.drawCenteredClipped(graphics, this.statusMessage, centerX, backY + 20 + 32, this.statusColor);
+      }
+   }
 }
