@@ -1391,8 +1391,15 @@ public class ConnectionManager {
                state.roomInfo.setHostSymmetric(true);
                NatClass newRemote = hostEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
                if (this.remoteNatClass != newRemote) {
+                  boolean wasUnknown = this.remoteNatClass == NatClass.UNKNOWN;
                   this.remoteNatClass = newRemote;
                   VoxLinkMod.LOGGER.info("[handleHolepunchMapped] Update remoteNat {} -> {} (sym=true)", NatClass.CONE, newRemote);
+                  if (wasUnknown) {
+                     PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
+                     if (recommended != this.punchProfile()) {
+                        this.switchPunchProfile(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass + "_after_mapped");
+                     }
+                  }
                }
             }
 
@@ -1411,13 +1418,6 @@ public class ConnectionManager {
             if (hostMappedIp != null && hostMappedPort > 0) {
                String hostNatType = hostSymmetric ? (hostEasySym ? "symmetric_easy_inc" : "symmetric") : "full_cone";
                state.roomInfo.addOrUpdatePeer(from, hostNatType, hostMappedIp, hostMappedPort);
-            }
-
-            if (hostSymmetric && this.remoteNatClass != NatClass.UNKNOWN) {
-               PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
-               if (recommended != this.punchProfile()) {
-                  this.switchPunchProfile(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass + "_after_mapped");
-               }
             }
 
             if (data.has("hostLocalIp") && !data.get("hostLocalIp").isJsonNull()) {
