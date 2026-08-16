@@ -37,8 +37,10 @@ public enum NatClass {
          return PunchProfile.HARDSYM;
       } else if (local == EASY_SYM && remote == EASY_SYM) {
          return PunchProfile.EASY_SYM_DUAL;
-      } else if ((local != HARD_SYM || remote != EASY_SYM) && (local != EASY_SYM || remote != HARD_SYM)) {
-         return local != HARD_SYM && remote != HARD_SYM ? PunchProfile.DEFAULT : PunchProfile.AGGRESSIVE;
+      } else if (local == EASY_SYM || remote == EASY_SYM) {
+         return PunchProfile.AGGRESSIVE;
+      } else if (local != HARD_SYM && remote != HARD_SYM) {
+         return PunchProfile.DEFAULT;
       } else {
          return PunchProfile.AGGRESSIVE;
       }

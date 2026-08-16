@@ -1413,6 +1413,13 @@ public class ConnectionManager {
                state.roomInfo.addOrUpdatePeer(from, hostNatType, hostMappedIp, hostMappedPort);
             }
 
+            if (hostSymmetric && this.remoteNatClass != NatClass.UNKNOWN) {
+               PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
+               if (recommended != this.punchProfile()) {
+                  this.switchPunchProfile(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass + "_after_mapped");
+               }
+            }
+
             if (data.has("hostLocalIp") && !data.get("hostLocalIp").isJsonNull()) {
                String receivedHostLocalIp = data.get("hostLocalIp").getAsString();
                if (receivedHostLocalIp != null && !receivedHostLocalIp.isEmpty()) {
