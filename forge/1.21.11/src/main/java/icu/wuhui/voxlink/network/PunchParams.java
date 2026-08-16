@@ -8,6 +8,8 @@ public final class PunchParams {
    public boolean skipDirectPunch;
    public boolean reuseSuccessfulSockets;
    public int[] successfulPortRange;
+   public int sendMinRounds;
+   public int sendMinPass;
 
    public PunchParams(
       int portRange, int timeoutMs, int sendInterval, int ackRetries, boolean skipDirectPunch, boolean reuseSuccessfulSockets, int[] successfulPortRange
@@ -19,6 +21,8 @@ public final class PunchParams {
       this.skipDirectPunch = skipDirectPunch;
       this.reuseSuccessfulSockets = reuseSuccessfulSockets;
       this.successfulPortRange = successfulPortRange;
+      this.sendMinRounds = 0;
+      this.sendMinPass = 0;
    }
 
    public static PunchParams fromProfile(PunchProfile profile) {

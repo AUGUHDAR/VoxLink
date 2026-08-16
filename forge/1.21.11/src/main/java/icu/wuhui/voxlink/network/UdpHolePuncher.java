@@ -91,6 +91,16 @@ public class UdpHolePuncher {
       return p != null && p.sendInterval > 0 ? p.sendInterval : this.profile().send.intervalMs;
    }
 
+   public int effectiveMinRounds() {
+      PunchParams p = this.punchParams;
+      return p != null && p.sendMinRounds > 0 ? p.sendMinRounds : this.profile().send.minRounds;
+   }
+
+   public int effectiveMinPass() {
+      PunchParams p = this.punchParams;
+      return p != null && p.sendMinPass > 0 ? p.sendMinPass : this.profile().send.minPass;
+   }
+
    public boolean effectiveSkipDirectPunch() {
       PunchParams p = this.punchParams;
       return p != null && p.skipDirectPunch;
@@ -1053,11 +1063,11 @@ public class UdpHolePuncher {
             }
          );
 
-         for (int roundPass = 0; roundPass < this.profile().send.minRounds; roundPass++) {
+         for (int roundPass = 0; roundPass < this.effectiveMinRounds(); roundPass++) {
             for (int i = 0; i < portsToSend.size(); i++) {
                int port = portsToSend.get(i);
 
-               for (int r = 0; r < this.profile().send.minPass; r++) {
+               for (int r = 0; r < this.effectiveMinPass(); r++) {
                   DatagramPacket packet = new DatagramPacket(data, data.length, addr, port);
                   sendPkt(this.socket, packet);
                }

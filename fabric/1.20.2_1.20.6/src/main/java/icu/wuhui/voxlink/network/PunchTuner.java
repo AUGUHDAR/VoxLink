@@ -36,13 +36,18 @@ public final class PunchTuner {
          case NO_RESPONSE:
             params.portRange = Math.min(params.portRange * 2, 500);
             params.timeoutMs = Math.min(params.timeoutMs + 4000, 30000);
+            params.sendMinRounds = 3;
+            params.sendMinPass = 3;
             break;
          case PREDICTION_OFF:
             params = PunchParams.fromProfile(PunchProfile.HARDSYM);
             params.portRange = Math.min(params.portRange * 2, 500);
+            params.sendMinRounds = 3;
+            params.sendMinPass = 3;
             break;
          case RESPONSE_NO_ACK:
             params.sendInterval = Math.max(params.sendInterval / 2, 50);
+            params.sendMinPass = 3;
             break;
          case FIREWALL_DETECTED:
             params.skipDirectPunch = true;
@@ -55,6 +60,7 @@ public final class PunchTuner {
             break;
          case ACK_TIMEOUT:
             params.ackRetries = 3;
+            params.sendMinPass = 3;
       }
 
       if (lastResult != null && lastResult.elapsedMs > 0L) {

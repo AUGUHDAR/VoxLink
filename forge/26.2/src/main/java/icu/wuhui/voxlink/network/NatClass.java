@@ -41,10 +41,12 @@ public enum NatClass {
          return PunchProfile.WIDE_SWEEP;
       } else if (local == CONE && remote == CONE) {
          return PunchProfile.FAST_LANE;
-      } else if (local != HARD_SYM && remote != HARD_SYM) {
-         return PunchProfile.DEFAULT;
-      } else {
+      } else if (local == CONE && remote == HARD_SYM) {
          return PunchProfile.AGGRESSIVE;
+      } else if (local == HARD_SYM && remote == CONE) {
+         return PunchProfile.AGGRESSIVE;
+      } else {
+         return PunchProfile.DEFAULT;
       }
    }
 }
