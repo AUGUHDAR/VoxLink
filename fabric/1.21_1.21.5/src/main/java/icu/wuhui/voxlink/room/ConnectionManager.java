@@ -1518,7 +1518,8 @@ public class ConnectionManager {
                         int fExtraPort = extraPort;
                         String fHostMappedIp = hostMappedIp;
                         VoxLinkMod.LOGGER.info("[RoomManager] Multi-port puncher#{}: {}:{}", new Object[]{i, fHostMappedIp, fExtraPort});
-                        extraPuncher.punchWithPortPrediction(fHostMappedIp, fExtraPort, this.punchProfile().joinerMultiPortRange)
+                        int extraRange = Math.max(this.punchProfile().joinerMultiPortRange, this.punchProfile().maxPortRange);
+                        extraPuncher.punchWithPortPrediction(fHostMappedIp, fExtraPort, extraRange)
                            .thenAccept(
                               result -> {
                                  if (!result.isSuccess()) {
@@ -1839,6 +1840,9 @@ public class ConnectionManager {
                for (int i = 0; i < fHostMultiCount; i++) {
                   UdpHolePuncher p = new UdpHolePuncher();
                   this.applyPunchTemplate(p);
+                  PunchParams hostRoundParams = PunchParams.fromProfile(this.punchProfile());
+                  hostRoundParams.timeoutMs = Math.min(hostRoundParams.timeoutMs, this.punchProfile().hostRoundTimeoutMs);
+                  p.setPunchParams(hostRoundParams);
 
                   try {
                      if (i == 0) {

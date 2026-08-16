@@ -1006,7 +1006,7 @@ public class UdpHolePuncher {
          portsToSend.add(centerPort);
          Random rnd = new Random();
          if (useRandomScan) {
-            int windowSize = this.profile().send.jitterBaseMs + rnd.nextInt(this.profile().send.jitterRangeMs);
+            int windowSize = this.profile().send.sweepWindowSize;
             int lowBound;
             int highBound;
             if (portRange >= 100) {
@@ -1051,9 +1051,11 @@ public class UdpHolePuncher {
          }
 
          LOGGER.info(
-            "[UdpHolePuncher] sendControlMultiPort: send to {} ports (x3 times x3 rounds, round={}): {} (center={}, range=+/-{}, random={}, local port={})",
+            "[UdpHolePuncher] sendControlMultiPort: send to {} ports (x{} rounds x{} pass, round={}): {} (center={}, range=+/-{}, random={}, local port={})",
             new Object[]{
                portsToSend.size(),
+               this.effectiveMinRounds(),
+               this.effectiveMinPass(),
                round,
                portsToSend.subList(0, Math.min(10, portsToSend.size())),
                centerPort,

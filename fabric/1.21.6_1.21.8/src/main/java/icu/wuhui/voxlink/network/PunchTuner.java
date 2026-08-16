@@ -90,7 +90,7 @@ public final class PunchTuner {
 
    private static PunchParams applyLateCycleLimit(PunchParams params, int cycle, int maxCycles) {
       if (cycle >= maxCycles - 2 && params.timeoutMs > 5000) {
-         params.timeoutMs = 5000;
+         params.timeoutMs = Math.max(5000, params.timeoutMs * 3 / 4);
       }
 
       return params;
