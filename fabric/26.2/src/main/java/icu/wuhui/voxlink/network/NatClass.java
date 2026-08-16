@@ -32,13 +32,15 @@ public enum NatClass {
 
    public static PunchProfile recommendProfile(NatClass local, NatClass remote) {
       if (local == null || remote == null || local == UNKNOWN || remote == UNKNOWN) {
-         return PunchProfile.AGGRESSIVE;
+         return PunchProfile.WIDE_SWEEP;
       } else if (local == HARD_SYM && remote == HARD_SYM) {
          return PunchProfile.HARDSYM;
       } else if (local == EASY_SYM && remote == EASY_SYM) {
          return PunchProfile.EASY_SYM_DUAL;
       } else if (local == EASY_SYM || remote == EASY_SYM) {
-         return PunchProfile.AGGRESSIVE;
+         return PunchProfile.WIDE_SWEEP;
+      } else if (local == CONE && remote == CONE) {
+         return PunchProfile.FAST_LANE;
       } else if (local != HARD_SYM && remote != HARD_SYM) {
          return PunchProfile.DEFAULT;
       } else {

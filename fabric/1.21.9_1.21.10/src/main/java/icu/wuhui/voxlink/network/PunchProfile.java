@@ -34,20 +34,28 @@ public final class PunchProfile {
    public final int socketCreateIntervalMs;
    private static final PunchProfile.SendParams SEND_DEFAULT = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 3, 3, 1, 10);
    private static final PunchProfile.SendParams SEND_DEFAULT_FAST = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 1, 2, 1, 5);
+   private static final PunchProfile.SendParams SEND_SPRINT = new PunchProfile.SendParams(100, 300, 600, 1200, 400, 150, 1, 1, 1, 3);
+   private static final PunchProfile.SendParams SEND_WIDE = new PunchProfile.SendParams(150, 500, 1000, 2000, 500, 200, 1, 2, 1, 5);
    public static final PunchProfile DEFAULT = new PunchProfile(
-      "DEFAULT", 8000, 20, 20, new int[]{4, 8, 15, 20}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT_FAST
+      "DEFAULT", 12000, 30, 100, new int[]{10, 25, 50, 75, 100}, 1, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT_FAST
    );
    public static final PunchProfile AGGRESSIVE = new PunchProfile(
       "AGGRESSIVE", 20000, 50, 100, new int[]{10, 25, 50, 75, 100}, 1, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT_FAST
    );
    public static final PunchProfile HARDSYM = new PunchProfile(
-      "HARDSYM", 25000, 60, 500, new int[]{20, 50, 100, 200, 500}, 2, 25, 20, 30, 50, 500, 3, 20, 84, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
+      "HARDSYM", 30000, 60, 500, new int[]{20, 50, 100, 200, 500}, 2, 25, 20, 30, 50, 500, 3, 20, 84, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
    );
    public static final PunchProfile EASY_SYM_DUAL = new PunchProfile(
       "EASY_SYM_DUAL", 12000, 30, 50, new int[]{5, 10, 20, 30, 50}, 2, 25, 50, 20, 50, 50, 3, 20, 25, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
    );
    public static final PunchProfile V100 = new PunchProfile(
       "V100", 8000, 38, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 84, 20, 3, 84, 84, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
+   );
+   public static final PunchProfile FAST_LANE = new PunchProfile(
+      "FAST_LANE", 6000, 15, 20, new int[]{5, 10, 20}, 1, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_SPRINT
+   );
+   public static final PunchProfile WIDE_SWEEP = new PunchProfile(
+      "WIDE_SWEEP", 35000, 70, 800, new int[]{50, 100, 200, 400, 800}, 1, 25, 20, 30, 50, 800, 3, 20, 84, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_WIDE
    );
    private static volatile PunchProfile current = DEFAULT;
    private static volatile String switchReason = "initial";
