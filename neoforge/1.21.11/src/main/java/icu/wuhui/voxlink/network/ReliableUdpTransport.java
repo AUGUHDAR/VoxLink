@@ -41,7 +41,7 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final int MAX_PAYLOAD = 1400;
    private static final int WINDOW_SIZE = 64;
    private static final long RETRANSMIT_TIMEOUT_MS = 800L;
-   private static final int KEEPALIVE_INTERVAL_S = 2;
+   private static final int KEEPALIVE_INTERVAL_S = 1;
    private static final int KEEPALIVE_TIMEOUT_S = 60;
    private static final int MAX_SILENT_RETRANSMIT_CYCLES = 30;
    private static final int UNRELIABLE_FAIL_THRESHOLD = 5;
@@ -145,7 +145,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          this.recvThread.start();
          this.retransmitTask = this.scheduler.scheduleWithFixedDelay(this::retransmitCheck, 50L, 50L, TimeUnit.MILLISECONDS);
          this.scheduler.scheduleWithFixedDelay(this::flushOutbound, 50L, 50L, TimeUnit.MILLISECONDS);
-         this.keepaliveTask = this.scheduler.scheduleWithFixedDelay(this::sendKeepalive, 2L, 2L, TimeUnit.SECONDS);
+         this.keepaliveTask = this.scheduler.scheduleWithFixedDelay(this::sendKeepalive, (long)KEEPALIVE_INTERVAL_S, (long)KEEPALIVE_INTERVAL_S, TimeUnit.SECONDS);
       }
    }
 
@@ -155,6 +155,10 @@ public class ReliableUdpTransport implements AutoCloseable {
 
    public void setOnIceRestartRequested(Runnable r) {
       this.onIceRestartRequested = r;
+   }
+
+   public void requestIceRestart() {
+      this.triggerIceRestart();
    }
 
    private void triggerIceRestart() {
@@ -192,24 +196,24 @@ public class ReliableUdpTransport implements AutoCloseable {
 
    private void maybeRebindRemote(DatagramPacket packet) {
       InetSocketAddress cur = this.remoteAddress;
-      if (cur != null) {
-         boolean fromCurrent = packet.getPort() == cur.getPort() && packet.getAddress().equals(cur.getAddress());
-         if (fromCurrent) {
+      if (cur == null) {
+         return;
+      }
+
+      boolean fromCurrent = packet.getPort() == cur.getPort() && packet.getAddress().equals(cur.getAddress());
+      if (fromCurrent) {
+         this.remoteConfirmed = true;
+         this.pendingRebindPort = -1;
+      } else if (packet.getAddress().equals(cur.getAddress())) {
+         long now = System.currentTimeMillis();
+         if (packet.getPort() == this.pendingRebindPort && now - this.pendingRebindTime < 5000L) {
+            this.remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
             this.remoteConfirmed = true;
             this.pendingRebindPort = -1;
-         } else if (!this.remoteConfirmed) {
-            if (packet.getAddress().equals(cur.getAddress())) {
-               long now = System.currentTimeMillis();
-               if (packet.getPort() == this.pendingRebindPort && now - this.pendingRebindTime < 2000L) {
-                  this.remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
-                  this.remoteConfirmed = true;
-                  this.pendingRebindPort = -1;
-                  LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
-               } else {
-                  this.pendingRebindPort = packet.getPort();
-                  this.pendingRebindTime = now;
-               }
-            }
+            LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
+         } else {
+            this.pendingRebindPort = packet.getPort();
+            this.pendingRebindTime = now;
          }
       }
    }

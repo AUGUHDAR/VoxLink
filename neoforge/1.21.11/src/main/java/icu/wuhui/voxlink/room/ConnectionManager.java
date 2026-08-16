@@ -13,6 +13,7 @@ import icu.wuhui.voxlink.network.P2PBridge;
 import icu.wuhui.voxlink.network.PortPredictor;
 import icu.wuhui.voxlink.network.ProtocolNegotiator;
 import icu.wuhui.voxlink.network.PunchFailureClassifier;
+import icu.wuhui.voxlink.network.PunchParams;
 import icu.wuhui.voxlink.network.PunchProfile;
 import icu.wuhui.voxlink.network.PunchResult;
 import icu.wuhui.voxlink.network.PunchStrategy;
@@ -123,6 +124,7 @@ public class ConnectionManager {
    private volatile StunProbe.ProbeResult stunProbeResult;
    private final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
    private volatile String lastPunchInfoId = "";
+   private volatile List<Integer> lastHostMappedPorts;
    private volatile boolean hostPunching = false;
    private static final int TARGET_CHANGE_IGNORE_MS = 3000;
    private volatile long lastPunchStartMs = 0L;
@@ -140,6 +142,8 @@ public class ConnectionManager {
    private volatile PunchResult lastPunchResult;
    private volatile NatClass localNatClass = NatClass.UNKNOWN;
    private volatile NatClass remoteNatClass = NatClass.UNKNOWN;
+   private volatile PunchProfile activePunchProfile = PunchProfile.DEFAULT;
+   private volatile PunchParams activePunchParams;
    private volatile CompletableFuture<Void> relayPrefetchFuture;
    private static final int MAX_CONNECTION_CYCLES = 8;
    private static final int FALLBACK_CYCLES = 3;
@@ -202,13 +206,14 @@ public class ConnectionManager {
       List<UdpHolePuncher> punchers = new ArrayList<>();
       List<StunProbe.PublicMappedAddress> addrs = new ArrayList<>();
       List<CompletableFuture<Object[]>> futures = new ArrayList<>();
-      int socketStunCount = Math.max(1, Math.min(PunchProfile.current().socketStunCount, stunUrls.size()));
+      int socketStunCount = Math.max(1, Math.min(this.punchProfile().socketStunCount, stunUrls.size()));
       List<String> raceUrls = stunUrls.size() > socketStunCount ? new ArrayList<>(stunUrls.subList(0, socketStunCount)) : stunUrls;
-      int createIntervalMs = Math.max(0, PunchProfile.current().socketCreateIntervalMs);
+      int createIntervalMs = Math.max(0, this.punchProfile().socketCreateIntervalMs);
 
       for (int i = 0; i < requiredSize; i++) {
          int idx = i;
          UdpHolePuncher puncher = new UdpHolePuncher();
+         this.applyPunchTemplate(puncher);
 
          try {
             puncher.createSocket();
@@ -255,7 +260,7 @@ public class ConnectionManager {
          }
       }
 
-      int minRequired = Math.min(PunchProfile.current().birthdaySocketCount, requiredSize);
+      int minRequired = Math.min(this.punchProfile().birthdaySocketCount, requiredSize);
       AtomicInteger successCount = new AtomicInteger(0);
       AtomicInteger doneCount = new AtomicInteger(0);
       CompletableFuture<Void> gate = new CompletableFuture<>();
@@ -358,6 +363,40 @@ public class ConnectionManager {
          t.setDaemon(true);
          return t;
       });
+   }
+
+   private PunchProfile punchProfile() {
+      PunchProfile p = this.activePunchProfile;
+      return p != null ? p : PunchProfile.DEFAULT;
+   }
+
+   public PunchProfile getActivePunchProfile() {
+      return this.punchProfile();
+   }
+
+   private void applyPunchTemplate(UdpHolePuncher puncher) {
+      if (puncher != null) {
+         puncher.setProfile(this.punchProfile());
+         puncher.setPunchParams(this.activePunchParams);
+      }
+   }
+
+   private void switchPunchProfile(PunchProfile target, String reason) {
+      if (target != null && target != this.activePunchProfile) {
+         PunchProfile old = this.activePunchProfile;
+         this.activePunchProfile = target;
+         VoxLinkMod.LOGGER.info("[PunchProfile] Instance switch: {} -> {} reason: {}", old, target.name, reason);
+      }
+   }
+
+   private int punchTimeoutMs() {
+      PunchParams p = this.activePunchParams;
+      return p != null && p.timeoutMs > 0 ? p.timeoutMs : this.punchProfile().punchTimeoutMs;
+   }
+
+   private boolean punchSkipDirect() {
+      PunchParams p = this.activePunchParams;
+      return p != null && p.skipDirectPunch;
    }
 
    public boolean isConnectionCycleActive() {
@@ -638,6 +677,10 @@ public class ConnectionManager {
       return this.activeUdpTransports.remove(key);
    }
 
+   public boolean hasUdpTransport(String key) {
+      return key != null && this.activeUdpTransports.containsKey(key);
+   }
+
    public void handleJoinRequest(String from, JsonObject data) {
       this.handleJoinRequest(from, data, 0);
    }
@@ -764,6 +807,7 @@ public class ConnectionManager {
          VoxLinkMod.LOGGER.info("[RoomManager] Reuse existing host punch socket (localPort={})", hostPuncher.getSocket().getLocalPort());
       } else {
          hostPuncher = new UdpHolePuncher();
+         this.applyPunchTemplate(hostPuncher);
 
          try {
             int mcPort = state.roomInfo.getHostPort();
@@ -836,6 +880,7 @@ public class ConnectionManager {
                      int idx = i;
                      bFutures.add(CompletableFuture.supplyAsync(() -> {
                         UdpHolePuncher bp = new UdpHolePuncher();
+                        this.applyPunchTemplate(bp);
 
                         try {
                            bp.createSocket();
@@ -928,14 +973,17 @@ public class ConnectionManager {
                      fOfferData.addProperty("hostSymmetric", true);
                   }
 
-                  boolean hostEasySym = punchSocketSymmetric && StunDetector.isEasySymmetric(fNatType);
+                  boolean hostEasySym = punchSocketSymmetric
+                     && mapped1 != null
+                     && mapped2 != null
+                     && Math.abs(mapped2.port() - mapped1.port()) <= 100;
                   if (hostEasySym) {
                      fOfferData.addProperty("hostEasySym", true);
                   }
 
                   if (mapped1 != null && mapped2 != null && mapped1.port() != mapped2.port()) {
                      int delta = mapped2.port() - mapped1.port();
-                     int portRange = PunchProfile.current().maxPortRange;
+                     int portRange = this.punchProfile().maxPortRange;
                      if (fHostPuncher != null && fHostPuncher.getSocket() != null) {
                         List<Integer> samples = StunProbe.samplePortsSequential(fHostPuncher.getSocket(), StunDetector.getAllStunUrls(), 10, 100);
                         if (samples.size() >= 5) {
@@ -1315,6 +1363,7 @@ public class ConnectionManager {
             ? data.get("hostMappedPortRange").getAsInt()
             : 100;
          List<Integer> hostMappedPorts = new ArrayList<>();
+         boolean samePorts = false;
          if (data.has("hostMappedPorts") && data.get("hostMappedPorts").isJsonArray()) {
             for (JsonElement elem : data.getAsJsonArray("hostMappedPorts")) {
                hostMappedPorts.add(elem.getAsInt());
@@ -1326,12 +1375,18 @@ public class ConnectionManager {
                hostMappedPorts.add(hostMappedPort);
             }
 
+            samePorts = this.lastHostMappedPorts != null && this.lastHostMappedPorts.equals(hostMappedPorts);
+            if (samePorts) {
+               VoxLinkMod.LOGGER.debug("[RoomManager] host mapped ports unchanged, skip rebuild");
+            }
+
             VoxLinkMod.LOGGER
                .info(
                   "[RoomManager] Received host mapped: {}:{} ports={} (sym={}, delta={})",
                   new Object[]{hostMappedIp, hostMappedPort, hostMappedPorts, hostSymmetric, hostMappedPortDelta}
                );
             state.roomInfo.setHostMappedAddress(hostMappedIp, hostMappedPort);
+            this.lastHostMappedPorts = new ArrayList<>(hostMappedPorts);
             if (hostSymmetric) {
                state.roomInfo.setHostSymmetric(true);
                NatClass newRemote = hostEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
@@ -1400,7 +1455,7 @@ public class ConnectionManager {
 
                VoxLinkMod.LOGGER.info("[RoomManager] Update joiner punch target to {}:{}", hostMappedIp, updatePort);
                joinerPuncher.updateTarget(hostMappedIp, updatePort);
-               if (hostMappedPorts.size() > 1) {
+               if (!samePorts && hostMappedPorts.size() > 1) {
                   List<String> staleExtra = new ArrayList<>();
 
                   for (String k : this.activeHolePunchers.keySet()) {
@@ -1440,6 +1495,7 @@ public class ConnectionManager {
                   String key = "joiner_extra_" + fIdx;
                   if (!this.activeHolePunchers.containsKey(key)) {
                      UdpHolePuncher extraPuncher = new UdpHolePuncher();
+                     this.applyPunchTemplate(extraPuncher);
 
                      try {
                         extraPuncher.createSocket();
@@ -1447,17 +1503,17 @@ public class ConnectionManager {
                         int fExtraPort = extraPort;
                         String fHostMappedIp = hostMappedIp;
                         VoxLinkMod.LOGGER.info("[RoomManager] Multi-port puncher#{}: {}:{}", new Object[]{i, fHostMappedIp, fExtraPort});
-                        extraPuncher.punchWithPortPrediction(fHostMappedIp, fExtraPort, 30)
+                        extraPuncher.punchWithPortPrediction(fHostMappedIp, fExtraPort, this.punchProfile().joinerMultiPortRange)
                            .thenAccept(
                               result -> {
                                  if (!result.isSuccess()) {
                                     PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
                                     this.lastPunchResult = result.withReason(reason);
-                                    PunchProfile.applyDynamicParams(
+                                    this.activePunchParams = 
                                        PunchTuner.nextParams(
-                                          PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
+                                          this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
                                        )
-                                    );
+                                    ;
                                     VoxLinkMod.LOGGER
                                        .info(
                                           "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
@@ -1542,7 +1598,7 @@ public class ConnectionManager {
    }
 
    public void handleHostPunchInfo(RoomManager.RoomState state, String from, JsonObject data) {
-      PunchProfile.clearDynamicParams();
+      this.activePunchParams = null;
       String joinerMappedIp = data.has("joinerMappedIp") ? data.get("joinerMappedIp").getAsString() : null;
       int joinerMappedPort = data.has("joinerMappedPort") ? data.get("joinerMappedPort").getAsInt() : 0;
       int joinerMappedPortDelta = data.has("joinerMappedPortDelta") && !data.get("joinerMappedPortDelta").isJsonNull()
@@ -1576,34 +1632,28 @@ public class ConnectionManager {
          }
       }
 
-      List<UdpHolePuncher> hostMultiPunchers = new ArrayList<>();
-      this.activeHolePunchers.entrySet().removeIf(e -> {
-         if (e.getKey().startsWith("host_")) {
-            UdpHolePuncher p = e.getValue();
-            if (p != null) {
-               try {
-                  p.stopPunch();
-               } catch (Exception var5x) {
-               }
-
-               try {
-                  p.close();
-               } catch (Exception var4x) {
-               }
-            }
-
-            hostMultiPunchers.add(p);
-            return true;
-         } else {
-            return false;
-         }
-      });
       boolean isActive = false;
 
-      for (UdpHolePuncher p : hostMultiPunchers) {
-         if (p != null && p.isPunching()) {
+      for (UdpHolePuncher existing : this.activeHolePunchers.values()) {
+         if (existing != null && existing.isPunching()) {
             isActive = true;
             break;
+         }
+      }
+
+      if (!isActive) {
+         long punchAgeMs = System.currentTimeMillis() - this.lastPunchStartMs;
+         boolean hostGroupAlive = false;
+
+         for (String key : this.activeHolePunchers.keySet()) {
+            if (key.startsWith("host_")) {
+               hostGroupAlive = true;
+               break;
+            }
+         }
+
+         if (punchAgeMs >= 0L && punchAgeMs < 60000L && hostGroupAlive && this.lastPunchInfoId != null && !this.lastPunchInfoId.isEmpty()) {
+            isActive = true;
          }
       }
 
@@ -1647,6 +1697,26 @@ public class ConnectionManager {
                   new Object[]{System.currentTimeMillis() - this.lastPunchStartMs, this.lastPunchInfoId, punchInfoId}
                );
             this.hostPunching = false;
+            this.activeHolePunchers.entrySet().removeIf(e -> {
+               if (e.getKey().startsWith("host_")) {
+                  UdpHolePuncher p = e.getValue();
+                  if (p != null) {
+                     try {
+                        p.stopPunch();
+                     } catch (Exception var5x) {
+                     }
+
+                     try {
+                        p.close();
+                     } catch (Exception var4x) {
+                     }
+                  }
+
+                  return true;
+               } else {
+                  return false;
+               }
+            });
          }
 
          this.lastPunchInfoId = punchInfoId;
@@ -1699,13 +1769,13 @@ public class ConnectionManager {
          int HOST_MULTI_COUNT;
          if (isHostSym && joinerSym) {
             HOST_MULTI_COUNT = PunchProfile.HARDSYM.hardSymSocketCount;
-            PunchProfile.switchToHardSym("Sym×Sym");
+            this.switchPunchProfile(PunchProfile.HARDSYM, "Sym×Sym");
          } else if (isHostSym) {
             HOST_MULTI_COUNT = PunchProfile.HARDSYM.hostMultiMinSocketCount;
          } else if (portUnreachable) {
-            HOST_MULTI_COUNT = PunchProfile.current().hostMultiSocketCount;
+            HOST_MULTI_COUNT = this.punchProfile().hostMultiSocketCount;
          } else {
-            HOST_MULTI_COUNT = PunchProfile.current().hostMultiBaseSocketCount;
+            HOST_MULTI_COUNT = this.punchProfile().hostMultiBaseSocketCount;
          }
 
          RoomManager.RoomState fState = state;
@@ -1720,6 +1790,7 @@ public class ConnectionManager {
                List<UdpHolePuncher> hostPunchers = new ArrayList<>();
                List<StunProbe.PublicMappedAddress> mappedAddrs = new ArrayList<>();
                boolean hostPunchSocketSymmetric = false;
+               int hostPunchSocketDelta = 0;
                UdpHolePuncher oldHost = this.activeHolePunchers.remove("host");
                if (oldHost != null) {
                   try {
@@ -1733,6 +1804,7 @@ public class ConnectionManager {
 
                for (int i = 0; i < fHostMultiCount; i++) {
                   UdpHolePuncher p = new UdpHolePuncher();
+                  this.applyPunchTemplate(p);
 
                   try {
                      if (i == 0) {
@@ -1768,7 +1840,7 @@ public class ConnectionManager {
                         }
                      )
                   );
-                  int createIntervalMs = Math.max(0, PunchProfile.current().socketCreateIntervalMs);
+                  int createIntervalMs = Math.max(0, this.punchProfile().socketCreateIntervalMs);
                   if (createIntervalMs > 0) {
                      try {
                         Thread.sleep(createIntervalMs);
@@ -1780,9 +1852,9 @@ public class ConnectionManager {
                }
 
                VoxLinkMod.LOGGER.info("[HostPunchInfo] Parallel start {}/{} socket+dual STUN tasks (no sleep)", createdCount, fHostMultiCount);
-               int minRequired = Math.min(PunchProfile.current().birthdaySocketCount, fHostMultiCount);
+               int minRequired = Math.min(this.punchProfile().birthdaySocketCount, fHostMultiCount);
                long stunDeadline = System.currentTimeMillis()
-                  + Math.max(5000L, (long)fHostMultiCount * Math.max(0, PunchProfile.current().socketCreateIntervalMs) + 3000L);
+                  + Math.max(5000L, (long)fHostMultiCount * Math.max(0, this.punchProfile().socketCreateIntervalMs) + 3000L);
 
                while (System.currentTimeMillis() < stunDeadline) {
                   int done = 0;
@@ -1827,6 +1899,9 @@ public class ConnectionManager {
 
                         if (addrs[0] != null && addrs[0].port() != addrs[1].port()) {
                            hostPunchSocketSymmetric = true;
+                           if (hostPunchSocketDelta == 0) {
+                              hostPunchSocketDelta = addrs[1].port() - addrs[0].port();
+                           }
                         }
                      }
                   } catch (Exception var49) {
@@ -1847,9 +1922,10 @@ public class ConnectionManager {
                } else {
                   if (hostPunchSocketSymmetric && !fState.roomInfo.isHostSymmetric()) {
                      fState.roomInfo.setHostSymmetric(true);
-                     NatClass newLocal = StunDetector.isEasySymmetric(fState.roomInfo.getNatType()) ? NatClass.EASY_SYM : NatClass.HARD_SYM;
+                     boolean hostPunchEasySym = Math.abs(hostPunchSocketDelta) <= 100;
+                     NatClass newLocal = hostPunchEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
                      if (this.localNatClass != newLocal) {
-                        VoxLinkMod.LOGGER.info("[HostPunchInfo] Update localNat {} -> {} (multi-socket symmetric detected)", this.localNatClass, newLocal);
+                        VoxLinkMod.LOGGER.info("[HostPunchInfo] Update localNat {} -> {} (multi-socket symmetric detected, delta={})", new Object[]{this.localNatClass, newLocal, hostPunchSocketDelta});
                         this.localNatClass = newLocal;
                      }
                   }
@@ -1862,9 +1938,12 @@ public class ConnectionManager {
                      symData.addProperty("hostSymmetric", true);
                   }
 
-                  boolean hostEasySymMapped = hostPunchSocketSymmetric && StunDetector.isEasySymmetric(fState.roomInfo.getNatType());
+                  boolean hostEasySymMapped = hostPunchSocketSymmetric && Math.abs(hostPunchSocketDelta) <= 100;
                   if (hostEasySymMapped) {
                      symData.addProperty("hostEasySym", true);
+                  }
+                  if (hostPunchSocketSymmetric && hostPunchSocketDelta != 0) {
+                     symData.addProperty("hostMappedPortDelta", hostPunchSocketDelta);
                   }
 
                   symData.addProperty("hostMappedIp", mappedIp);
@@ -1934,10 +2013,10 @@ public class ConnectionManager {
                   int hostPortRange = 0;
                   if (!joinerSymmetric || !StunDetector.isNatTypeSymmetric(hostNat) && !hostPunchSocketSymmetric) {
                      if (joinerSymmetric) {
-                        hostPortRange = PunchProfile.current().defaultPortRange;
+                        hostPortRange = this.punchProfile().defaultPortRange;
                      }
                   } else {
-                     hostPortRange = PunchProfile.current().defaultPortRange;
+                     hostPortRange = this.punchProfile().defaultPortRange;
                   }
 
                   VoxLinkMod.LOGGER
@@ -2037,80 +2116,105 @@ public class ConnectionManager {
                         }
                      }
 
-                     for (int i = 0; i < hostPunchers.size(); i++) {
-                        UdpHolePuncher mp = hostPunchers.get(i);
-                        int idx = i;
-                        mp.punchWithPortPrediction(fJoinerMappedIp, fJoinerMappedPort, hostPortRange)
-                           .thenAccept(
-                              result -> {
-                                 if (!result.isSuccess()) {
-                                    PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
-                                    this.lastPunchResult = result.withReason(reason);
-                                    PunchProfile.applyDynamicParams(
-                                       PunchTuner.nextParams(
-                                          PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
-                                       )
-                                    );
-                                    VoxLinkMod.LOGGER
-                                       .info(
-                                          "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
-                                          new Object[]{reason, result.socketsReceivedPunch, result.socketsReceivedAck}
-                                       );
-                                    this.hostPunching = false;
-                                    this.lastPunchInfoId = "";
-                                    this.activeHolePunchers.remove("host");
-                                    this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("host_"));
+                     long punchGroupDeadline = System.currentTimeMillis() + 60000L;
 
-                                    try {
-                                       mp.close();
-                                    } catch (Exception var12x) {
-                                    }
-                                 } else {
-                                    DatagramSocket socket = result.getSuccessSocket();
-                                    if (!hostPunchWon.compareAndSet(false, true)) {
-                                       try {
-                                          mp.close();
-                                       } catch (Exception var13x) {
-                                       }
-                                    } else if (this.roomManager.currentRoom.get() == fState && this.connectionWon.compareAndSet(false, true)) {
-                                       VoxLinkMod.LOGGER.info("[HostPunchInfo] Socket#{} punch success!", idx);
-                                       mp.markSocketTransferred();
-                                       this.stopAllPunchingAfterHostBridge();
-                                       mp.stopPunch();
-                                       DatagramSocket winSocket = socket;
-                                       UdpHolePuncher winPuncher = mp;
-                                       this.scheduler
-                                          .submit(
-                                             () -> {
-                                                try {
-                                                   this.establishUdpTransport(
-                                                      fState,
-                                                      winSocket,
-                                                      winPuncher,
-                                                      new InetSocketAddress(fJoinerMappedIp, fJoinerMappedPort),
-                                                      clientId,
-                                                      true,
-                                                      clientId
-                                                   );
-                                                } catch (Exception e) {
-                                                   VoxLinkMod.LOGGER.error("[HostPunchInfo] Transport create failed: {}", e.getMessage());
-                                                   winPuncher.close();
-                                                }
+                     while (!this.connectionWon.get() && this.roomManager.currentRoom.get() == fState && System.currentTimeMillis() < punchGroupDeadline) {
+                        boolean anyAlive = false;
+                        List<CompletableFuture<?>> roundFutures = new ArrayList<>();
+
+                        for (int i = 0; i < hostPunchers.size(); i++) {
+                           UdpHolePuncher mp = hostPunchers.get(i);
+                           if (mp.isSocketTransferred() || mp.getSocket() == null || mp.getSocket().isClosed()) {
+                              continue;
+                           }
+
+                           anyAlive = true;
+                           int idx = i;
+                           roundFutures.add(
+                              mp.punchWithPortPrediction(fJoinerMappedIp, fJoinerMappedPort, hostPortRange)
+                                 .thenAccept(
+                                    result -> {
+                                       if (!result.isSuccess()) {
+                                          PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
+                                          this.lastPunchResult = result.withReason(reason);
+                                          this.activePunchParams = 
+                                             PunchTuner.nextParams(
+                                                this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
+                                             )
+                                          ;
+                                          VoxLinkMod.LOGGER
+                                             .info(
+                                                "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
+                                                new Object[]{reason, result.socketsReceivedPunch, result.socketsReceivedAck}
+                                             );
+                                       } else {
+                                          DatagramSocket socket = result.getSuccessSocket();
+                                          if (!hostPunchWon.compareAndSet(false, true)) {
+                                             try {
+                                                mp.close();
+                                             } catch (Exception var13x) {
                                              }
-                                          );
-                                    } else {
-                                       try {
-                                          mp.close();
-                                       } catch (Exception var14x) {
+                                          } else if (this.roomManager.currentRoom.get() == fState && this.connectionWon.compareAndSet(false, true)) {
+                                             VoxLinkMod.LOGGER.info("[HostPunchInfo] Socket#{} punch success!", idx);
+                                             mp.markSocketTransferred();
+                                             this.stopAllPunchingAfterHostBridge();
+                                             mp.stopPunch();
+                                             DatagramSocket winSocket = socket;
+                                             UdpHolePuncher winPuncher = mp;
+                                             this.scheduler
+                                                .submit(
+                                                   () -> {
+                                                      try {
+                                                         this.establishUdpTransport(
+                                                            fState,
+                                                            winSocket,
+                                                            winPuncher,
+                                                            new InetSocketAddress(fJoinerMappedIp, fJoinerMappedPort),
+                                                            clientId,
+                                                            true,
+                                                            clientId
+                                                         );
+                                                      } catch (Exception e) {
+                                                         VoxLinkMod.LOGGER.error("[HostPunchInfo] Transport create failed: {}", e.getMessage());
+                                                         winPuncher.close();
+                                                      }
+                                                   }
+                                                );
+                                          } else {
+                                             try {
+                                                mp.close();
+                                             } catch (Exception var14x) {
+                                             }
+                                          }
                                        }
                                     }
-                                 }
-                              }
-                           )
-                           .exceptionally(e -> {
-                              VoxLinkMod.LOGGER.debug("[HostPunchInfo] Socket#{} punch failed: {}", idx, e.getMessage());
-                              return null;
-                           });
+                                 )
+                                 .exceptionally(e -> {
+                                    VoxLinkMod.LOGGER.debug("[HostPunchInfo] Socket#{} punch failed: {}", idx, e.getMessage());
+                                    return null;
+                                 })
+                           );
+                        }
+
+                        if (!anyAlive) {
+                           break;
+                        }
+
+                        try {
+                           CompletableFuture.allOf(roundFutures.toArray(new CompletableFuture[0])).join();
+                        } catch (Exception var15x) {
+                        }
+
+                        if (this.connectionWon.get() || this.roomManager.currentRoom.get() != fState) {
+                           break;
+                        }
+
+                        try {
+                           Thread.sleep(300L);
+                        } catch (InterruptedException ie) {
+                           Thread.currentThread().interrupt();
+                           break;
+                        }
                      }
                   } else {
                      VoxLinkMod.LOGGER.info("[HostPunchInfo] Connected or room changed during lazy, abort punch");
@@ -2222,6 +2326,7 @@ public class ConnectionManager {
                   existingReverse.updateTarget(joinerMappedIp, joinerMappedPort);
                } else {
                   UdpHolePuncher puncher = new UdpHolePuncher();
+                  this.applyPunchTemplate(puncher);
 
                   try {
                      puncher.createSocket();
@@ -2266,12 +2371,14 @@ public class ConnectionManager {
                            StunProbe.PublicMappedAddress hostMapped1 = m1;
                            StunProbe.PublicMappedAddress hostMapped2 = m2;
                            boolean hostPunchSocketSymmetric = false;
+                           int hostRevDelta = 0;
                            StunProbe.PublicMappedAddress hostMapped = null;
                            if (hostMapped1 != null && hostMapped2 != null) {
                               if (hostMapped1.port() != hostMapped2.port()) {
                                  hostPunchSocketSymmetric = true;
+                                 hostRevDelta = hostMapped2.port() - hostMapped1.port();
                                  VoxLinkMod.LOGGER
-                                    .info("[ReversePunch] Host punch socket STUN: symmetric detected ({} vs {})", hostMapped1.port(), hostMapped2.port());
+                                    .info("[ReversePunch] Host punch socket STUN: symmetric detected ({} vs {}, delta={})", new Object[]{hostMapped1.port(), hostMapped2.port(), hostRevDelta});
                               }
 
                               hostMapped = hostMapped2;
@@ -2281,7 +2388,8 @@ public class ConnectionManager {
 
                            if (hostPunchSocketSymmetric && !fState.roomInfo.isHostSymmetric()) {
                               fState.roomInfo.setHostSymmetric(true);
-                              NatClass newLocal = StunDetector.isEasySymmetric(fState.roomInfo.getNatType()) ? NatClass.EASY_SYM : NatClass.HARD_SYM;
+                              boolean hostRevEasySym = Math.abs(hostRevDelta) <= 100;
+                              NatClass newLocal = hostRevEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
                               if (this.localNatClass != newLocal) {
                                  VoxLinkMod.LOGGER
                                     .info("[ReversePunch] Update localNat {} -> {} (reverse socket symmetric detected)", this.localNatClass, newLocal);
@@ -2300,7 +2408,7 @@ public class ConnectionManager {
                               punchData.addProperty("hostSymmetric", true);
                            }
 
-                           boolean hostEasySymRev = hostPunchSocketSymmetric && StunDetector.isEasySymmetric(fState.roomInfo.getNatType());
+                           boolean hostEasySymRev = hostPunchSocketSymmetric && Math.abs(hostRevDelta) <= 100;
                            if (hostEasySymRev) {
                               punchData.addProperty("hostEasySym", true);
                            }
@@ -2335,7 +2443,7 @@ public class ConnectionManager {
                               allJoinerPorts.add(fJoinerMappedPort);
                            }
 
-                           int hostPortRange = PunchProfile.current().defaultPortRange;
+                           int hostPortRange = this.punchProfile().defaultPortRange;
                            if (hostSymmetric && fJoinerSymmetric) {
                               hostPortRange = 0;
                            } else if (fJoinerSymmetric && allJoinerPorts.size() > 1) {
@@ -2343,14 +2451,14 @@ public class ConnectionManager {
                               VoxLinkMod.LOGGER
                                  .info("[ReversePunch] Birthday attack mode: host punch {} joiner ports: {}", allJoinerPorts.size(), allJoinerPorts);
                            } else if (fJoinerSymmetric) {
-                              hostPortRange = PunchProfile.current().widePortRange;
+                              hostPortRange = this.punchProfile().widePortRange;
                            } else if (hostSymmetric) {
-                              PunchProfile.switchToHardSym("host_sym_reverse");
+                              this.switchPunchProfile(PunchProfile.HARDSYM, "host_sym_reverse");
                               hostPortRange = PunchProfile.HARDSYM.portPredictionMaxRange;
                            } else if (!"moderate".equals(hostNat) && !"port_restricted_cone".equals(hostNat)) {
-                              hostPortRange = PunchProfile.current().defaultPortRange;
+                              hostPortRange = this.punchProfile().defaultPortRange;
                            } else {
-                              hostPortRange = PunchProfile.current().portPredictionMaxRange;
+                              hostPortRange = this.punchProfile().portPredictionMaxRange;
                            }
 
                            VoxLinkMod.LOGGER
@@ -2369,13 +2477,13 @@ public class ConnectionManager {
                                  currentPuncher.close();
                                  this.activeHolePunchers.remove("hostRev");
                               }
-                           }, PunchProfile.effectiveTimeoutMs() / 1000 + 5, TimeUnit.SECONDS);
+                           }, this.punchTimeoutMs() / 1000 + 5, TimeUnit.SECONDS);
                            CompletableFuture<PunchResult> punchFuture;
                            if (allJoinerPorts.size() > 1) {
                               Set<Integer> expandedPorts = new LinkedHashSet<>();
 
                               for (int port : allJoinerPorts) {
-                                 for (int offset = -PunchProfile.current().defaultPortRange; offset <= PunchProfile.current().defaultPortRange; offset++) {
+                                 for (int offset = -this.punchProfile().defaultPortRange; offset <= this.punchProfile().defaultPortRange; offset++) {
                                     int p = port + offset;
                                     if (p > 0 && p <= 65535) {
                                        expandedPorts.add(p);
@@ -2390,8 +2498,8 @@ public class ConnectionManager {
                                     new Object[]{
                                        allJoinerPorts.size(),
                                        portList.size(),
-                                       allJoinerPorts.get(0) - PunchProfile.current().defaultPortRange,
-                                       allJoinerPorts.get(allJoinerPorts.size() - 1) + PunchProfile.current().defaultPortRange
+                                       allJoinerPorts.get(0) - this.punchProfile().defaultPortRange,
+                                       allJoinerPorts.get(allJoinerPorts.size() - 1) + this.punchProfile().defaultPortRange
                                     }
                                  );
                               punchFuture = currentPuncher.punchMultiPort(fRevJoinerMappedIp, portList);
@@ -2404,11 +2512,11 @@ public class ConnectionManager {
                                     if (!result.isSuccess()) {
                                        PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
                                        this.lastPunchResult = result.withReason(reason);
-                                       PunchProfile.applyDynamicParams(
+                                       this.activePunchParams = 
                                           PunchTuner.nextParams(
-                                             PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
+                                             this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
                                           )
-                                       );
+                                       ;
                                        VoxLinkMod.LOGGER
                                           .info(
                                              "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
@@ -2590,14 +2698,14 @@ public class ConnectionManager {
                            }
                         );
                         boolean joinerIsSymmetric = this.stunProbeResult != null && this.stunProbeResult.natType.isSymmetric();
-                        int portRange = PunchProfile.current().defaultPortRange;
+                        int portRange = this.punchProfile().defaultPortRange;
                         if (joinerIsSymmetric) {
-                           portRange = PunchProfile.current().defaultPortRange;
+                           portRange = this.punchProfile().defaultPortRange;
                            VoxLinkMod.LOGGER.info("[ReversePunch] Joiner is symmetric NAT — use small range (±30) to open NAT mapping");
                         } else if (hostSymmetric) {
-                           portRange = PunchProfile.current().portPredictionMaxRange;
+                           portRange = this.punchProfile().portPredictionMaxRange;
                         } else {
-                           portRange = PunchProfile.current().defaultPortRange;
+                           portRange = this.punchProfile().defaultPortRange;
                         }
 
                         VoxLinkMod.LOGGER
@@ -2614,11 +2722,11 @@ public class ConnectionManager {
                                  if (!result.isSuccess()) {
                                     PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
                                     this.lastPunchResult = result.withReason(reason);
-                                    PunchProfile.applyDynamicParams(
+                                    this.activePunchParams = 
                                        PunchTuner.nextParams(
-                                          PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
+                                          this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult
                                        )
-                                    );
+                                    ;
                                     VoxLinkMod.LOGGER
                                        .info(
                                           "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
@@ -2818,7 +2926,7 @@ public class ConnectionManager {
                   VoxLinkMod.LOGGER
                      .info(
                         "[Connection] Cycle {} done, both support persistent retry (round={}, level={}), reset cycle from 0",
-                        new Object[]{maxCycles, round, PunchProfile.describe()}
+                        new Object[]{maxCycles, round, this.punchProfile().describeInstance()}
                      );
                   ConnectionState.transitionTo(ConnectionState.STUN_PROBE, "持续重试 round " + round);
                   this.connectionStartTimeMs = System.currentTimeMillis();
@@ -2838,15 +2946,15 @@ public class ConnectionManager {
             this.connectionWon.set(false);
             ConnectionState.transitionTo(ConnectionState.STUN_PROBE, "周期" + (cycle + 1) + "/" + maxCycles);
             if (cycle == 0) {
-               PunchProfile.clearDynamicParams();
+               this.activePunchParams = null;
                this.localNatClass = this.classifyLocalNat();
                this.remoteNatClass = this.classifyRemoteNat(state);
                PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
-               PunchProfile.switchTo(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass);
+               this.switchPunchProfile(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass);
                VoxLinkMod.LOGGER
                   .info(
                      "[Connection] Layer1 NAT classification: local={} remote={} -> profile={}",
-                     new Object[]{this.localNatClass, this.remoteNatClass, PunchProfile.describe()}
+                     new Object[]{this.localNatClass, this.remoteNatClass, this.punchProfile().describeInstance()}
                   );
                if (this.shouldPrefetchRelay(this.localNatClass, this.remoteNatClass) && this.relayPrefetchFuture == null) {
                   this.relayPrefetchFuture = this.prefetchRelayCandidates(state).exceptionally(e -> {
@@ -3017,7 +3125,7 @@ public class ConnectionManager {
                         "[Connection] Layer4 smart schedule cycle={} strategy={} localNat={} remoteNat={}",
                         new Object[]{cycle, strategy, this.localNatClass, this.remoteNatClass}
                      );
-                  if (PunchProfile.effectiveSkipDirectPunch()) {
+                  if (this.punchSkipDirect()) {
                      VoxLinkMod.LOGGER.info("[Connection] Wave 1: Skip UDP punch (tuner FIREWALL_DETECTED)");
                   } else {
                      switch (strategy) {
@@ -3271,6 +3379,7 @@ public class ConnectionManager {
 
             this.activeHolePunchers.remove("joiner_reuse");
             puncher = new UdpHolePuncher();
+            this.applyPunchTemplate(puncher);
 
             try {
                puncher.createSocket();
@@ -3449,7 +3558,7 @@ public class ConnectionManager {
                      this.activeHolePunchers.remove("joiner");
                      this.tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 1);
                   } else if (this.stunProbeResult != null && this.stunProbeResult.natType.isEasySymmetric() && state.roomInfo.isHostEasySym()) {
-                     int dualSocketCount = this.continuousRetryRound.get() > 0 ? 50 : 25;
+                     int dualSocketCount = this.continuousRetryRound.get() > 0 ? this.punchProfile().easySymMutualRetrySocketCount : this.punchProfile().easySymMutualSocketCount;
                      VoxLinkMod.LOGGER.info("Both EasySym, start mutual punch ({} socket x +/-20)", dualSocketCount);
                      UdpHolePuncher dualPuncher = finalPuncher;
                      dualPuncher.punchEasySymDual(fTargetIp, fTargetPort, this.stunProbeResult.natType, StunProbe.NatType.SYMMETRIC_EASY_INC, dualSocketCount)
@@ -3463,11 +3572,11 @@ public class ConnectionManager {
                                        "[Connection] cycle={} EasySym mutual punch failed reason={} recvPunch={} recvAck={}",
                                        new Object[]{cycle, reason, result.socketsReceivedPunch, result.socketsReceivedAck}
                                     );
-                                 PunchProfile.applyDynamicParams(
+                                 this.activePunchParams = 
                                     PunchTuner.nextParams(
-                                       PunchProfile.current(), this.localNatClass, this.remoteNatClass, cycle + 1, maxCycles, reason, this.lastPunchResult
+                                       this.punchProfile(), this.localNatClass, this.remoteNatClass, cycle + 1, maxCycles, reason, this.lastPunchResult
                                     )
-                                 );
+                                 ;
                                  this.addressBlacklist.recordUdpFailure(punchTargetAddr);
                                  dualPuncher.stopPunch();
                                  if (this.roomManager.currentRoom.get() != state) {
@@ -3526,24 +3635,24 @@ public class ConnectionManager {
                               || "restricted_cone".equals(state.roomInfo.getNatType())
                               || "full_cone".equals(state.roomInfo.getNatType())
                         );
-                     int portRange = PunchProfile.current().defaultPortRange;
+                     int portRange = this.punchProfile().defaultPortRange;
                      int hostMappedPortRange = state.roomInfo.getHostMappedPortRange();
                      if (joinerIsSymmetric && hostConfirmedNonSymmetric) {
                         portRange = 0;
                      } else if (state.roomInfo.isHostSymmetric()) {
                         if (hostMappedPortDelta != 0) {
-                           portRange = hostMappedPortRange > 0 ? hostMappedPortRange : PunchProfile.current().widePortRange;
+                           portRange = hostMappedPortRange > 0 ? hostMappedPortRange : this.punchProfile().widePortRange;
                         } else if (cycle == 0) {
-                           portRange = PunchProfile.current().maxPortRange;
+                           portRange = this.punchProfile().maxPortRange;
                         } else {
-                           portRange = PunchProfile.current().portPredictionMaxRange;
+                           portRange = this.punchProfile().portPredictionMaxRange;
                         }
                      } else if (cycle == 0) {
-                        portRange = PunchProfile.current().defaultPortRange;
+                        portRange = this.punchProfile().defaultPortRange;
                      } else if (cycle == 1) {
-                        portRange = PunchProfile.current().widePortRange;
+                        portRange = this.punchProfile().widePortRange;
                      } else {
-                        portRange = PunchProfile.current().maxPortRange;
+                        portRange = this.punchProfile().maxPortRange;
                      }
 
                      VoxLinkMod.LOGGER
@@ -3562,8 +3671,8 @@ public class ConnectionManager {
                      int socketCount = 0;
                      if (joinerIsSymmetric) {
                         socketCount = state.roomInfo.isHostSymmetric()
-                           ? PunchProfile.current().hardSymSocketCount
-                           : PunchProfile.current().joinerSymSocketCount;
+                           ? this.punchProfile().hardSymSocketCount
+                           : this.punchProfile().joinerSymSocketCount;
                         VoxLinkMod.LOGGER.info("[Connection] Joiner symmetric NAT, create {} multi-socket punches", socketCount);
                      }
 
@@ -3572,6 +3681,7 @@ public class ConnectionManager {
 
                      for (int si = 0; si < socketCount; si++) {
                         UdpHolePuncher sp = new UdpHolePuncher();
+                        this.applyPunchTemplate(sp);
 
                         try {
                            sp.createSocket();
@@ -3618,11 +3728,11 @@ public class ConnectionManager {
                                           "[Connection] cycle={} UDP punch failed (attempt{}/{}) reason={} recvPunch={} recvAck={}",
                                           new Object[]{cycle, attempt, 3, reason, result.socketsReceivedPunch, result.socketsReceivedAck}
                                        );
-                                    PunchProfile.applyDynamicParams(
+                                    this.activePunchParams = 
                                        PunchTuner.nextParams(
-                                          PunchProfile.current(), this.localNatClass, this.remoteNatClass, cycle + 1, maxCycles, reason, this.lastPunchResult
+                                          this.punchProfile(), this.localNatClass, this.remoteNatClass, cycle + 1, maxCycles, reason, this.lastPunchResult
                                        )
-                                    );
+                                    ;
                                     finalPuncher.stopPunch();
                                     if (this.roomManager.currentRoom.get() != state) {
                                        try {
@@ -3826,11 +3936,11 @@ public class ConnectionManager {
                                           "[Connection] cycle={} multi-socket punch failed reason={} recvPunch={} recvAck={}",
                                           new Object[]{cycle, reason, result.socketsReceivedPunch, result.socketsReceivedAck}
                                        );
-                                    PunchProfile.applyDynamicParams(
+                                    this.activePunchParams = 
                                        PunchTuner.nextParams(
-                                          PunchProfile.current(), this.localNatClass, this.remoteNatClass, cycle + 1, maxCycles, reason, this.lastPunchResult
+                                          this.punchProfile(), this.localNatClass, this.remoteNatClass, cycle + 1, maxCycles, reason, this.lastPunchResult
                                        )
-                                    );
+                                    ;
 
                                     for (UdpHolePuncher spxxxx : multiSockets) {
                                        try {
@@ -4095,12 +4205,12 @@ public class ConnectionManager {
             }
          }
 
-         if (cycle == 0 && PunchProfile.current() == PunchProfile.DEFAULT) {
+         if (cycle == 0 && this.punchProfile() == PunchProfile.DEFAULT) {
             boolean hostSym = state.roomInfo.isHostSymmetric();
             boolean localSym = this.stunProbeResult != null && this.stunProbeResult.natType.isSymmetric();
             if (hostSym || localSym) {
-               PunchProfile.switchToAggressive("首轮失败+" + (hostSym ? "HostSym" : "LocalSym"));
-               VoxLinkMod.LOGGER.info("[Connection] Detected extreme symmetric NAT, switch to aggressive level next round: {}", PunchProfile.describe());
+               this.switchPunchProfile(PunchProfile.AGGRESSIVE, "首轮失败+" + (hostSym ? "HostSym" : "LocalSym"));
+               VoxLinkMod.LOGGER.info("[Connection] Detected extreme symmetric NAT, switch to aggressive level next round: {}", this.punchProfile().describeInstance());
             }
          }
 
@@ -4111,11 +4221,11 @@ public class ConnectionManager {
                   VoxLinkMod.LOGGER.warn("[Connection] Consecutive {} failures with same reason ({}), switch strategy", count, this.lastFailureReason);
                   switch (this.lastFailureReason) {
                      case NO_RESPONSE:
-                        PunchProfile.switchToHardSym("consecutive_no_response");
+                        this.switchPunchProfile(PunchProfile.HARDSYM, "consecutive_no_response");
                      case FIREWALL_DETECTED:
                         break;
                      default:
-                        PunchProfile.switchToAggressive("consecutive_" + this.lastFailureReason);
+                        this.switchPunchProfile(PunchProfile.AGGRESSIVE, "consecutive_" + this.lastFailureReason);
                   }
 
                   this.consecutiveFailureCount.set(0);
@@ -4130,7 +4240,7 @@ public class ConnectionManager {
          long delay = BACKOFF_DELAYS_MS[delayIdx];
          VoxLinkMod.LOGGER
             .info(
-               "[Connection] Cycle {}/{} failed, retry in {}s (backoff level={})", new Object[]{cycle + 1, maxCycles, delay / 1000L, PunchProfile.describe()}
+               "[Connection] Cycle {}/{} failed, retry in {}s (backoff level={})", new Object[]{cycle + 1, maxCycles, delay / 1000L, this.punchProfile().describeInstance()}
             );
          this.scheduler.schedule(() -> {
             if (this.roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
@@ -4160,8 +4270,8 @@ public class ConnectionManager {
       if (!isSymmetric && !hostSym) {
          this.startSimpleReversePunch(state);
       } else {
-         PunchProfile.switchToV100("sym_birthday");
-         int socketCount = isEasySym ? PunchProfile.current().birthdaySocketCount : PunchProfile.current().hardSymSocketCount;
+         this.switchPunchProfile(PunchProfile.V100, "sym_birthday");
+         int socketCount = isEasySym ? this.punchProfile().birthdaySocketCount : this.punchProfile().hardSymSocketCount;
          VoxLinkMod.LOGGER
             .info(
                "[ReversePunch] Detected symmetric (local={}, host={}) — birthday attack {} sockets (easySym={})",
@@ -4172,7 +4282,7 @@ public class ConnectionManager {
    }
 
    public void startBirthdayPunch(RoomManager.RoomState state) {
-      this.startBirthdayPunch(state, PunchProfile.current().birthdaySocketCount, false);
+      this.startBirthdayPunch(state, this.punchProfile().birthdaySocketCount, false);
    }
 
    public void startBirthdayPunch(RoomManager.RoomState state, int socketCount, boolean isEasySym) {
@@ -4266,7 +4376,7 @@ public class ConnectionManager {
                               this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("joiner_birthday_"));
                               this.showConnectFailed(state, "voxlink.connection.punch_timeout");
                            }
-                        }, PunchProfile.effectiveTimeoutMs() / 1000 + 5, TimeUnit.SECONDS);
+                        }, this.punchTimeoutMs() / 1000 + 5, TimeUnit.SECONDS);
                      }
                   } else {
                      VoxLinkMod.LOGGER.error("[BirthdayPunch] All STUN queries failed");
@@ -4279,6 +4389,7 @@ public class ConnectionManager {
 
    public void startSimpleReversePunch(RoomManager.RoomState state) {
       UdpHolePuncher puncher = new UdpHolePuncher();
+      this.applyPunchTemplate(puncher);
 
       try {
          puncher.createSocket();
@@ -4333,7 +4444,7 @@ public class ConnectionManager {
             }
 
             this.activeHolePunchers.remove("joiner_reverse");
-            this.startBirthdayPunch(state, PunchProfile.current().hardSymSocketCount, false);
+            this.startBirthdayPunch(state, this.punchProfile().hardSymSocketCount, false);
          } else {
             JsonObject offerData = new JsonObject();
             offerData.addProperty("joinerMappedIp", myMappedAddr.ip());
@@ -4373,8 +4484,8 @@ public class ConnectionManager {
                int fHostMappedPort = hostMappedPort;
                UdpHolePuncher finalPuncher = puncher;
                int portRange = joinerSymmetric
-                  ? PunchProfile.current().defaultPortRange
-                  : (state.roomInfo.isHostSymmetric() ? PunchProfile.current().portPredictionMaxRange : PunchProfile.current().defaultPortRange);
+                  ? this.punchProfile().defaultPortRange
+                  : (state.roomInfo.isHostSymmetric() ? this.punchProfile().portPredictionMaxRange : this.punchProfile().defaultPortRange);
                VoxLinkMod.LOGGER.info("[ReversePunch] Punch to {}:{} immediately (range=±{})", new Object[]{fHostMappedIp, fHostMappedPort, portRange});
                puncher.setOnPeerPunchReceived(addr -> {
                   String code = state.roomInfo.getCode();
@@ -4393,9 +4504,9 @@ public class ConnectionManager {
                         if (!result.isSuccess()) {
                            PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
                            this.lastPunchResult = result.withReason(reason);
-                           PunchProfile.applyDynamicParams(
-                              PunchTuner.nextParams(PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
-                           );
+                           this.activePunchParams = 
+                              PunchTuner.nextParams(this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
+                           ;
                            VoxLinkMod.LOGGER
                               .info(
                                  "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
@@ -4491,13 +4602,13 @@ public class ConnectionManager {
                   }
                }
             );
-            int portRange = PunchProfile.current().defaultPortRange;
+            int portRange = this.punchProfile().defaultPortRange;
             if (isEasySym) {
-               portRange = PunchProfile.current().easySymPortRange;
+               portRange = this.punchProfile().easySymPortRange;
             } else if (hostSymmetric) {
-               portRange = PunchProfile.current().defaultPortRange;
+               portRange = this.punchProfile().defaultPortRange;
             } else {
-               portRange = PunchProfile.current().minPortRange;
+               portRange = this.punchProfile().minPortRange;
             }
 
             puncher.punchWithPortPrediction(hostMappedIp, hostMappedPort, portRange, true)
@@ -4506,9 +4617,9 @@ public class ConnectionManager {
                      if (!result.isSuccess()) {
                         PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
                         this.lastPunchResult = result.withReason(reason);
-                        PunchProfile.applyDynamicParams(
-                           PunchTuner.nextParams(PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
-                        );
+                        this.activePunchParams = 
+                           PunchTuner.nextParams(this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
+                        ;
                         VoxLinkMod.LOGGER
                            .info(
                               "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
@@ -4590,7 +4701,7 @@ public class ConnectionManager {
 
             this.showConnectFailed(state, "voxlink.connection.punch_timeout");
          }
-      }, PunchProfile.effectiveTimeoutMs() / 1000 + 5, TimeUnit.SECONDS);
+      }, this.punchTimeoutMs() / 1000 + 5, TimeUnit.SECONDS);
    }
 
    public void connectViaBridge(RoomManager.RoomState state, ConnectionFallback.ConnectResult result) {
@@ -4724,7 +4835,7 @@ public class ConnectionManager {
 
       int round = this.continuousRetryRound.incrementAndGet();
       this.escalateProfileForRound(round);
-      VoxLinkMod.LOGGER.info("[Connection] Enter persistent retry round={}, level={}, reset cycle from 0", round, PunchProfile.describe());
+      VoxLinkMod.LOGGER.info("[Connection] Enter persistent retry round={}, level={}, reset cycle from 0", round, this.punchProfile().describeInstance());
       ConnectionState.transitionTo(ConnectionState.STUN_PROBE, "持续重试 round " + round);
       if (this.connectionTimeoutFuture != null) {
          this.connectionTimeoutFuture.cancel(false);
@@ -5039,8 +5150,9 @@ public class ConnectionManager {
                String fRelayIp = relayIp;
                int fRelayPort = relayPort;
 
-               for (int i = 0; i < PunchProfile.current().relaySocketCount; i++) {
+               for (int i = 0; i < this.punchProfile().relaySocketCount; i++) {
                   UdpHolePuncher rp = new UdpHolePuncher();
+                  this.applyPunchTemplate(rp);
 
                   try {
                      rp.createSocket();
@@ -5058,9 +5170,9 @@ public class ConnectionManager {
                            if (!result.isSuccess()) {
                               PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
                               this.lastPunchResult = result.withReason(reason);
-                              PunchProfile.applyDynamicParams(
-                                 PunchTuner.nextParams(PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
-                              );
+                              this.activePunchParams = 
+                                 PunchTuner.nextParams(this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
+                              ;
                               VoxLinkMod.LOGGER
                                  .info(
                                     "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
@@ -5231,8 +5343,9 @@ public class ConnectionManager {
                   String fTargetClientId = targetClientId;
                   ReliableUdpTransport fHostTransport = hostTransport;
 
-                  for (int i = 0; i < PunchProfile.current().relaySocketCount; i++) {
+                  for (int i = 0; i < this.punchProfile().relaySocketCount; i++) {
                      UdpHolePuncher cp = new UdpHolePuncher();
+                     this.applyPunchTemplate(cp);
 
                      try {
                         cp.createSocket();
@@ -5243,16 +5356,16 @@ public class ConnectionManager {
                      conePunchers.add(cp);
                      this.activeHolePunchers.put("relay_to_sym_" + i, cp);
                      int idx = i;
-                     cp.punchWithPortPrediction(fTargetIp, fTargetPort, 10)
+                     cp.punchWithPortPrediction(fTargetIp, fTargetPort, this.punchProfile().coneBackupPortRange)
                         .orTimeout(15L, TimeUnit.SECONDS)
                         .thenAccept(
                            result -> {
                               if (!result.isSuccess()) {
                                  PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
                                  this.lastPunchResult = result.withReason(reason);
-                                 PunchProfile.applyDynamicParams(
-                                    PunchTuner.nextParams(PunchProfile.current(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
-                                 );
+                                 this.activePunchParams = 
+                                    PunchTuner.nextParams(this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
+                                 ;
                                  VoxLinkMod.LOGGER
                                     .info(
                                        "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
@@ -5572,7 +5685,7 @@ public class ConnectionManager {
    }
 
    private void escalateProfileForRound(int round) {
-      PunchProfile current = PunchProfile.current();
+      PunchProfile current = this.punchProfile();
       if (current != PunchProfile.HARDSYM) {
          PunchProfile target;
          if (current == PunchProfile.AGGRESSIVE) {
@@ -5581,7 +5694,7 @@ public class ConnectionManager {
             target = PunchProfile.AGGRESSIVE;
          }
 
-         PunchProfile.switchTo(target, "continuous_retry_round_" + round);
+         this.switchPunchProfile(target, "continuous_retry_round_" + round);
       }
    }
 

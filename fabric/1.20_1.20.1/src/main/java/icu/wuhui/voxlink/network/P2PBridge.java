@@ -872,11 +872,25 @@ public class P2PBridge {
             () -> {
                Runnable onCloseFinal = onClose;
                Socket mcSocket = null;
+               AtomicBoolean firstPacketArrived = new AtomicBoolean(false);
 
                try {
                   InputStream udpIn = transport.getInputStream();
                   byte[] firstBuf = new byte[32768];
+                  Thread firstPacketWatchdog = new Thread(() -> {
+                     try {
+                        Thread.sleep(15000L);
+                        if (!firstPacketArrived.get() && transport.isConnected() && running.get()) {
+                           LOGGER.warn("UDP host bridge for client {} first packet timeout (15s), request ICE restart", clientId);
+                           transport.requestIceRestart();
+                        }
+                     } catch (InterruptedException var3) {
+                     }
+                  }, "VoxLink-BridgeWatchdog");
+                  firstPacketWatchdog.setDaemon(true);
+                  firstPacketWatchdog.start();
                   int firstLen = udpIn.read(firstBuf);
+                  firstPacketArrived.set(true);
                   if (firstLen <= 0) {
                      throw new IOException("UDP stream closed before first packet (read=" + firstLen + ")");
                   }

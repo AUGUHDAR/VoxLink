@@ -56,6 +56,45 @@ public class UdpHolePuncher {
    private volatile Consumer<InetSocketAddress> onPeerPunchReceived;
    private volatile List<UdpHolePuncher> socketGroup;
    private volatile boolean skipFirewallDetection;
+   private volatile PunchProfile profile;
+   private volatile PunchParams punchParams;
+
+   public void setProfile(PunchProfile p) {
+      this.profile = p;
+   }
+
+   public PunchProfile profile() {
+      PunchProfile p = this.profile;
+      return p != null ? p : PunchProfile.current();
+   }
+
+   public void setPunchParams(PunchParams params) {
+      this.punchParams = params;
+   }
+
+   public PunchParams punchParams() {
+      return this.punchParams;
+   }
+
+   public int effectiveTimeoutMs() {
+      PunchParams p = this.punchParams;
+      return p != null && p.timeoutMs > 0 ? p.timeoutMs : this.profile().punchTimeoutMs;
+   }
+
+   public int effectivePortRange() {
+      PunchParams p = this.punchParams;
+      return p != null && p.portRange > 0 ? p.portRange : this.profile().portPredictionMaxRange;
+   }
+
+   public int effectiveSendInterval() {
+      PunchParams p = this.punchParams;
+      return p != null && p.sendInterval > 0 ? p.sendInterval : this.profile().send.intervalMs;
+   }
+
+   public boolean effectiveSkipDirectPunch() {
+      PunchParams p = this.punchParams;
+      return p != null && p.skipDirectPunch;
+   }
 
    public static void shutdown() {
       ScheduledExecutorService s = PUNCH_TIMEOUT_SCHEDULER;
@@ -102,6 +141,10 @@ public class UdpHolePuncher {
       this.socketTransferred = true;
    }
 
+   public boolean isSocketTransferred() {
+      return this.socketTransferred;
+   }
+
    public void setSkipFirewallDetection(boolean skip) {
       this.skipFirewallDetection = skip;
    }
@@ -117,7 +160,7 @@ public class UdpHolePuncher {
       }
 
       this.socket = new DatagramSocket();
-      this.socket.setSoTimeout(PunchProfile.current().send.socketTimeoutMs);
+      this.socket.setSoTimeout(this.profile().send.socketTimeoutMs);
       return this.socket;
    }
 
@@ -129,7 +172,7 @@ public class UdpHolePuncher {
 
       try {
          this.socket = new DatagramSocket(preferredPort);
-         this.socket.setSoTimeout(PunchProfile.current().send.socketTimeoutMs);
+         this.socket.setSoTimeout(this.profile().send.socketTimeoutMs);
          return this.socket;
       } catch (SocketException e) {
          return this.createSocket();
@@ -180,10 +223,10 @@ public class UdpHolePuncher {
       long startTime = System.currentTimeMillis();
       int socketsTried = socketGroup.size();
       byte[] data = new byte[]{MAGIC[0], MAGIC[1], 1, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
-      int maxTotalCycles = PunchProfile.effectiveTimeoutMs() / PunchProfile.effectiveSendInterval();
+      int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
       LOGGER.info(
          "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
-         new Object[]{remoteIp, targetPort, socketGroup.size(), PunchProfile.effectiveSendInterval(), PunchProfile.describe()}
+         new Object[]{remoteIp, targetPort, socketGroup.size(), this.effectiveSendInterval(), this.profile().describeInstance()}
       );
       List<DatagramChannel> channels = new ArrayList<>();
       Map<DatagramChannel, UdpHolePuncher> channelToPuncher = new HashMap<>();
@@ -328,7 +371,7 @@ public class UdpHolePuncher {
          long sendStartMs = System.currentTimeMillis();
 
          while (this.punching.get() && !this.holeOpen.get() && cycles < maxTotalCycles) {
-            if (!skipFirewallCheck && cycles >= PunchProfile.current().firewallDetectCycles && !this.remoteReceived.get()) {
+            if (!skipFirewallCheck && cycles >= this.profile().firewallDetectCycles && !this.remoteReceived.get()) {
                long elapsed = System.currentTimeMillis() - sendStartMs;
                LOGGER.warn("[UdpHolePuncher] Multi-socket firewall check: sent {} cycles/{}ms no reply, UDP blocked, abort early", cycles, elapsed);
                synchronized (completionLock) {
@@ -354,7 +397,7 @@ public class UdpHolePuncher {
             cycles++;
 
             try {
-               Thread.sleep(PunchProfile.effectiveSendInterval());
+               Thread.sleep(this.effectiveSendInterval());
             } catch (InterruptedException e) {
                Thread.currentThread().interrupt();
                break;
@@ -385,7 +428,7 @@ public class UdpHolePuncher {
                }
             }
          }
-      }, PunchProfile.effectiveTimeoutMs() + PunchProfile.current().send.extraWaitMs, TimeUnit.MILLISECONDS);
+      }, this.effectiveTimeoutMs() + this.profile().send.extraWaitMs, TimeUnit.MILLISECONDS);
       this.timeoutFuture = tf;
       P2PBridge.registerPendingUdpTimeout(tf);
       return result;
@@ -424,7 +467,7 @@ public class UdpHolePuncher {
          this.completed.set(false);
          LOGGER.info(
             "[UdpHolePuncher] punchMultiPort start: target={}, port count={}, range={}~{}, profile={}",
-            new Object[]{remoteIp, targetPorts.size(), targetPorts.get(0), targetPorts.get(targetPorts.size() - 1), PunchProfile.describe()}
+            new Object[]{remoteIp, targetPorts.size(), targetPorts.get(0), targetPorts.get(targetPorts.size() - 1), this.profile().describeInstance()}
          );
 
          try {
@@ -556,7 +599,7 @@ public class UdpHolePuncher {
          Thread sendThread = new Thread(
             () -> {
                int cyclesPerformed = 0;
-               int maxTotalCycles = PunchProfile.effectiveTimeoutMs() / PunchProfile.effectiveSendInterval();
+               int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
                long sendStartMs = System.currentTimeMillis();
                byte[] data = new byte[]{MAGIC[0], MAGIC[1], 1, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
                LOGGER.info(
@@ -567,15 +610,7 @@ public class UdpHolePuncher {
                while (this.punching.get() && !this.holeOpen.get() && cyclesPerformed < maxTotalCycles) {
                   if (cyclesPerformed >= maxTotalCycles * 4 / 5 && !this.remoteReceived.get()) {
                      long elapsed = System.currentTimeMillis() - sendStartMs;
-                     LOGGER.warn("[UdpHolePuncher] Multi-port firewall check: sent {} cycles/{}ms no reply, UDP blocked, abort early", cyclesPerformed, elapsed);
-                     synchronized (completionLock) {
-                        if (this.completed.compareAndSet(false, true)) {
-                           this.punching.set(false);
-                           result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, true));
-                        }
-
-                        return;
-                     }
+                     LOGGER.debug("[UdpHolePuncher] Multi-port no reply after {} cycles/{}ms, continue until timeout (peer may be offline)", cyclesPerformed, elapsed);
                   }
 
                   for (int port : targetPorts) {
@@ -586,7 +621,7 @@ public class UdpHolePuncher {
                   cyclesPerformed++;
 
                   try {
-                     Thread.sleep(PunchProfile.effectiveSendInterval());
+                     Thread.sleep(this.effectiveSendInterval());
                   } catch (InterruptedException e) {
                      Thread.currentThread().interrupt();
                      break;
@@ -620,7 +655,7 @@ public class UdpHolePuncher {
                   result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false));
                }
             }
-         }, PunchProfile.effectiveTimeoutMs() + PunchProfile.current().send.extraWaitLongMs, TimeUnit.MILLISECONDS);
+         }, this.effectiveTimeoutMs() + this.profile().send.extraWaitLongMs, TimeUnit.MILLISECONDS);
          this.timeoutFuture = tf;
          P2PBridge.registerPendingUdpTimeout(tf);
          return result;
@@ -637,7 +672,7 @@ public class UdpHolePuncher {
       this.completed.set(false);
       LOGGER.info(
          "[UdpHolePuncher] punchWithPortPrediction start: target={}:{}, range={}, fixed={}, profile={}",
-         new Object[]{remoteIp, basePort, portRange, fixedRange, PunchProfile.describe()}
+         new Object[]{remoteIp, basePort, portRange, fixedRange, this.profile().describeInstance()}
       );
 
       try {
@@ -755,7 +790,7 @@ public class UdpHolePuncher {
       Thread sendThread = new Thread(
          () -> {
             int cyclesPerformed = 0;
-            int maxTotalCycles = PunchProfile.effectiveTimeoutMs() / PunchProfile.effectiveSendInterval();
+            int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
             int debugSendCount = 0;
             long sendStartMs = System.currentTimeMillis();
             LOGGER.info(
@@ -765,16 +800,9 @@ public class UdpHolePuncher {
 
             while (this.punching.get() && !this.holeOpen.get() && cyclesPerformed < maxTotalCycles) {
                if (portPrediction) {
-                  int currentRange;
-                  if (useFixedRange) {
-                     currentRange = portRange;
-                  } else {
-                     int rangeIdx = cyclesPerformed / PunchProfile.current().cyclesPerRange;
-                     if (rangeIdx >= PunchProfile.current().progressiveRanges.length) {
-                        rangeIdx = PunchProfile.current().progressiveRanges.length - 1;
-                     }
-
-                     currentRange = Math.min(PunchProfile.current().progressiveRanges[rangeIdx], PunchProfile.effectivePortRange());
+                  int currentRange = portRange > 0 ? portRange : this.effectivePortRange();
+                  if (cyclesPerformed > 0) {
+                     currentRange = Math.min(currentRange, 20);
                   }
 
                   if (debugSendCount < 5) {
@@ -808,7 +836,7 @@ public class UdpHolePuncher {
                debugSendCount++;
 
                try {
-                  Thread.sleep(PunchProfile.effectiveSendInterval());
+                  Thread.sleep(this.effectiveSendInterval());
                } catch (InterruptedException e) {
                   Thread.currentThread().interrupt();
                   break;
@@ -846,24 +874,24 @@ public class UdpHolePuncher {
                }
             }
          }
-      }, PunchProfile.effectiveTimeoutMs() + PunchProfile.current().send.extraWaitMs, TimeUnit.MILLISECONDS);
+      }, this.effectiveTimeoutMs() + this.profile().send.extraWaitMs, TimeUnit.MILLISECONDS);
       this.timeoutFuture = tf;
       P2PBridge.registerPendingUdpTimeout(tf);
       return result;
    }
 
    public CompletableFuture<PunchResult> punchEasySymDual(String remoteIp, int remoteBasePort, StunProbe.NatType localNat, StunProbe.NatType remoteNat) {
-      return this.punchEasySymDual(remoteIp, remoteBasePort, localNat, remoteNat, PunchProfile.current().easySymDualSocketCount);
+      return this.punchEasySymDual(remoteIp, remoteBasePort, localNat, remoteNat, this.profile().easySymDualSocketCount);
    }
 
    public CompletableFuture<PunchResult> punchEasySymDual(
       String remoteIp, int remoteBasePort, StunProbe.NatType localNat, StunProbe.NatType remoteNat, int socketCount
    ) {
-      int effectiveSocketCount = socketCount > 0 ? socketCount : PunchProfile.current().easySymDualSocketCount;
+      int effectiveSocketCount = socketCount > 0 ? socketCount : this.profile().easySymDualSocketCount;
       LOGGER.info(
          "[UdpHolePuncher] EasySym mutual punch start: target={}:{}, sockets={}, range=+/-{}, local={}, remote={}, profile={}",
          new Object[]{
-            remoteIp, remoteBasePort, effectiveSocketCount, PunchProfile.current().easySymDualPortRange, localNat.key, remoteNat.key, PunchProfile.describe()
+            remoteIp, remoteBasePort, effectiveSocketCount, this.profile().easySymDualPortRange, localNat.key, remoteNat.key, this.profile().describeInstance()
          }
       );
       List<UdpHolePuncher> punchers = new ArrayList<>();
@@ -889,7 +917,7 @@ public class UdpHolePuncher {
       List<CompletableFuture<PunchResult>> futures = new ArrayList<>();
 
       for (UdpHolePuncher p : punchers) {
-         futures.add(p.punchWithPortPrediction(remoteIp, remoteBasePort, PunchProfile.current().easySymDualPortRange, true));
+         futures.add(p.punchWithPortPrediction(remoteIp, remoteBasePort, this.profile().easySymDualPortRange, true));
       }
 
       CompletableFuture<PunchResult> result = new CompletableFuture<>();
@@ -961,7 +989,7 @@ public class UdpHolePuncher {
          portsToSend.add(centerPort);
          Random rnd = new Random();
          if (useRandomScan) {
-            int windowSize = PunchProfile.current().send.jitterBaseMs + rnd.nextInt(PunchProfile.current().send.jitterRangeMs);
+            int windowSize = this.profile().send.jitterBaseMs + rnd.nextInt(this.profile().send.jitterRangeMs);
             int lowBound = Math.max(1, centerPort - portRange);
             int highBound = Math.min(65535, centerPort + portRange);
             int rangeSize = highBound - lowBound + 1;
@@ -1010,18 +1038,18 @@ public class UdpHolePuncher {
             }
          );
 
-         for (int roundPass = 0; roundPass < PunchProfile.current().send.minRounds; roundPass++) {
+         for (int roundPass = 0; roundPass < this.profile().send.minRounds; roundPass++) {
             for (int i = 0; i < portsToSend.size(); i++) {
                int port = portsToSend.get(i);
 
-               for (int r = 0; r < PunchProfile.current().send.minPass; r++) {
+               for (int r = 0; r < this.profile().send.minPass; r++) {
                   DatagramPacket packet = new DatagramPacket(data, data.length, addr, port);
                   sendPkt(this.socket, packet);
                }
 
                if (i < portsToSend.size() - 1) {
                   try {
-                     Thread.sleep(PunchProfile.current().send.sleepShortMs);
+                     Thread.sleep(this.profile().send.sleepShortMs);
                   } catch (InterruptedException ignored) {
                      Thread.currentThread().interrupt();
                      return;
@@ -1031,7 +1059,7 @@ public class UdpHolePuncher {
 
             if (roundPass < 2) {
                try {
-                  Thread.sleep(PunchProfile.current().send.sleepLongMs);
+                  Thread.sleep(this.profile().send.sleepLongMs);
                } catch (InterruptedException ignored) {
                   Thread.currentThread().interrupt();
                   return;
@@ -1220,10 +1248,10 @@ public class UdpHolePuncher {
       long startTime = System.currentTimeMillis();
       int socketsTried = socketGroup.size();
       byte[] data = new byte[]{MAGIC[0], MAGIC[1], 1, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
-      int maxTotalCycles = PunchProfile.effectiveTimeoutMs() / PunchProfile.effectiveSendInterval();
+      int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
       LOGGER.info(
          "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
-         new Object[]{remoteIp, targetPort, socketGroup.size(), PunchProfile.describe()}
+         new Object[]{remoteIp, targetPort, socketGroup.size(), this.profile().describeInstance()}
       );
       List<Thread> recvThreads = new ArrayList<>();
 
@@ -1233,7 +1261,7 @@ public class UdpHolePuncher {
          DatagramSocket ssock = sp.getSocket();
          if (ssock != null && !ssock.isClosed()) {
             try {
-               ssock.setSoTimeout(PunchProfile.current().send.socketTimeoutMs);
+               ssock.setSoTimeout(this.profile().send.socketTimeoutMs);
             } catch (Exception var21) {
             }
 
@@ -1312,7 +1340,7 @@ public class UdpHolePuncher {
          long sendStartMs = System.currentTimeMillis();
 
          while (this.punching.get() && !this.holeOpen.get() && cycles < maxTotalCycles) {
-            if (!skipFirewallCheck && cycles >= PunchProfile.current().firewallDetectCycles && !this.remoteReceived.get()) {
+            if (!skipFirewallCheck && cycles >= this.profile().firewallDetectCycles && !this.remoteReceived.get()) {
                long elapsed = System.currentTimeMillis() - sendStartMs;
                LOGGER.warn("[UdpHolePuncher] Multi-socket firewall check (Legacy): sent {} cycles/{}ms no reply, UDP blocked", cycles, elapsed);
                synchronized (completionLock) {
@@ -1338,7 +1366,7 @@ public class UdpHolePuncher {
             cycles++;
 
             try {
-               Thread.sleep(PunchProfile.effectiveSendInterval());
+               Thread.sleep(this.effectiveSendInterval());
             } catch (InterruptedException e) {
                Thread.currentThread().interrupt();
                break;
@@ -1368,7 +1396,7 @@ public class UdpHolePuncher {
                }
             }
          }
-      }, PunchProfile.effectiveTimeoutMs() + PunchProfile.current().send.extraWaitMs, TimeUnit.MILLISECONDS);
+      }, this.effectiveTimeoutMs() + this.profile().send.extraWaitMs, TimeUnit.MILLISECONDS);
       this.timeoutFuture = tf;
       P2PBridge.registerPendingUdpTimeout(tf);
       return result;

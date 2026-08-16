@@ -38,8 +38,8 @@ public final class PunchTuner {
             params.timeoutMs = Math.min(params.timeoutMs + 4000, 30000);
             break;
          case PREDICTION_OFF:
-            PunchProfile.switchToHardSym("prediction_off");
-            params = PunchParams.fromProfile(PunchProfile.current());
+            params = PunchParams.fromProfile(PunchProfile.HARDSYM);
+            params.portRange = Math.min(params.portRange * 2, 500);
             break;
          case RESPONSE_NO_ACK:
             params.sendInterval = Math.max(params.sendInterval / 2, 50);

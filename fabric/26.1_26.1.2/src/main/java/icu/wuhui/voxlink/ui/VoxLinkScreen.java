@@ -2,6 +2,7 @@ package icu.wuhui.voxlink.ui;
 
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.network.PunchProfile;
+import icu.wuhui.voxlink.room.ConnectionManager;
 import icu.wuhui.voxlink.room.ConnectionState;
 import icu.wuhui.voxlink.room.RoomInfo;
 import icu.wuhui.voxlink.terracotta.TerracottaBinary;
@@ -354,7 +355,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                if (cs != ConnectionState.CONNECTED && cs != ConnectionState.IDLE && cs != ConnectionState.FAILED) {
                   StringBuilder detail = new StringBuilder();
                   detail.append(cs.displayName).append(" ").append(ConnectionState.getStateDurationMs() / 1000L).append("s");
-                  if (PunchProfile.isAggressive()) {
+                  if (PunchProfile.AGGRESSIVE == ConnectionManager.getInstance().getActivePunchProfile()) {
                      detail.append(" | AGGRESSIVE");
                   }
 

@@ -25,24 +25,28 @@ public final class PunchProfile {
    public final int birthdaySocketCount;
    public final int joinerSymSocketCount;
    public final int relaySocketCount;
+   public final int joinerMultiPortRange;
+   public final int easySymMutualSocketCount;
+   public final int easySymMutualRetrySocketCount;
+   public final int coneBackupPortRange;
    public final PunchProfile.SendParams send;
    public final int socketStunCount;
    public final int socketCreateIntervalMs;
    private static final PunchProfile.SendParams SEND_DEFAULT = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 3, 3, 1, 10);
    public static final PunchProfile DEFAULT = new PunchProfile(
-      "DEFAULT", 8000, 20, 20, new int[]{4, 8, 15, 20}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+      "DEFAULT", 8000, 20, 20, new int[]{4, 8, 15, 20}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
    );
    public static final PunchProfile AGGRESSIVE = new PunchProfile(
-      "AGGRESSIVE", 20000, 50, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+      "AGGRESSIVE", 20000, 50, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
    );
    public static final PunchProfile HARDSYM = new PunchProfile(
-      "HARDSYM", 25000, 60, 500, new int[]{20, 50, 100, 200, 500}, 2, 25, 20, 30, 50, 500, 3, 20, 84, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+      "HARDSYM", 25000, 60, 500, new int[]{20, 50, 100, 200, 500}, 2, 25, 20, 30, 50, 500, 3, 20, 84, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
    );
    public static final PunchProfile EASY_SYM_DUAL = new PunchProfile(
-      "EASY_SYM_DUAL", 12000, 30, 50, new int[]{5, 10, 20, 30, 50}, 2, 25, 50, 20, 50, 50, 3, 20, 25, 5, 3, 84, 32, 50, 5, 2, 50, SEND_DEFAULT
+      "EASY_SYM_DUAL", 12000, 30, 50, new int[]{5, 10, 20, 30, 50}, 2, 25, 50, 20, 50, 50, 3, 20, 25, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
    );
    public static final PunchProfile V100 = new PunchProfile(
-      "V100", 8000, 38, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 84, 20, 3, 84, 84, 50, 5, 2, 50, SEND_DEFAULT
+      "V100", 8000, 38, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 84, 20, 3, 84, 84, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
    );
    private static volatile PunchProfile current = DEFAULT;
    private static volatile String switchReason = "initial";
@@ -69,6 +73,10 @@ public final class PunchProfile {
       int birthdaySocketCount,
       int joinerSymSocketCount,
       int relaySocketCount,
+      int joinerMultiPortRange,
+      int easySymMutualSocketCount,
+      int easySymMutualRetrySocketCount,
+      int coneBackupPortRange,
       int socketStunCount,
       int socketCreateIntervalMs,
       PunchProfile.SendParams send
@@ -93,6 +101,10 @@ public final class PunchProfile {
       this.birthdaySocketCount = birthdaySocketCount;
       this.joinerSymSocketCount = joinerSymSocketCount;
       this.relaySocketCount = relaySocketCount;
+      this.joinerMultiPortRange = joinerMultiPortRange;
+      this.easySymMutualSocketCount = easySymMutualSocketCount;
+      this.easySymMutualRetrySocketCount = easySymMutualRetrySocketCount;
+      this.coneBackupPortRange = coneBackupPortRange;
       this.socketStunCount = socketStunCount;
       this.socketCreateIntervalMs = socketCreateIntervalMs;
       this.send = send;
@@ -171,6 +183,17 @@ public final class PunchProfile {
          + current.firewallDetectCycles
          + ", range="
          + current.portPredictionMaxRange
+         + ")";
+   }
+
+   public String describeInstance() {
+      return this.name
+         + "(timeout="
+         + this.punchTimeoutMs
+         + "ms, cycles="
+         + this.firewallDetectCycles
+         + ", range="
+         + this.portPredictionMaxRange
          + ")";
    }
 

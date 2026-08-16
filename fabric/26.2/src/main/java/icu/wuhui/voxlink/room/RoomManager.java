@@ -1696,7 +1696,11 @@ public class RoomManager {
       VoxLinkMod.LOGGER.info("Peer connected: {}", from);
       RoomManager.RoomState st = this.currentRoom.get();
       if (st != null && st != PENDING && st.roomInfo.isHost()) {
-         this.connectionManager.stopAllPunchingAfterHostBridge();
+         if (from != null && this.connectionManager.hasUdpTransport(from)) {
+            this.connectionManager.stopAllPunchingAfterHostBridge();
+         } else {
+            VoxLinkMod.LOGGER.info("[RoomManager] Peer connected but host transport not ready, keep punching");
+         }
          this.scheduler.schedule(() -> {
             try {
                Minecraft mc = Minecraft.getInstance();
