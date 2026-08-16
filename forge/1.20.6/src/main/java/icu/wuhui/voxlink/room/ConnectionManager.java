@@ -1943,6 +1943,11 @@ public class ConnectionManager {
                         VoxLinkMod.LOGGER.info("[HostPunchInfo] Update localNat {} -> {} (multi-socket symmetric detected, delta={})", new Object[]{this.localNatClass, newLocal, hostPunchSocketDelta});
                         this.localNatClass = newLocal;
                      }
+
+                     if (hostPunchEasySym && !"symmetric_easy_inc".equals(fState.roomInfo.getNatType())) {
+                        fState.roomInfo.setNatType("symmetric_easy_inc");
+                        VoxLinkMod.LOGGER.info("[HostPunchInfo] Override cached NAT {} -> symmetric_easy_inc (multi-socket dual STUN detected)", "cached");
+                     }
                   }
 
                   JsonObject symData = new JsonObject();
@@ -2880,12 +2885,7 @@ public class ConnectionManager {
          if (hostSym) {
             return hostEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
          } else {
-            String nt = state.roomInfo.getNatType();
-            if (nt != null && !nt.isEmpty() && !"unknown".equals(nt)) {
-               return NatClass.CONE;
-            } else {
-               return state.roomInfo.getHostIp() != null ? NatClass.CONE : NatClass.UNKNOWN;
-            }
+            return NatClass.UNKNOWN;
          }
       } else {
          return NatClass.UNKNOWN;
