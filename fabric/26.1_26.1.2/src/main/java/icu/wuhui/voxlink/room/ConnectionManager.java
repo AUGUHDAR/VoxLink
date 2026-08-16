@@ -1711,6 +1711,25 @@ public class ConnectionManager {
                   "[RoomManager] Punching {}ms no success, target changed ({} -> {}), restart with new target",
                   new Object[]{System.currentTimeMillis() - this.lastPunchStartMs, this.lastPunchInfoId, punchInfoId}
                );
+
+            String[] lastParts = this.lastPunchInfoId.split(":");
+            if (lastParts.length == 2 && lastParts[0].equals(joinerMappedIp)) {
+               this.lastPunchInfoId = punchInfoId;
+
+               for (UdpHolePuncher hp : this.activeHolePunchers.values()) {
+                  if (hp != null && hp.getSocket() != null && !hp.getSocket().isClosed()) {
+                     hp.updateTarget(joinerMappedIp, joinerMappedPort);
+                  }
+               }
+
+               VoxLinkMod.LOGGER
+                  .info(
+                     "[RoomManager] joiner mapped port drift ({} -> {}), update target, keep socket group stable",
+                     new Object[]{lastParts[1], joinerMappedPort}
+                  );
+               return;
+            }
+
             this.hostPunching = false;
             this.activeHolePunchers.entrySet().removeIf(e -> {
                if (e.getKey().startsWith("host_")) {
@@ -3592,7 +3611,6 @@ public class ConnectionManager {
                                        this.punchProfile(), this.localNatClass, this.remoteNatClass, cycle + 1, maxCycles, reason, this.lastPunchResult
                                     )
                                  ;
-                                 this.addressBlacklist.recordUdpFailure(punchTargetAddr);
                                  dualPuncher.stopPunch();
                                  if (this.roomManager.currentRoom.get() != state) {
                                     this.connectionCycleActive.set(false);
@@ -3630,7 +3648,6 @@ public class ConnectionManager {
                         )
                         .exceptionally(e -> {
                            VoxLinkMod.LOGGER.warn("[Connection] EasySym mutual punch failed: {}", e.getMessage());
-                           this.addressBlacklist.recordUdpFailure(punchTargetAddr);
                            dualPuncher.stopPunch();
                            if (this.roomManager.currentRoom.get() != state) {
                               this.connectionCycleActive.set(false);
@@ -3656,7 +3673,7 @@ public class ConnectionManager {
                         portRange = 0;
                      } else if (state.roomInfo.isHostSymmetric()) {
                         if (hostMappedPortDelta != 0) {
-                           portRange = hostMappedPortRange > 0 ? hostMappedPortRange : this.punchProfile().widePortRange;
+                           portRange = Math.max(hostMappedPortRange > 0 ? hostMappedPortRange : this.punchProfile().widePortRange, this.punchProfile().maxPortRange);
                         } else if (cycle == 0) {
                            portRange = this.punchProfile().maxPortRange;
                         } else {
@@ -3761,7 +3778,6 @@ public class ConnectionManager {
                                     } else if (this.activeHolePunchers.get("joiner") != finalPuncher) {
                                        VoxLinkMod.LOGGER.info("[Connection] Puncher replaced, no retry");
                                     } else {
-                                       this.addressBlacklist.recordUdpFailure(punchTargetAddr);
                                        if (result.firewallDetected) {
                                           VoxLinkMod.LOGGER.warn("[Connection] Firewall blocked UDP, skip retry enter Wave 2 TCP fallback");
 
@@ -3880,7 +3896,6 @@ public class ConnectionManager {
                                        return null;
                                     }
 
-                                    this.addressBlacklist.recordUdpFailure(punchTargetAddr);
                                     if (!(e.getCause() instanceof FirewallBlockedException) && !(e instanceof FirewallBlockedException)) {
                                        if (attempt < 3) {
                                           long delay = 800L * (1L << Math.min(attempt - 1, 4));
