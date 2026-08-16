@@ -38,7 +38,7 @@ public final class PunchProfile {
       "DEFAULT", 8000, 20, 20, new int[]{4, 8, 15, 20}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT_FAST
    );
    public static final PunchProfile AGGRESSIVE = new PunchProfile(
-      "AGGRESSIVE", 20000, 50, 100, new int[]{10, 25, 50, 75, 100}, 2, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT
+      "AGGRESSIVE", 20000, 50, 100, new int[]{10, 25, 50, 75, 100}, 1, 25, 20, 30, 50, 100, 3, 20, 20, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT_FAST
    );
    public static final PunchProfile HARDSYM = new PunchProfile(
       "HARDSYM", 25000, 60, 500, new int[]{20, 50, 100, 200, 500}, 2, 25, 20, 30, 50, 500, 3, 20, 84, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, SEND_DEFAULT

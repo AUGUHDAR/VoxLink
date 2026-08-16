@@ -381,8 +381,16 @@ public class ConnectionManager {
       }
    }
 
+   private volatile long lastProfileSwitchMs = 0L;
+
    private void switchPunchProfile(PunchProfile target, String reason) {
       if (target != null && target != this.activePunchProfile) {
+         long now = System.currentTimeMillis();
+         if (this.lastProfileSwitchMs != 0L && now - this.lastProfileSwitchMs < 20000L) {
+            return;
+         }
+
+         this.lastProfileSwitchMs = now;
          PunchProfile old = this.activePunchProfile;
          this.activePunchProfile = target;
          VoxLinkMod.LOGGER.info("[PunchProfile] Instance switch: {} -> {} reason: {}", old, target.name, reason);
@@ -1659,7 +1667,7 @@ public class ConnectionManager {
             }
          }
 
-         if (punchAgeMs >= 0L && punchAgeMs < 60000L && hostGroupAlive && this.lastPunchInfoId != null && !this.lastPunchInfoId.isEmpty()) {
+         if (punchAgeMs >= 0L && punchAgeMs < 120000L && hostGroupAlive && this.lastPunchInfoId != null && !this.lastPunchInfoId.isEmpty()) {
             isActive = true;
          }
       }
@@ -2000,7 +2008,7 @@ public class ConnectionManager {
 
                   ScheduledFuture<?> punchTimeout = this.scheduler.schedule(() -> {
                      if (this.hostPunching) {
-                        VoxLinkMod.LOGGER.info("[HostPunchInfo] 60s fallback cleanup host socket client={}", clientId);
+                        VoxLinkMod.LOGGER.info("[HostPunchInfo] 120s fallback cleanup host socket client={}", clientId);
                         this.hostPunching = false;
                         this.lastPunchInfoId = "";
                         this.activeHolePunchers.remove("host");
@@ -2014,7 +2022,7 @@ public class ConnectionManager {
                            }
                         }
                      }
-                  }, 60L, TimeUnit.SECONDS);
+                  }, 120L, TimeUnit.SECONDS);
                   boolean joinerSymmetric = fData.has("joinerSymmetric") && fData.get("joinerSymmetric").getAsBoolean();
                   String hostNat = fState.roomInfo.getNatType();
                   int hostPortRange = 0;
@@ -2033,7 +2041,7 @@ public class ConnectionManager {
                      );
                   P2PBridge.armLazyP2pDeadline();
                   boolean hostDriftSync = hostPunchSocketSymmetric || fState.roomInfo.isHostSymmetric();
-                  long driftMaxDurMs = 60000L;
+                  long driftMaxDurMs = 120000L;
                   long driftStartMs = System.currentTimeMillis();
                   long driftLastSentMs = 0L;
 
@@ -2123,7 +2131,7 @@ public class ConnectionManager {
                         }
                      }
 
-                     long punchGroupDeadline = System.currentTimeMillis() + 60000L;
+                     long punchGroupDeadline = System.currentTimeMillis() + 120000L;
 
                      while (!this.connectionWon.get() && this.roomManager.currentRoom.get() == fState && System.currentTimeMillis() < punchGroupDeadline) {
                         boolean anyAlive = false;
