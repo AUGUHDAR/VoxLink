@@ -997,8 +997,16 @@ public class UdpHolePuncher {
          Random rnd = new Random();
          if (useRandomScan) {
             int windowSize = this.profile().send.jitterBaseMs + rnd.nextInt(this.profile().send.jitterRangeMs);
-            int lowBound = Math.max(1, centerPort - portRange);
-            int highBound = Math.min(65535, centerPort + portRange);
+            int lowBound;
+            int highBound;
+            if (portRange >= 100) {
+               lowBound = 1;
+               highBound = 65535;
+            } else {
+               lowBound = Math.max(1, centerPort - portRange);
+               highBound = Math.min(65535, centerPort + portRange);
+            }
+
             int rangeSize = highBound - lowBound + 1;
             windowSize = Math.min(windowSize, rangeSize - 1);
             if (windowSize > 0) {

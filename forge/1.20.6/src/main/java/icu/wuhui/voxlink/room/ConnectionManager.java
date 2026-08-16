@@ -1805,7 +1805,7 @@ public class ConnectionManager {
             HOST_MULTI_COUNT = PunchProfile.HARDSYM.hardSymSocketCount;
             this.switchPunchProfile(PunchProfile.HARDSYM, "Sym×Sym");
          } else if (isHostSym) {
-            HOST_MULTI_COUNT = PunchProfile.HARDSYM.hostMultiMinSocketCount;
+            HOST_MULTI_COUNT = Math.max(PunchProfile.HARDSYM.hostMultiMinSocketCount, this.punchProfile().hostMultiSocketCount);
          } else if (portUnreachable) {
             HOST_MULTI_COUNT = this.punchProfile().hostMultiSocketCount;
          } else {
