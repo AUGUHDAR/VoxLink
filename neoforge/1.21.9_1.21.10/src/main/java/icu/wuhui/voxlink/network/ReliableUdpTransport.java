@@ -1,18 +1,17 @@
 package icu.wuhui.voxlink.network;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -20,730 +19,975 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ReliableUdpTransport implements AutoCloseable {
+   private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-rudp");
+   private static final byte[] MAGIC = new byte[]{86, 76};
+   private static final byte TYPE_PUNCH = 1;
+   private static final byte TYPE_PUNCH_ACK = 2;
+   private static final byte TYPE_DATA = 3;
+   private static final byte TYPE_ACK = 4;
+   private static final byte TYPE_DISCONNECT = 7;
+   private static final byte TYPE_KEEPALIVE = 8;
+   private static final byte TYPE_FEC_XOR = 9;
+   private static final byte TYPE_RESTART = 10;
+   private static final int FEC_GROUP_SIZE = 4;
+   private static final int HEADER_SIZE = 11;
+   private static final int PAYLOAD_LEN_SIZE = 2;
+   private static final int MAX_PAYLOAD = 1400;
+   private static final int WINDOW_SIZE = 64;
+   private static final long RETRANSMIT_TIMEOUT_MS = 800L;
+   private static final int KEEPALIVE_INTERVAL_S = 2;
+   private static final int KEEPALIVE_TIMEOUT_S = 60;
+   private static final int MAX_SILENT_RETRANSMIT_CYCLES = 30;
+   private static final int UNRELIABLE_FAIL_THRESHOLD = 5;
+   private static final long UNRELIABLE_SILENCE_MS = 8000L;
+   private static final int MAX_FEC_GROUP_SIZE = 20;
+   private static final int FEC_MAX_PACKET_SIZE = 1454;
+   private static final int FEC_CLEAN_WINDOW = 10;
+   private static final int SMALL_PACKET_THRESHOLD = 512;
+   private static final int POLL_INTERVAL_MS = 50;
+   private static final int MAX_BUFFERED_CHUNKS = 512;
+   private static final long RTO_MIN_MS = 100L;
+   private static final long RTO_MAX_MS = 800L;
+   private static final long CLOCK_GRANULARITY_MS = 10L;
+   private static final int WINDOW_MIN = 16;
+   private static final int WINDOW_MAX = 64;
+   private static final int LOSS_SAMPLE_LIMIT = 200;
+   private static final long MAX_RETRANSMIT_TOTAL_MS = 24000L;
+   private static final long RETRANSMIT_BACKOFF_MS = 250L;
+   private volatile long srtt = -1L;
+   private volatile long rttvar = 0L;
+   private volatile long rto = 200L;
+   private int lossEvents = 0;
+   private int lossLostEvents = 0;
+   private volatile int effectiveWindow = 64;
+   private volatile int lastAckSeq = -1;
+   private int dupAckCount = 0;
+   private final DatagramSocket socket;
+   private volatile InetSocketAddress remoteAddress;
+   private volatile boolean remoteConfirmed = false;
+   private volatile boolean running = true;
+   private final AtomicBoolean connected = new AtomicBoolean(false);
+   private volatile long lastRecvTime = System.currentTimeMillis();
+   private final AtomicBoolean closed = new AtomicBoolean(false);
+   private volatile int writeState = 0;
+   private static final int STATE_WRITABLE = 0;
+   private static final int STATE_UNRELIABLE = 1;
+   private volatile int consecutiveFailures = 0;
+   private final AtomicBoolean iceRestartTriggered = new AtomicBoolean(false);
+   private volatile Runnable onIceRestartRequested;
+   private volatile int nextSendSeq = 0;
+   private volatile int oldestUnackedSeq = 0;
+   private final ConcurrentSkipListMap<Integer, ReliableUdpTransport.PendingPacket> pendingAcks = new ConcurrentSkipListMap<>();
+   private final Object sendLock = new Object();
+   private final AtomicInteger nextExpectedSeq = new AtomicInteger(0);
+   private final ConcurrentSkipListMap<Integer, byte[]> recvBuffer = new ConcurrentSkipListMap<>();
+   private final Object recvLock = new Object();
+   private final ReliableUdpTransport.UdpInputStream inputStream = new ReliableUdpTransport.UdpInputStream();
+   private final ReliableUdpTransport.UdpOutputStream outputStream = new ReliableUdpTransport.UdpOutputStream();
+   private final ConcurrentLinkedQueue<byte[]> outboundQueue = new ConcurrentLinkedQueue<>();
+   private int bufferedChunks = 0;
+   private Thread recvThread;
+   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+      Thread t = new Thread(r, "VoxLink-Retransmit");
+      t.setDaemon(true);
+      return t;
+   });
+   private ScheduledFuture<?> retransmitTask;
+   private ScheduledFuture<?> keepaliveTask;
+   private final List<byte[]> fecSendGroup = new ArrayList<>();
+   private int fecSendGroupSeq = -1;
+   private final Object fecSendLock = new Object();
+   private final ConcurrentHashMap<Integer, ConcurrentHashMap<Integer, byte[]>> fecRecvGroup = new ConcurrentHashMap<>();
+   private final ConcurrentHashMap<Integer, byte[]> fecRecvXor = new ConcurrentHashMap<>();
+   private final ConcurrentHashMap<Integer, int[]> fecRecvLengths = new ConcurrentHashMap<>();
+   private volatile int minActiveGroupId = Integer.MAX_VALUE;
+   private volatile int pendingRebindPort = -1;
+   private volatile long pendingRebindTime = 0L;
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-rudp");
+   public ReliableUdpTransport(DatagramSocket socket, InetSocketAddress remoteAddress) {
+      this.socket = socket;
+      this.remoteAddress = remoteAddress;
 
-    private static final byte[] MAGIC = {0x56, 0x4C};
-    private static final byte TYPE_DATA = 0x03;
-    private static final byte TYPE_ACK = 0x04;
-    private static final byte TYPE_DISCONNECT = 0x07;
-    private static final byte TYPE_KEEPALIVE = 0x08;
-    private static final byte TYPE_FEC_XOR = 0x09;
-    //debounce 阶段三: ICE Restart信号 通知对端连接已断请重新打洞 老版本收到会忽略(unknown type)
-    private static final byte TYPE_RESTART = 0x0A;
-    private static final int FEC_GROUP_SIZE = 4;
+      try {
+         socket.setSoTimeout(100);
+      } catch (Exception var4) {
+      }
+   }
 
-    private static final int HEADER_SIZE = 11;
-    private static final int PAYLOAD_LEN_SIZE = 2;
-    private static final int MAX_PAYLOAD = 1024;
-    private static final int WINDOW_SIZE = 64;
-    private static final long RETRANSMIT_TIMEOUT_MS = 800;
-    private static final int MAX_RETRANSMITS = 30;
-    private static final int KEEPALIVE_INTERVAL_S = 2;
-    private static final int KEEPALIVE_TIMEOUT_S = 60;
-    // 无数据=对端挂了。用lastRecvTime(任何包都刷新)而非lastAckTime(仅ACK刷新)，
-    // 避免丢包时接收方不发ACK导致误判。阈值=30*800ms=24s，容忍严重丢包。
-    private static final int MAX_SILENT_RETRANSMIT_CYCLES = 30;
-    private static final int EXTRA_HEADER_BYTES = 4;
-    private static final int MAX_FEC_GROUP_SIZE = 20;
-    private static final int FEC_CLEAN_WINDOW = 10;
-    private static final int SMALL_PACKET_THRESHOLD = 512;
-    private static final int POLL_INTERVAL_MS = 50;
+   public InputStream getInputStream() {
+      return this.inputStream;
+   }
 
-    private final DatagramSocket socket;
-    //debounce 对称NAT对端端口会漂: 打洞层拿到的端口常是对端败北socket的映射 必须可重绑定
-    private volatile InetSocketAddress remoteAddress;
-    //debounce 首包锁定: 一旦从当前remote收到过包即锁定 防ICE池旧transport残留包把地址劫回死端口
-    private volatile boolean remoteConfirmed = false;
-    private volatile boolean running = true;
-    private final AtomicBoolean connected = new AtomicBoolean(false);
-    private volatile long lastRecvTime = System.currentTimeMillis();
-    private final AtomicBoolean closed = new AtomicBoolean(false);
-    //debounce 阶段三: ICE Restart回调 + 防重入标志 上层注册后传输层断开时触发重新打洞
-    private final AtomicBoolean iceRestartTriggered = new AtomicBoolean(false);
-    private volatile Runnable onIceRestartRequested;
+   public OutputStream getOutputStream() {
+      return this.outputStream;
+   }
 
-    private volatile int nextSendSeq = 0;
-    private volatile int oldestUnackedSeq = 0;
-    private final ConcurrentSkipListMap<Integer, PendingPacket> pendingAcks = new ConcurrentSkipListMap<>();
-    private final Object sendLock = new Object();
-
-    private final AtomicInteger nextExpectedSeq = new AtomicInteger(0);
-    private final ConcurrentSkipListMap<Integer, byte[]> recvBuffer = new ConcurrentSkipListMap<>();
-    private final Object recvLock = new Object();
-
-    private final UdpInputStream inputStream = new UdpInputStream();
-    private final UdpOutputStream outputStream = new UdpOutputStream();
-
-    private Thread recvThread;
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "VoxLink-Retransmit");
-        t.setDaemon(true);
-        return t;
-    });
-    private ScheduledFuture<?> retransmitTask;
-    private ScheduledFuture<?> keepaliveTask;
-
-    private final List<byte[]> fecSendGroup = new ArrayList<>();
-    private int fecSendGroupSeq = -1;
-    private final Object fecSendLock = new Object();
-
-    private final ConcurrentHashMap<Integer, ConcurrentHashMap<Integer, byte[]>> fecRecvGroup = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Integer, byte[]> fecRecvXor = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Integer, int[]> fecRecvLengths = new ConcurrentHashMap<>();
-    private volatile int minActiveGroupId = Integer.MAX_VALUE;
-
-    public ReliableUdpTransport(DatagramSocket socket, InetSocketAddress remoteAddress) {
-        this.socket = socket;
-        this.remoteAddress = remoteAddress;
-        try {
-            socket.setSoTimeout(100);
-        } catch (Exception ignored) {}
-    }
-
-    public InputStream getInputStream() {
-        return inputStream;
-    }
-
-    public OutputStream getOutputStream() {
-        return outputStream;
-    }
-
-    public void start() {
-        if (!connected.compareAndSet(false, true)) return;
-        // 刷新NAT映射
-        try {
-            byte[] data = new byte[HEADER_SIZE];
+   public void start() {
+      if (this.connected.compareAndSet(false, true)) {
+         try {
+            byte[] data = new byte[11];
             System.arraycopy(MAGIC, 0, data, 0, 2);
-            data[2] = TYPE_KEEPALIVE;
+            data[2] = 8;
             writeInt32(data, 3, 0);
             writeInt32(data, 7, 0);
-            socket.send(new DatagramPacket(data, data.length, remoteAddress));
-        } catch (IOException ignored) {}
+            this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+         } catch (IOException var2) {
+         }
 
-        recvThread = new Thread(this::receiveLoop, "VoxLink-UdpRecv");
-        recvThread.setDaemon(true);
-        recvThread.start();
+         this.recvThread = new Thread(this::receiveLoop, "VoxLink-UdpRecv");
+         this.recvThread.setDaemon(true);
+         this.recvThread.start();
+         this.retransmitTask = this.scheduler.scheduleWithFixedDelay(this::retransmitCheck, 50L, 50L, TimeUnit.MILLISECONDS);
+         this.scheduler.scheduleWithFixedDelay(this::flushOutbound, 50L, 50L, TimeUnit.MILLISECONDS);
+         this.keepaliveTask = this.scheduler.scheduleWithFixedDelay(this::sendKeepalive, 2L, 2L, TimeUnit.SECONDS);
+      }
+   }
 
-        retransmitTask = scheduler.scheduleWithFixedDelay(this::retransmitCheck,
-                RETRANSMIT_TIMEOUT_MS, RETRANSMIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        keepaliveTask = scheduler.scheduleWithFixedDelay(this::sendKeepalive,
-                KEEPALIVE_INTERVAL_S, KEEPALIVE_INTERVAL_S, TimeUnit.SECONDS);
-    }
+   public boolean isConnected() {
+      return this.connected.get() && this.running;
+   }
 
-    public boolean isConnected() {
-        return connected.get() && running;
-    }
+   public void setOnIceRestartRequested(Runnable r) {
+      this.onIceRestartRequested = r;
+   }
 
-    //debounce 阶段三: 上层注册回调 传输层断开时触发ICE Restart(重新STUN+打洞)
-    public void setOnIceRestartRequested(Runnable r) {
-        this.onIceRestartRequested = r;
-    }
-
-    //debounce 阶段三: 触发ICE Restart回调 原子去重避免重复触发
-    private void triggerIceRestart() {
-        if (!iceRestartTriggered.compareAndSet(false, true)) return;
-        Runnable r = onIceRestartRequested;
-        if (r != null) {
-            try { r.run(); } catch (Exception e) {
-                LOGGER.warn("[ReliableUdp] ICE Restart callback exception: {}", e.getMessage());
-            }
-        }
-    }
-
-    //debounce 阶段三: 发送RESTART信号通知对端 老版本收到会忽略(走default case)
-    private void sendRestart() {
-        try {
-            byte[] data = new byte[HEADER_SIZE];
-            System.arraycopy(MAGIC, 0, data, 0, 2);
-            data[2] = TYPE_RESTART;
-            writeInt32(data, 3, 0);
-            writeInt32(data, 7, 0);
-            socket.send(new DatagramPacket(data, data.length, remoteAddress));
-        } catch (IOException ignored) {}
-    }
-
-    //debounce 同IP端口漂移才重绑定 防随机垃圾包劫持会话; 漂移常见于一端对称NAT多socket打洞
-    //锁定语义: 当前remote从未收到包时才允许漂移到首个真实来包端口 收到过即锁死
-    private void maybeRebindRemote(DatagramPacket packet) {
-        InetSocketAddress cur = remoteAddress;
-        if (cur == null) return;
-        boolean fromCurrent = packet.getPort() == cur.getPort() && packet.getAddress().equals(cur.getAddress());
-        if (fromCurrent) {
-            remoteConfirmed = true;
-            return;
-        }
-        if (remoteConfirmed) return;
-        if (!packet.getAddress().equals(cur.getAddress())) return;
-        remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
-        remoteConfirmed = true;
-        LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
-    }
-
-    private void receiveLoop() {
-        byte[] buf = new byte[MAX_PAYLOAD + HEADER_SIZE + PAYLOAD_LEN_SIZE + EXTRA_HEADER_BYTES];
-        DatagramPacket packet = new DatagramPacket(buf, buf.length);
-        while (running) {
+   private void triggerIceRestart() {
+      if (this.iceRestartTriggered.compareAndSet(false, true)) {
+         Runnable r = this.onIceRestartRequested;
+         if (r != null) {
             try {
-                socket.receive(packet);
-                if (packet.getLength() < HEADER_SIZE) continue;
-                if (buf[0] != MAGIC[0] || buf[1] != MAGIC[1]) continue;
-
-                //debounce 对称NAT: 对端胜出socket的映射端口常与打洞期观测端口不同
-                //同IP合法传输包到达即重绑定到实际来源端口 否则数据发死端口永远无ACK
-                maybeRebindRemote(packet);
-
-                byte type = buf[2];
-                int seq = readInt32(buf, 3);
-                int ack = readInt32(buf, 7);
-
-                switch (type) {
-                    case TYPE_DATA -> handleData(seq, ack, buf, packet.getLength());
-                    case TYPE_ACK -> { handleAck(ack); lastRecvTime = System.currentTimeMillis(); }
-                    case TYPE_DISCONNECT -> handleDisconnect();
-                    case TYPE_KEEPALIVE -> lastRecvTime = System.currentTimeMillis();
-                    case TYPE_FEC_XOR -> handleFecXor(readInt32(buf, 3), buf, packet.getLength());
-                    //debounce 阶段三: 收到对端RESTART信号 触发回调上层重新打洞
-                    case TYPE_RESTART -> {
-                        lastRecvTime = System.currentTimeMillis();
-                        LOGGER.info("[ReliableUdp] Received peer RESTART signal, trigger ICE Restart");
-                        triggerIceRestart();
-                    }
-                }
-            } catch (SocketTimeoutException e) {
-                // continue
-            } catch (IOException e) {
-                if (socket.isClosed() || !running) {
-                    running = false;
-                    break;
-                }
-                LOGGER.warn("[ReliableUdp] Receive error: {}", e.getMessage());
-            } catch (Throwable t) {
-                //debounce 防RuntimeException静默杀死线程 sendBytes死等
-                LOGGER.error("[ReliableUdp] receiveLoop died with exception: {}", t.getMessage(), t);
-                running = false;
-                connected.set(false);
-                synchronized (recvLock) { recvLock.notifyAll(); }
-                synchronized (sendLock) { sendLock.notifyAll(); }
-                //debounce 异步触发close 不能在recvThread自身join self 否则死锁
-                try { scheduler.execute(this::close); } catch (Exception ignored) {}
-                break;
+               r.run();
+            } catch (Exception e) {
+               LOGGER.warn("[ReliableUdp] ICE Restart callback exception: {}", e.getMessage());
             }
-        }
-    }
+         }
+      }
+   }
 
-    private void handleData(int seq, int ack, byte[] buf, int packetLen) {
-        lastRecvTime = System.currentTimeMillis();
-        processAck(ack);
+   private void sendRestart() {
+      try {
+         byte[] data = new byte[11];
+         System.arraycopy(MAGIC, 0, data, 0, 2);
+         data[2] = 10;
+         writeInt32(data, 3, 0);
+         writeInt32(data, 7, 0);
+         this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+      } catch (IOException var2) {
+      }
+   }
 
-        byte[] payload = copyPayload(buf, packetLen);
-        if (payload == null) {
-            sendAck();
-            return;
-        }
+   private void sendPunchAck(SocketAddress from) {
+      try {
+         byte[] data = new byte[]{MAGIC[0], MAGIC[1], 2, 0, 0};
+         this.socket.send(new DatagramPacket(data, data.length, from));
+      } catch (IOException var3) {
+      }
+   }
 
-        int groupId = seq / FEC_GROUP_SIZE;
-        fecRecvGroup.computeIfAbsent(groupId, k -> new ConcurrentHashMap<>()).put(seq, payload);
-        // FEC内存泄漏防护: 淘汰过期的group(比当前最小活跃group小10个以上的)
-        if (groupId < minActiveGroupId) minActiveGroupId = groupId;
-        if (fecRecvGroup.size() > MAX_FEC_GROUP_SIZE) {
-            int cutoff = minActiveGroupId + FEC_CLEAN_WINDOW;
-            fecRecvGroup.keySet().removeIf(g -> g < cutoff);
-            fecRecvXor.keySet().removeIf(g -> g < cutoff);
-            fecRecvLengths.keySet().removeIf(g -> g < cutoff);
-            if (!fecRecvGroup.isEmpty()) {
-                minActiveGroupId = fecRecvGroup.keySet().stream().mapToInt(Integer::intValue).min().orElse(minActiveGroupId);
+   private void maybeRebindRemote(DatagramPacket packet) {
+      InetSocketAddress cur = this.remoteAddress;
+      if (cur != null) {
+         boolean fromCurrent = packet.getPort() == cur.getPort() && packet.getAddress().equals(cur.getAddress());
+         if (fromCurrent) {
+            this.remoteConfirmed = true;
+            this.pendingRebindPort = -1;
+         } else if (!this.remoteConfirmed) {
+            if (packet.getAddress().equals(cur.getAddress())) {
+               long now = System.currentTimeMillis();
+               if (packet.getPort() == this.pendingRebindPort && now - this.pendingRebindTime < 2000L) {
+                  this.remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
+                  this.remoteConfirmed = true;
+                  this.pendingRebindPort = -1;
+                  LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
+               } else {
+                  this.pendingRebindPort = packet.getPort();
+                  this.pendingRebindTime = now;
+               }
             }
-        }
+         }
+      }
+   }
 
-        synchronized (recvLock) {
-            if (seq == nextExpectedSeq.get()) {
-                inputStream.writeBuffer(payload);
-                nextExpectedSeq.getAndIncrement();
+   private void receiveLoop() {
+      byte[] buf = new byte[1454];
+      DatagramPacket packet = new DatagramPacket(buf, buf.length);
 
-                while (recvBuffer.containsKey(nextExpectedSeq.get())) {
-                    byte[] cached = recvBuffer.remove(nextExpectedSeq.get());
-                    inputStream.writeBuffer(cached);
-                    nextExpectedSeq.getAndIncrement();
-                }
-                recvLock.notifyAll();
-            } else if (seqAfter(seq, nextExpectedSeq.get()) && seq < nextExpectedSeq.get() + WINDOW_SIZE * 2) {
-                recvBuffer.putIfAbsent(seq, payload);
+      while (this.running) {
+         try {
+            this.socket.receive(packet);
+            if (packet.getLength() >= 3 && buf[0] == MAGIC[0] && buf[1] == MAGIC[1]) {
+               byte type = buf[2];
+               if (type != 1 && type != 2) {
+                  if (packet.getLength() >= 11) {
+                     this.maybeRebindRemote(packet);
+                     int seq = readInt32(buf, 3);
+                     int ack = readInt32(buf, 7);
+                     switch (type) {
+                        case 3:
+                           this.handleData(seq, ack, buf, packet.getLength());
+                           break;
+                        case 4:
+                           this.handleAck(ack);
+                           this.lastRecvTime = System.currentTimeMillis();
+                        case 5:
+                        case 6:
+                        default:
+                           break;
+                        case 7:
+                           this.handleDisconnect();
+                           break;
+                        case 8:
+                           this.lastRecvTime = System.currentTimeMillis();
+                           this.consecutiveFailures = 0;
+                           if (this.writeState != 0) {
+                              this.writeState = 0;
+                              LOGGER.info("[ReliableUdp] writeState restored to WRITABLE");
+                           }
+
+                           this.sendKeepalive();
+                           break;
+                        case 9:
+                           this.handleFecXor(readInt32(buf, 3), buf, packet.getLength());
+                           break;
+                        case 10:
+                           this.lastRecvTime = System.currentTimeMillis();
+                           LOGGER.info("[ReliableUdp] Received peer RESTART signal, trigger ICE Restart");
+                           this.triggerIceRestart();
+                     }
+                  }
+               } else {
+                  this.maybeRebindRemote(packet);
+                  this.lastRecvTime = System.currentTimeMillis();
+                  if (type == 1) {
+                     this.sendPunchAck(packet.getSocketAddress());
+                  }
+               }
+            }
+         } catch (SocketTimeoutException var11) {
+         } catch (IOException e) {
+            if (this.socket.isClosed() || !this.running) {
+               this.running = false;
+               break;
+            }
+
+            LOGGER.warn("[ReliableUdp] Receive error: {}", e.getMessage());
+         } catch (Throwable t) {
+            LOGGER.error("[ReliableUdp] receiveLoop died with exception: {}", t.getMessage(), t);
+            this.running = false;
+            this.connected.set(false);
+            synchronized (this.recvLock) {
+               this.recvLock.notifyAll();
+            }
+
+            synchronized (this.sendLock) {
+               this.sendLock.notifyAll();
+            }
+
+            try {
+               this.scheduler.execute(this::close);
+            } catch (Exception var8) {
+            }
+            break;
+         }
+      }
+   }
+
+   private void handleData(int seq, int ack, byte[] buf, int packetLen) {
+      this.lastRecvTime = System.currentTimeMillis();
+      this.processAck(ack);
+      byte[] payload = this.copyPayload(buf, packetLen);
+      if (payload == null) {
+         this.sendAck();
+      } else {
+         int expected = this.nextExpectedSeq.get();
+         if (seqAfter(expected, seq) && seqDiff(expected, seq) > 128) {
+            LOGGER.warn("[ReliableUdp] Peer restarted (seq {} far behind expected {}), reset receive state", seq, expected);
+            this.nextExpectedSeq.set(seq);
+            this.recvBuffer.clear();
+            this.fecRecvGroup.clear();
+            this.fecRecvXor.clear();
+            this.fecRecvLengths.clear();
+            this.minActiveGroupId = Integer.MAX_VALUE;
+         }
+
+         int groupId = seq / 4;
+         this.fecRecvGroup.computeIfAbsent(groupId, k -> new ConcurrentHashMap<>()).put(seq, payload);
+         if (groupId < this.minActiveGroupId) {
+            this.minActiveGroupId = groupId;
+         }
+
+         if (this.fecRecvGroup.size() > 20) {
+            int cutoff = this.minActiveGroupId + 10;
+            this.fecRecvGroup.keySet().removeIf(g -> g < cutoff);
+            this.fecRecvXor.keySet().removeIf(g -> g < cutoff);
+            this.fecRecvLengths.keySet().removeIf(g -> g < cutoff);
+            if (!this.fecRecvGroup.isEmpty()) {
+               this.minActiveGroupId = this.fecRecvGroup.keySet().stream().mapToInt(Integer::intValue).min().orElse(this.minActiveGroupId);
+            }
+         }
+
+         synchronized (this.recvLock) {
+            int expectedSeq = this.nextExpectedSeq.get();
+            if (seq != expectedSeq) {
+               if (!seqAfter(seq, expectedSeq) || seqDiff(seq, expectedSeq) >= 128) {
+                  this.sendAck();
+                  return;
+               }
+
+               this.recvBuffer.putIfAbsent(seq, payload);
             } else {
-                sendAck();
-                return;
+               if (this.bufferedChunks >= 512) {
+                  return;
+               }
+
+               this.inputStream.writeBuffer(payload);
+               this.bufferedChunks++;
+               this.nextExpectedSeq.getAndIncrement();
+
+               while (this.recvBuffer.containsKey(this.nextExpectedSeq.get()) && this.bufferedChunks < 512) {
+                  byte[] cached = this.recvBuffer.remove(this.nextExpectedSeq.get());
+                  this.inputStream.writeBuffer(cached);
+                  this.bufferedChunks++;
+                  this.nextExpectedSeq.getAndIncrement();
+               }
+
+               this.recvLock.notifyAll();
             }
-        }
+         }
 
-        sendAck();
-        tryFecRecovery(groupId);
-    }
+         this.sendAck();
+         this.tryFecRecovery(groupId);
+      }
+   }
 
-    private byte[] copyPayload(byte[] buf, int packetLen) {
-        int payloadLen = readUint16(buf, HEADER_SIZE);
-        if (HEADER_SIZE + PAYLOAD_LEN_SIZE + payloadLen > packetLen) return null;
-        byte[] payload = new byte[payloadLen];
-        System.arraycopy(buf, HEADER_SIZE + PAYLOAD_LEN_SIZE, payload, 0, payloadLen);
-        return payload;
-    }
+   private byte[] copyPayload(byte[] buf, int packetLen) {
+      int payloadLen = readUint16(buf, 11);
+      if (13 + payloadLen > packetLen) {
+         return null;
+      }
 
-    private void handleFecXor(int groupId, byte[] buf, int packetLen) {
-        lastRecvTime = System.currentTimeMillis();
-        int xorPayloadLen = readUint16(buf, HEADER_SIZE);
-        int count = buf[HEADER_SIZE + PAYLOAD_LEN_SIZE] & 0xFF;
-        int lengthsOffset = HEADER_SIZE + PAYLOAD_LEN_SIZE + 1;
-        int xorOffset = lengthsOffset + count * 2;
-        if (xorOffset + xorPayloadLen > packetLen) return;
-        int[] originalLengths = new int[count];
-        for (int i = 0; i < count; i++) {
+      byte[] payload = new byte[payloadLen];
+      System.arraycopy(buf, 13, payload, 0, payloadLen);
+      return payload;
+   }
+
+   private void handleFecXor(int groupId, byte[] buf, int packetLen) {
+      this.lastRecvTime = System.currentTimeMillis();
+      int xorPayloadLen = readUint16(buf, 11);
+      int count = buf[13] & 255;
+      int lengthsOffset = 14;
+      int xorOffset = lengthsOffset + count * 2;
+      if (xorOffset + xorPayloadLen <= packetLen) {
+         int[] originalLengths = new int[count];
+
+         for (int i = 0; i < count; i++) {
             originalLengths[i] = readUint16(buf, lengthsOffset + i * 2);
-        }
-        byte[] xorPayload = new byte[xorPayloadLen];
-        System.arraycopy(buf, xorOffset, xorPayload, 0, xorPayloadLen);
-        fecRecvXor.put(groupId, xorPayload);
-        fecRecvLengths.put(groupId, originalLengths);
-        tryFecRecovery(groupId);
-    }
+         }
 
-    private void tryFecRecovery(int groupId) {
-        Map<Integer, byte[]> groupData = fecRecvGroup.get(groupId);
-        byte[] xorPayload = fecRecvXor.get(groupId);
-        int[] originalLengths = fecRecvLengths.get(groupId);
-        if (groupData == null || xorPayload == null || originalLengths == null) return;
-        int startSeq = groupId * FEC_GROUP_SIZE;
-        int missingSeq = -1;
-        int missingIndex = -1;
-        int receivedCount = 0;
-        for (int i = 0; i < FEC_GROUP_SIZE; i++) {
+         byte[] xorPayload = new byte[xorPayloadLen];
+         System.arraycopy(buf, xorOffset, xorPayload, 0, xorPayloadLen);
+         this.fecRecvXor.put(groupId, xorPayload);
+         this.fecRecvLengths.put(groupId, originalLengths);
+         this.tryFecRecovery(groupId);
+      }
+   }
+
+   private void tryFecRecovery(int groupId) {
+      Map<Integer, byte[]> groupData = this.fecRecvGroup.get(groupId);
+      byte[] xorPayload = this.fecRecvXor.get(groupId);
+      int[] originalLengths = this.fecRecvLengths.get(groupId);
+      if (groupData != null && xorPayload != null && originalLengths != null) {
+         int startSeq = groupId * 4;
+         int missingSeq = -1;
+         int missingIndex = -1;
+         int receivedCount = 0;
+
+         for (int i = 0; i < 4; i++) {
             int s = startSeq + i;
             if (groupData.containsKey(s)) {
-                receivedCount++;
-            } else if (seqAfter(nextExpectedSeq.get(), s)) {
-                receivedCount++;
+               receivedCount++;
+            } else if (seqAfter(this.nextExpectedSeq.get(), s)) {
+               receivedCount++;
             } else {
-                missingSeq = s;
-                missingIndex = i;
+               missingSeq = s;
+               missingIndex = i;
             }
-        }
-        if (receivedCount == FEC_GROUP_SIZE - 1 && missingSeq >= 0) {
-            byte[] recovered = xorPayload.clone();
-            for (Map.Entry<Integer, byte[]> e : groupData.entrySet()) {
-                byte[] p = e.getValue();
-                int len = Math.min(recovered.length, p.length);
-                for (int i = 0; i < len; i++) {
-                    recovered[i] ^= p[i];
-                }
+         }
+
+         if (receivedCount == 3 && missingSeq >= 0) {
+            byte[] recovered = (byte[])xorPayload.clone();
+
+            for (Entry<Integer, byte[]> e : groupData.entrySet()) {
+               byte[] p = e.getValue();
+               int len = Math.min(recovered.length, p.length);
+
+               for (int i = 0; i < len; i++) {
+                  recovered[i] ^= p[i];
+               }
             }
+
             int origLen = missingIndex < originalLengths.length ? originalLengths[missingIndex] : recovered.length;
             if (origLen < recovered.length) {
-                byte[] trimmed = new byte[origLen];
-                System.arraycopy(recovered, 0, trimmed, 0, origLen);
-                recovered = trimmed;
+               byte[] trimmed = new byte[origLen];
+               System.arraycopy(recovered, 0, trimmed, 0, origLen);
+               recovered = trimmed;
             }
-            synchronized (recvLock) {
-                recvBuffer.put(missingSeq, recovered);
-                while (recvBuffer.containsKey(nextExpectedSeq.get())) {
-                    byte[] cached = recvBuffer.remove(nextExpectedSeq.get());
-                    inputStream.writeBuffer(cached);
-                    nextExpectedSeq.getAndIncrement();
-                }
-                recvLock.notifyAll();
+
+            synchronized (this.recvLock) {
+               if (this.bufferedChunks < 512) {
+                  this.recvBuffer.put(missingSeq, recovered);
+               }
+
+               while (this.bufferedChunks < 512 && this.recvBuffer.containsKey(this.nextExpectedSeq.get())) {
+                  byte[] cached = this.recvBuffer.remove(this.nextExpectedSeq.get());
+                  this.inputStream.writeBuffer(cached);
+                  this.bufferedChunks++;
+                  this.nextExpectedSeq.getAndIncrement();
+               }
+
+               this.recvLock.notifyAll();
             }
+
             LOGGER.debug("[ReliableUdp] FEC recovered seq {}", missingSeq);
-            fecRecvGroup.remove(groupId);
-            fecRecvXor.remove(groupId);
-            fecRecvLengths.remove(groupId);
-        } else if (receivedCount == FEC_GROUP_SIZE) {
-            fecRecvGroup.remove(groupId);
-            fecRecvXor.remove(groupId);
-            fecRecvLengths.remove(groupId);
-        }
-    }
+            this.fecRecvGroup.remove(groupId);
+            this.fecRecvXor.remove(groupId);
+            this.fecRecvLengths.remove(groupId);
+         } else if (receivedCount == 4) {
+            this.fecRecvGroup.remove(groupId);
+            this.fecRecvXor.remove(groupId);
+            this.fecRecvLengths.remove(groupId);
+         }
+      }
+   }
 
-    private static byte[] computeXorPayload(List<byte[]> payloads) {
-        int maxLen = 0;
-        for (byte[] p : payloads) {
-            if (p.length > maxLen) maxLen = p.length;
-        }
-        byte[] xor = new byte[maxLen];
-        for (byte[] p : payloads) {
-            for (int i = 0; i < p.length; i++) {
-                xor[i] ^= p[i];
+   private static byte[] computeXorPayload(List<byte[]> payloads) {
+      int maxLen = 0;
+
+      for (byte[] p : payloads) {
+         if (p.length > maxLen) {
+            maxLen = p.length;
+         }
+      }
+
+      byte[] xor = new byte[maxLen];
+
+      for (byte[] p : payloads) {
+         for (int i = 0; i < p.length; i++) {
+            xor[i] ^= p[i];
+         }
+      }
+
+      return xor;
+   }
+
+   private void handleAck(int ack) {
+      this.processAck(ack);
+   }
+
+   private void processAck(int ack) {
+      synchronized (this.sendLock) {
+         if (ack == this.lastAckSeq) {
+            this.dupAckCount++;
+            if (this.dupAckCount >= 3 && !this.pendingAcks.isEmpty()) {
+               ReliableUdpTransport.PendingPacket oldest = this.pendingAcks.get(this.oldestUnackedSeq);
+               if (oldest != null) {
+                  oldest.sendTime = System.currentTimeMillis();
+                  oldest.retries++;
+                  this.sendDataPacket(this.oldestUnackedSeq, oldest.data, false);
+                  this.recordLoss(true);
+               }
+
+               this.dupAckCount = 0;
             }
-        }
-        return xor;
-    }
+         } else {
+            this.lastAckSeq = ack;
+            this.dupAckCount = 0;
+         }
 
-    private void handleAck(int ack) {
-        processAck(ack);
-    }
-
-    private void processAck(int ack) {
-        synchronized (sendLock) {
-            while (!pendingAcks.isEmpty() && seqAfter(ack, oldestUnackedSeq)) {
-                pendingAcks.remove(oldestUnackedSeq);
-                oldestUnackedSeq++;
+         while (!this.pendingAcks.isEmpty() && seqAfter(ack, this.oldestUnackedSeq)) {
+            ReliableUdpTransport.PendingPacket pp = this.pendingAcks.get(this.oldestUnackedSeq);
+            if (pp != null && pp.retries == 0) {
+               this.updateRto(System.currentTimeMillis() - pp.sendTime);
             }
-            sendLock.notifyAll();
-        }
-    }
 
-    private void handleDisconnect() {
-        LOGGER.warn("[ReliableUdp] Received DISCONNECT packet");
-        running = false;
-        connected.set(false);
-        synchronized (recvLock) {
-            recvLock.notifyAll();
-        }
-        synchronized (sendLock) {
-            sendLock.notifyAll();
-        }
-    }
+            this.pendingAcks.remove(this.oldestUnackedSeq);
+            this.oldestUnackedSeq++;
+            this.consecutiveFailures = 0;
+            this.recordLoss(false);
+         }
 
-    private void sendAck() {
-        try {
-            byte[] data = new byte[HEADER_SIZE];
+         if (this.writeState == 1) {
+            this.writeState = 0;
+            LOGGER.info("[ReliableUdp] writeState UNRELIABLE->WRITABLE (ack received)");
+         }
+
+         this.sendLock.notifyAll();
+      }
+   }
+
+   private void updateRto(long sample) {
+      if (sample > 0L) {
+         if (this.srtt < 0L) {
+            this.srtt = sample;
+            this.rttvar = sample / 2L;
+         } else {
+            this.rttvar = (3L * this.rttvar + Math.abs(this.srtt - sample)) / 4L;
+            this.srtt = (7L * this.srtt + sample) / 8L;
+         }
+
+         this.rto = Math.max(100L, Math.min(800L, this.srtt + Math.max(10L, 4L * this.rttvar)));
+      }
+   }
+
+   private void recordLoss(boolean lost) {
+      if (lost) {
+         this.lossLostEvents++;
+      }
+
+      this.lossEvents++;
+      if (this.lossEvents >= 200) {
+         this.lossLostEvents = (this.lossLostEvents + 1) / 2;
+         this.lossEvents = (this.lossEvents + 1) / 2;
+      }
+
+      double rate = (double)this.lossLostEvents / Math.max(this.lossEvents, 1);
+      int w;
+      if (rate < 0.03) {
+         w = 64;
+      } else if (rate < 0.08) {
+         w = 48;
+      } else if (rate < 0.15) {
+         w = 32;
+      } else {
+         w = 16;
+      }
+
+      if (w != this.effectiveWindow) {
+         this.effectiveWindow = w;
+         LOGGER.debug("[ReliableUdp] congestion window {} (loss={}%)", w, (int)(rate * 100.0));
+      }
+   }
+
+   public long getRtoMs() {
+      return this.rto;
+   }
+
+   private void handleDisconnect() {
+      LOGGER.warn("[ReliableUdp] Received DISCONNECT packet");
+      this.running = false;
+      this.connected.set(false);
+      synchronized (this.recvLock) {
+         this.recvLock.notifyAll();
+      }
+
+      synchronized (this.sendLock) {
+         this.sendLock.notifyAll();
+      }
+   }
+
+   private void sendAck() {
+      try {
+         byte[] data = new byte[11];
+         System.arraycopy(MAGIC, 0, data, 0, 2);
+         data[2] = 4;
+         writeInt32(data, 3, 0);
+         writeInt32(data, 7, this.nextExpectedSeq.get());
+         this.enqueueSend(data);
+      } catch (Exception e) {
+         LOGGER.debug("[ReliableUdp] ACK build failed: {}", e.getMessage());
+      }
+   }
+
+   private void enqueueSend(byte[] data) {
+      if (this.running && !this.closed.get()) {
+         this.outboundQueue.offer(data);
+      }
+   }
+
+   private void flushOutbound() {
+      if (this.running && !this.closed.get()) {
+         byte[] data;
+         while ((data = this.outboundQueue.poll()) != null) {
+            try {
+               this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+            } catch (IOException e) {
+               LOGGER.debug("[ReliableUdp] Outbound send failed: {}", e.getMessage());
+               break;
+            }
+         }
+      } else {
+         this.outboundQueue.clear();
+      }
+   }
+
+   private void sendDataPacket(int seq, byte[] payload, boolean interleave) {
+      try {
+         byte[] data = new byte[13 + payload.length];
+         System.arraycopy(MAGIC, 0, data, 0, 2);
+         data[2] = 3;
+         writeInt32(data, 3, seq);
+         writeInt32(data, 7, this.nextExpectedSeq.get());
+         writeUint16(data, 11, payload.length);
+         System.arraycopy(payload, 0, data, 13, payload.length);
+         this.enqueueSend(data);
+         if (interleave && payload.length < 512 && this.running && !this.closed.get()) {
+            byte[] dup = (byte[])data.clone();
+            this.scheduler.schedule(() -> this.enqueueSend(dup), 50L, TimeUnit.MILLISECONDS);
+         }
+      } catch (Exception e) {
+         LOGGER.debug("[ReliableUdp] Data build failed: {}", e.getMessage());
+      }
+   }
+
+   private void sendFecPacket(int groupId, byte[] xorPayload, int[] originalLengths) {
+      try {
+         int count = originalLengths.length;
+         int bodyOffset = 14 + count * 2;
+         byte[] data = new byte[bodyOffset + xorPayload.length];
+         System.arraycopy(MAGIC, 0, data, 0, 2);
+         data[2] = 9;
+         writeInt32(data, 3, groupId);
+         writeInt32(data, 7, 0);
+         writeUint16(data, 11, xorPayload.length);
+         data[13] = (byte)count;
+
+         for (int i = 0; i < count; i++) {
+            writeUint16(data, 14 + i * 2, originalLengths[i]);
+         }
+
+         System.arraycopy(xorPayload, 0, data, bodyOffset, xorPayload.length);
+         this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+      } catch (IOException e) {
+         LOGGER.debug("[ReliableUdp] FEC send failed: {}", e.getMessage());
+      }
+   }
+
+   private void sendKeepalive() {
+      if (this.running && this.connected.get()) {
+         try {
+            byte[] data = new byte[11];
             System.arraycopy(MAGIC, 0, data, 0, 2);
-            data[2] = TYPE_ACK;
+            data[2] = 8;
             writeInt32(data, 3, 0);
-            writeInt32(data, 7, nextExpectedSeq.get());
-            socket.send(new DatagramPacket(data, data.length, remoteAddress));
-        } catch (IOException e) {
-            LOGGER.debug("[ReliableUdp] ACK send failed: {}", e.getMessage());
-        }
-    }
+            writeInt32(data, 7, this.nextExpectedSeq.get());
+            this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+         } catch (IOException var2) {
+         }
+      }
+   }
 
-    private void sendDataPacket(int seq, byte[] payload, boolean interleave) {
-        try {
-            byte[] data = new byte[HEADER_SIZE + PAYLOAD_LEN_SIZE + payload.length];
-            System.arraycopy(MAGIC, 0, data, 0, 2);
-            data[2] = TYPE_DATA;
-            writeInt32(data, 3, seq);
-            writeInt32(data, 7, nextExpectedSeq.get());
-            writeUint16(data, HEADER_SIZE, payload.length);
-            System.arraycopy(payload, 0, data, HEADER_SIZE + PAYLOAD_LEN_SIZE, payload.length);
-            socket.send(new DatagramPacket(data, data.length, remoteAddress));
-            if (interleave && payload.length < SMALL_PACKET_THRESHOLD && running && !closed.get()) {
-                byte[] dup = data.clone();
-                scheduler.schedule(() -> {
-                    if (running && !closed.get()) {
-                        try {
-                            socket.send(new DatagramPacket(dup, dup.length, remoteAddress));
-                        } catch (IOException ignored) {}
-                    }
-                }, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+   private void retransmitCheck() {
+      if (this.running) {
+         long now = System.currentTimeMillis();
+         long silenceMs = now - this.lastRecvTime;
+         if (this.writeState == 0 && !this.pendingAcks.isEmpty()) {
+            boolean tooManyFailures = this.consecutiveFailures >= 5;
+            boolean tooLongNoResp = silenceMs > 8000L;
+            if (tooManyFailures && tooLongNoResp) {
+               this.writeState = 1;
+               LOGGER.warn("[ReliableUdp] writeState WRITABLE->UNRELIABLE (failures={}, silence={}ms)", this.consecutiveFailures, silenceMs);
             }
-        } catch (IOException e) {
-            LOGGER.debug("[ReliableUdp] Data send failed: {}", e.getMessage());
-        }
-    }
+         }
 
-    private void sendFecPacket(int groupId, byte[] xorPayload, int[] originalLengths) {
-        try {
-            int count = originalLengths.length;
-            int bodyOffset = HEADER_SIZE + PAYLOAD_LEN_SIZE + 1 + count * 2;
-            byte[] data = new byte[bodyOffset + xorPayload.length];
-            System.arraycopy(MAGIC, 0, data, 0, 2);
-            data[2] = TYPE_FEC_XOR;
-            writeInt32(data, 3, groupId);
-            writeInt32(data, 7, 0);
-            writeUint16(data, HEADER_SIZE, xorPayload.length);
-            data[HEADER_SIZE + PAYLOAD_LEN_SIZE] = (byte) count;
-            for (int i = 0; i < count; i++) {
-                writeUint16(data, HEADER_SIZE + PAYLOAD_LEN_SIZE + 1 + i * 2, originalLengths[i]);
-            }
-            System.arraycopy(xorPayload, 0, data, bodyOffset, xorPayload.length);
-            socket.send(new DatagramPacket(data, data.length, remoteAddress));
-        } catch (IOException e) {
-            LOGGER.debug("[ReliableUdp] FEC send failed: {}", e.getMessage());
-        }
-    }
+         if (silenceMs > 60000L) {
+            LOGGER.warn("[ReliableUdp] No data received for {}s, connection dead", 60);
+            this.sendRestart();
+            this.triggerIceRestart();
+            this.close();
+         } else if (!this.pendingAcks.isEmpty() && silenceMs > 24000L) {
+            LOGGER.warn("[ReliableUdp] No packets received for {}ms, {} packets pending, peer probably dead", 24000L, this.pendingAcks.size());
+            this.sendRestart();
+            this.triggerIceRestart();
+            this.close();
+         } else {
+            synchronized (this.sendLock) {
+               long maxRetransmits = Math.max(10L, Math.min(120L, 24000L / Math.max(this.rto, 100L)));
 
-    private void sendKeepalive() {
-        if (!running || !connected.get()) return;
-        try {
-            byte[] data = new byte[HEADER_SIZE];
-            System.arraycopy(MAGIC, 0, data, 0, 2);
-            data[2] = TYPE_KEEPALIVE;
-            writeInt32(data, 3, 0);
-            writeInt32(data, 7, nextExpectedSeq.get());
-            socket.send(new DatagramPacket(data, data.length, remoteAddress));
-        } catch (IOException e) {
-            // ignore
-        }
-    }
-
-    private void retransmitCheck() {
-        if (!running) return;
-        if (System.currentTimeMillis() - lastRecvTime > KEEPALIVE_TIMEOUT_S * 1000L) {
-            LOGGER.warn("[ReliableUdp] No data received for {}s, connection dead", KEEPALIVE_TIMEOUT_S);
-            //debounce 阶段三: 连接死掉前通知对端重启 + 触发本端ICE Restart回调
-            sendRestart();
-            triggerIceRestart();
-            close();
-            return;
-        }
-        // 无数据=对端挂了。用lastRecvTime避免丢包时误判。
-        if (!pendingAcks.isEmpty() && System.currentTimeMillis() - lastRecvTime > MAX_SILENT_RETRANSMIT_CYCLES * RETRANSMIT_TIMEOUT_MS) {
-            LOGGER.warn("[ReliableUdp] No packets received for {}ms, {} packets pending, peer probably dead",
-                    MAX_SILENT_RETRANSMIT_CYCLES * RETRANSMIT_TIMEOUT_MS, pendingAcks.size());
-            //debounce 阶段三: 同上 通知对端 + 触发回调
-            sendRestart();
-            triggerIceRestart();
-            close();
-            return;
-        }
-        long now = System.currentTimeMillis();
-        synchronized (sendLock) {
-            for (Map.Entry<Integer, PendingPacket> entry : pendingAcks.entrySet()) {
-                PendingPacket pp = entry.getValue();
-                if (now - pp.sendTime > RETRANSMIT_TIMEOUT_MS) {
-                    if (pp.retries >= MAX_RETRANSMITS) {
-                        LOGGER.warn("[ReliableUdp] seq {} retry {} times exceeded limit (unacked:{})",
-                                entry.getKey(), MAX_RETRANSMITS, pendingAcks.size());
-                        close();
+               for (Entry<Integer, ReliableUdpTransport.PendingPacket> entry : this.pendingAcks.entrySet()) {
+                  ReliableUdpTransport.PendingPacket pp = entry.getValue();
+                  long backoff = this.rto + Math.min(pp.retries, 3) * 250L;
+                  if (now - pp.sendTime > backoff) {
+                     if (pp.retries >= maxRetransmits) {
+                        LOGGER.warn(
+                           "[ReliableUdp] seq {} retry {} times exceeded limit (unacked:{})",
+                           new Object[]{entry.getKey(), maxRetransmits, this.pendingAcks.size()}
+                        );
+                        this.close();
                         return;
-                    }
-                    if (pp.retries == 0) {
-                        LOGGER.info("[ReliableUdp] Retransmit seq {} (pending={})", entry.getKey(), pendingAcks.size());
-                    }
-                    pp.sendTime = now;
-                    pp.retries++;
-                    sendDataPacket(entry.getKey(), pp.data, false);
-                }
+                     }
+
+                     if (pp.retries == 0) {
+                        LOGGER.info("[ReliableUdp] Retransmit seq {} (pending={})", entry.getKey(), this.pendingAcks.size());
+                     }
+
+                     pp.sendTime = now;
+                     pp.retries++;
+                     this.consecutiveFailures++;
+                     this.recordLoss(true);
+                     this.sendDataPacket(entry.getKey(), pp.data, false);
+                  }
+               }
             }
-        }
-    }
+         }
+      }
+   }
 
-    private void sendBytes(byte[] data, int offset, int length) throws IOException {
-        if (!running || !connected.get()) throw new IOException("Transport closed");
+   private void sendBytes(byte[] data, int offset, int length) throws IOException {
+      if (this.running && this.connected.get()) {
+         int pos = offset;
 
-        int pos = offset;
-        while (pos < offset + length) {
-            int chunkLen = Math.min(MAX_PAYLOAD, offset + length - pos);
+         while (pos < offset + length) {
+            int chunkLen = Math.min(1400, offset + length - pos);
             byte[] chunk = new byte[chunkLen];
             System.arraycopy(data, pos, chunk, 0, chunkLen);
             pos += chunkLen;
+            synchronized (this.sendLock) {
+               long stuckStartMs = -1L;
+               int lastUnacked = this.oldestUnackedSeq;
 
-            synchronized (sendLock) {
-                long stuckStartMs = -1L;
-                int lastUnacked = oldestUnackedSeq;
-                while (running && connected.get() && seqDiff(nextSendSeq, oldestUnackedSeq) >= WINDOW_SIZE) {
-                    try {
-                        if (stuckStartMs < 0L) {
-                            stuckStartMs = System.currentTimeMillis();
-                            lastUnacked = oldestUnackedSeq;
-                        } else if (oldestUnackedSeq != lastUnacked) {
-                            //窗口滑动重置计时
-                            stuckStartMs = System.currentTimeMillis();
-                            lastUnacked = oldestUnackedSeq;
-                        }
-                        sendLock.wait(1000);
-                        long stuckMs = System.currentTimeMillis() - stuckStartMs;
-                        //debounce 真实时间判定 避免notify频繁唤醒误判
-                        if (stuckMs >= MAX_SILENT_RETRANSMIT_CYCLES * 1000L) {
-                            throw new IOException("transport stuck: " + (stuckMs / 1000L) + "s no progress");
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new IOException("Transport closed or interrupted");
-                    }
-                }
-                if (!running || !connected.get()) throw new IOException("Transport closed");
+               while (this.running && this.connected.get() && seqDiff(this.nextSendSeq, this.oldestUnackedSeq) >= this.effectiveWindow) {
+                  try {
+                     if (stuckStartMs < 0L) {
+                        stuckStartMs = System.currentTimeMillis();
+                        lastUnacked = this.oldestUnackedSeq;
+                     } else if (this.oldestUnackedSeq != lastUnacked) {
+                        stuckStartMs = System.currentTimeMillis();
+                        lastUnacked = this.oldestUnackedSeq;
+                     }
 
-                int seq = nextSendSeq++;
-                PendingPacket pp = new PendingPacket(chunk, System.currentTimeMillis(), 0);
-                pendingAcks.put(seq, pp);
-                sendDataPacket(seq, chunk, true);
+                     this.sendLock.wait(1000L);
+                     long stuckMs = System.currentTimeMillis() - stuckStartMs;
+                     if (stuckMs >= 30000L) {
+                        throw new IOException("transport stuck: " + stuckMs / 1000L + "s no progress");
+                     }
+                  } catch (InterruptedException e) {
+                     Thread.currentThread().interrupt();
+                     throw new IOException("Transport closed or interrupted");
+                  }
+               }
 
-                synchronized (fecSendLock) {
-                    int groupId = seq / FEC_GROUP_SIZE;
-                    if (groupId != fecSendGroupSeq) {
-                        fecSendGroup.clear();
-                        fecSendGroupSeq = groupId;
-                    }
-                    fecSendGroup.add(chunk.clone());
-                    if (fecSendGroup.size() == FEC_GROUP_SIZE) {
-                        byte[] xorPayload = computeXorPayload(fecSendGroup);
-                        int[] lengths = new int[FEC_GROUP_SIZE];
-                        for (int i = 0; i < FEC_GROUP_SIZE; i++) {
-                            lengths[i] = fecSendGroup.get(i).length;
-                        }
-                        sendFecPacket(groupId, xorPayload, lengths);
-                        fecSendGroup.clear();
-                    }
-                }
+               if (!this.running || !this.connected.get()) {
+                  throw new IOException("Transport closed");
+               }
+
+               int seq = this.nextSendSeq++;
+               ReliableUdpTransport.PendingPacket pp = new ReliableUdpTransport.PendingPacket(chunk, System.currentTimeMillis(), 0);
+               this.pendingAcks.put(seq, pp);
+               this.sendDataPacket(seq, chunk, true);
+               synchronized (this.fecSendLock) {
+                  int groupId = seq / 4;
+                  if (groupId != this.fecSendGroupSeq) {
+                     this.fecSendGroup.clear();
+                     this.fecSendGroupSeq = groupId;
+                  }
+
+                  this.fecSendGroup.add((byte[])chunk.clone());
+                  if (this.fecSendGroup.size() == 4) {
+                     byte[] xorPayload = computeXorPayload(this.fecSendGroup);
+                     int[] lengths = new int[4];
+
+                     for (int i = 0; i < 4; i++) {
+                        lengths[i] = this.fecSendGroup.get(i).length;
+                     }
+
+                     this.sendFecPacket(groupId, xorPayload, lengths);
+                     this.fecSendGroup.clear();
+                  }
+               }
             }
-        }
-    }
+         }
 
-    @Override
-    public void close() {
-        if (!closed.compareAndSet(false, true)) return;
-        running = false;
-        connected.set(false);
+         return;
+      } else {
+         throw new IOException("Transport closed");
+      }
+   }
 
-        try {
-            byte[] data = new byte[HEADER_SIZE];
+   @Override
+   public void close() {
+      if (this.closed.compareAndSet(false, true)) {
+         this.running = false;
+         this.connected.set(false);
+
+         try {
+            byte[] data = new byte[11];
             System.arraycopy(MAGIC, 0, data, 0, 2);
-            data[2] = TYPE_DISCONNECT;
+            data[2] = 7;
             writeInt32(data, 3, 0);
             writeInt32(data, 7, 0);
-            socket.send(new DatagramPacket(data, data.length, remoteAddress));
-        } catch (IOException ignored) {}
+            this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+         } catch (IOException var7) {
+         }
 
-        if (retransmitTask != null) retransmitTask.cancel(false);
-        if (keepaliveTask != null) keepaliveTask.cancel(false);
-        scheduler.shutdownNow();
+         if (this.retransmitTask != null) {
+            this.retransmitTask.cancel(false);
+         }
 
-        synchronized (recvLock) {
-            recvLock.notifyAll();
-        }
-        synchronized (sendLock) {
-            sendLock.notifyAll();
-        }
+         if (this.keepaliveTask != null) {
+            this.keepaliveTask.cancel(false);
+         }
 
-        if (recvThread != null) {
-            recvThread.interrupt();
-        }
+         this.scheduler.shutdownNow();
+         synchronized (this.recvLock) {
+            this.recvLock.notifyAll();
+         }
 
-        try {
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
+         synchronized (this.sendLock) {
+            this.sendLock.notifyAll();
+         }
+
+         if (this.recvThread != null) {
+            this.recvThread.interrupt();
+         }
+
+         try {
+            if (this.socket != null && !this.socket.isClosed()) {
+               this.socket.close();
             }
-        } catch (Exception ignored) {
-        }
-        //debounce 删除越权调用 UdpHolePuncher.cancel/close已自行cancel自己的timeoutFuture
-        //transport清空全局列表会拖累其他正在打洞的puncher
-    }
+         } catch (Exception var4) {
+         }
+      }
+   }
 
-    private static int readInt32(byte[] buf, int offset) {
-        return ((buf[offset] & 0xFF) << 24) | ((buf[offset + 1] & 0xFF) << 16) |
-                ((buf[offset + 2] & 0xFF) << 8) | (buf[offset + 3] & 0xFF);
-    }
+   private static int readInt32(byte[] buf, int offset) {
+      return (buf[offset] & 0xFF) << 24 | (buf[offset + 1] & 0xFF) << 16 | (buf[offset + 2] & 0xFF) << 8 | buf[offset + 3] & 0xFF;
+   }
 
-    private static boolean seqAfter(int a, int b) {
-        return (a > b && a - b < Integer.MAX_VALUE / 2) || (a < b && b - a > Integer.MAX_VALUE / 2);
-    }
+   private static boolean seqAfter(int a, int b) {
+      return a > b && a - b < 1073741823 || a < b && b - a > 1073741823;
+   }
 
-    private static int seqDiff(int newer, int older) {
-        // 序列号回绕
-        long diff = ((long) newer - (long) older) & 0xFFFFFFFFL;
-        return (int) diff;
-    }
+   private static int seqDiff(int newer, int older) {
+      long diff = (long)newer - older & 4294967295L;
+      return (int)diff;
+   }
 
-    private static int readUint16(byte[] buf, int offset) {
-        return ((buf[offset] & 0xFF) << 8) | (buf[offset + 1] & 0xFF);
-    }
+   private static int readUint16(byte[] buf, int offset) {
+      return (buf[offset] & 0xFF) << 8 | buf[offset + 1] & 0xFF;
+   }
 
-    private static void writeInt32(byte[] buf, int offset, int value) {
-        buf[offset] = (byte) (value >> 24);
-        buf[offset + 1] = (byte) (value >> 16);
-        buf[offset + 2] = (byte) (value >> 8);
-        buf[offset + 3] = (byte) value;
-    }
+   private static void writeInt32(byte[] buf, int offset, int value) {
+      buf[offset] = (byte)(value >> 24);
+      buf[offset + 1] = (byte)(value >> 16);
+      buf[offset + 2] = (byte)(value >> 8);
+      buf[offset + 3] = (byte)value;
+   }
 
-    private static void writeUint16(byte[] buf, int offset, int value) {
-        buf[offset] = (byte) (value >> 8);
-        buf[offset + 1] = (byte) value;
-    }
+   private static void writeUint16(byte[] buf, int offset, int value) {
+      buf[offset] = (byte)(value >> 8);
+      buf[offset + 1] = (byte)value;
+   }
 
-    private static class PendingPacket {
-        final byte[] data;
-        long sendTime;
-        int retries;
+   private static class PendingPacket {
+      final byte[] data;
+      long sendTime;
+      int retries;
 
-        PendingPacket(byte[] data, long sendTime, int retries) {
-            this.data = data;
-            this.sendTime = sendTime;
-            this.retries = retries;
-        }
-    }
+      PendingPacket(byte[] data, long sendTime, int retries) {
+         this.data = data;
+         this.sendTime = sendTime;
+         this.retries = retries;
+      }
+   }
 
-    private class UdpInputStream extends InputStream {
-        private final ConcurrentLinkedQueue<byte[]> chunks = new ConcurrentLinkedQueue<>();
-        private byte[] currentChunk = null;
-        private int currentPos = 0;
+   private class UdpInputStream extends InputStream {
+      private final ConcurrentLinkedQueue<byte[]> chunks = new ConcurrentLinkedQueue<>();
+      private byte[] currentChunk = null;
+      private int currentPos = 0;
 
-        void writeBuffer(byte[] data) {
-            chunks.offer(data);
-        }
+      void writeBuffer(byte[] data) {
+         this.chunks.offer(data);
+      }
 
-        @Override
-        public int read() throws IOException {
-            byte[] b = new byte[1];
-            int n = read(b, 0, 1);
-            return n <= 0 ? -1 : b[0] & 0xFF;
-        }
+      @Override
+      public int read() throws IOException {
+         byte[] b = new byte[1];
+         int n = this.read(b, 0, 1);
+         return n <= 0 ? -1 : b[0] & 0xFF;
+      }
 
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            if (len == 0) return 0;
+      @Override
+      public int read(byte[] b, int off, int len) throws IOException {
+         if (len == 0) {
+            return 0;
+         }
 
-            synchronized (recvLock) {
-                while (true) {
-                    if (currentChunk != null && currentPos < currentChunk.length) {
-                        int avail = currentChunk.length - currentPos;
-                        int toRead = Math.min(len, avail);
-                        System.arraycopy(currentChunk, currentPos, b, off, toRead);
-                        currentPos += toRead;
-                        if (currentPos >= currentChunk.length) {
-                            currentChunk = null;
-                            currentPos = 0;
-                        }
-                        return toRead;
-                    }
+         synchronized (ReliableUdpTransport.this.recvLock) {
+            while (this.currentChunk == null || this.currentPos >= this.currentChunk.length) {
+               this.currentChunk = this.chunks.poll();
+               this.currentPos = 0;
+               if (this.currentChunk != null) {
+                  if (ReliableUdpTransport.this.bufferedChunks > 0) {
+                     ReliableUdpTransport.this.bufferedChunks--;
+                  }
+               } else {
+                  if (!ReliableUdpTransport.this.running && this.chunks.isEmpty()) {
+                     return -1;
+                  }
 
-                    currentChunk = chunks.poll();
-                    currentPos = 0;
-
-                    if (currentChunk != null) continue;
-
-                    if (!running && chunks.isEmpty()) return -1;
-
-                    try {
-                        recvLock.wait(500);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new IOException("Interrupted");
-                    }
-                }
+                  try {
+                     ReliableUdpTransport.this.recvLock.wait(500L);
+                  } catch (InterruptedException e) {
+                     Thread.currentThread().interrupt();
+                     throw new IOException("Interrupted");
+                  }
+               }
             }
-        }
 
-        @Override
-        public int available() {
-            synchronized (recvLock) {
-                int total = 0;
-                if (currentChunk != null) total += currentChunk.length - currentPos;
-                for (byte[] chunk : chunks.toArray(new byte[0][])) total += chunk.length;
-                return total;
+            int avail = this.currentChunk.length - this.currentPos;
+            int toRead = Math.min(len, avail);
+            System.arraycopy(this.currentChunk, this.currentPos, b, off, toRead);
+            this.currentPos += toRead;
+            if (this.currentPos >= this.currentChunk.length) {
+               this.currentChunk = null;
+               this.currentPos = 0;
             }
-        }
-    }
 
-    private class UdpOutputStream extends OutputStream {
-        @Override
-        public void write(int b) throws IOException {
-            write(new byte[]{(byte) b}, 0, 1);
-        }
+            return toRead;
+         }
+      }
 
-        @Override
-        public void write(byte[] b, int off, int len) throws IOException {
-            try {
-                sendBytes(b, off, len);
-            } catch (IOException e) {
-                LOGGER.debug("[ReliableUdp] Write failed: {}", e.getMessage());
-                throw e;
+      @Override
+      public int available() {
+         synchronized (ReliableUdpTransport.this.recvLock) {
+            int total = 0;
+            if (this.currentChunk != null) {
+               total += this.currentChunk.length - this.currentPos;
             }
-        }
 
-        @Override
-        public void flush() {
-        }
-    }
+            for (byte[] chunk : this.chunks.toArray(new byte[0][])) {
+               total += chunk.length;
+            }
+
+            return total;
+         }
+      }
+   }
+
+   private class UdpOutputStream extends OutputStream {
+      @Override
+      public void write(int b) throws IOException {
+         this.write(new byte[]{(byte)b}, 0, 1);
+      }
+
+      @Override
+      public void write(byte[] b, int off, int len) throws IOException {
+         try {
+            ReliableUdpTransport.this.sendBytes(b, off, len);
+         } catch (IOException e) {
+            ReliableUdpTransport.LOGGER.debug("[ReliableUdp] Write failed: {}", e.getMessage());
+            throw e;
+         }
+      }
+
+      @Override
+      public void flush() {
+      }
+   }
 }

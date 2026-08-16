@@ -3,6 +3,10 @@ package icu.wuhui.voxlink.ui;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.terracotta.TerracottaBinary;
 import icu.wuhui.voxlink.terracotta.TerracottaManager;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -10,295 +14,281 @@ import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
 public class TerracottaConfigScreen extends VoxLinkScreenBase {
-    private final Screen parent;
-    private Button redownloadBtn;
-    private Button deleteBinaryBtn;
-    private Button pauseResumeBtn;
-    private Button cancelBtn;
-    private String statusMessage = "";
-    private int statusColor = VoxLinkColors.WHITE;
-    private boolean lastPausedState = false;
+   private final Screen parent;
+   private Button redownloadBtn;
+   private Button deleteBinaryBtn;
+   private Button pauseResumeBtn;
+   private Button cancelBtn;
+   private String statusMessage = "";
+   private int statusColor = -1;
+   private boolean lastPausedState = false;
+   private static final int BTN_W = 200;
+   private static final int BTN_H = 20;
+   private static final int GAP = 4;
+   private static final int HALF_BTN_W = 98;
+   private static final int MIN_FORM_HEIGHT = 44;
+   private static final int TITLE_Y = 16;
+   private static final int STATUS_LABEL_Y_OFFSET = 14;
+   private static final int STATUS_MSG_Y_OFFSET = 6;
 
-    private static final int BTN_W = 200;
-    private static final int BTN_H = 20;
-    private static final int GAP = 4;
-    private static final int HALF_BTN_W = 98;
-    private static final int MIN_FORM_HEIGHT = 44;
-    private static final int TITLE_Y = 16;
-    private static final int STATUS_LABEL_Y_OFFSET = 14;
-    private static final int STATUS_MSG_Y_OFFSET = 6;
+   public TerracottaConfigScreen(Screen parent) {
+      super(Component.translatable("voxlink.terracotta.config"));
+      this.parent = parent;
+   }
 
-    public TerracottaConfigScreen(Screen parent) {
-        super(Component.translatable("voxlink.terracotta.config"));
-        this.parent = parent;
-    }
-
-    @Override
-    protected void init() {
-        super.init();
-        int centerX = this.width / 2;
-        boolean isDownloading = TerracottaManager.isDownloading();
-        //下载中: 6 项 (update, parallel, delete, redownload, pause/cancel, done)
-        //非下载: 5 项 (update, parallel, delete, redownload, done)
-        int itemCount = isDownloading ? 6 : 5;
-        int formHeight = itemCount * BTN_H + (itemCount - 1) * GAP;
-        int y = Math.max(MIN_FORM_HEIGHT, (this.height - formHeight) / 2);
-
-        CycleButton<Boolean> updateCheckToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isUpdateCheckEnabled())
-        .create(centerX - BTN_W / 2, y, BTN_W, BTN_H,
-        Component.translatable("voxlink.update.check"),
-        (btn, val) -> {
+   @Override
+   protected void init() {
+      super.init();
+      int centerX = this.width / 2;
+      boolean isDownloading = TerracottaManager.isDownloading();
+      int itemCount = isDownloading ? 6 : 5;
+      int formHeight = itemCount * 20 + (itemCount - 1) * 4;
+      int y = Math.max(44, (this.height - formHeight) / 2);
+      CycleButton<Boolean> updateCheckToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isUpdateCheckEnabled())
+         .create(centerX - 100, y, 200, 20, Component.translatable("voxlink.update.check"), (btn, val) -> {
             VoxLinkMod.getConfig().setUpdateCheckEnabled(val);
             VoxLinkMod.getConfig().save();
-        });
-        addRenderableWidget(updateCheckToggle);
-
-        boolean currentParallel = VoxLinkMod.getConfig().isParallelP2P();
-        Button parallelToggle = Button.builder(
-        Component.translatable("voxlink.terracotta.toggle.join",
-        Component.translatable(currentParallel
-        ? "voxlink.terracotta.on" : "voxlink.terracotta.off")),
-        button -> {
-            boolean newVal = !VoxLinkMod.getConfig().isParallelP2P();
-            VoxLinkMod.getConfig().setParallelP2P(newVal);
-            VoxLinkMod.getConfig().save();
-            button.setMessage(Component.translatable("voxlink.terracotta.toggle.join",
-            Component.translatable(newVal
-            ? "voxlink.terracotta.on" : "voxlink.terracotta.off")));
-        })
-        .bounds(centerX - BTN_W / 2, y + BTN_H + GAP, BTN_W, BTN_H).build();
-        addRenderableWidget(parallelToggle);
-
-        deleteBinaryBtn = Button.builder(
-        Component.translatable("voxlink.terracotta.delete_binary"),
-        button -> deleteBinary()
-        ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 2, BTN_W, BTN_H).build();
-        deleteBinaryBtn.active = !isDownloading;
-        addRenderableWidget(deleteBinaryBtn);
-
-        int redownloadY = y + (BTN_H + GAP) * 3;
-        Component redownloadLabel = buildRedownloadLabel();
-        redownloadBtn = Button.builder(redownloadLabel, button -> startRedownload())
-        .bounds(centerX - BTN_W / 2, redownloadY, BTN_W, BTN_H).build();
-        redownloadBtn.active = !isDownloading;
-        addRenderableWidget(redownloadBtn);
-
-        if (isDownloading) {
-            int pauseCancelY = y + (BTN_H + GAP) * 4;
-            boolean paused = TerracottaManager.isDownloadPaused();
-            pauseResumeBtn = Button.builder(
-            Component.translatable(paused ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"),
+         });
+      this.addRenderableWidget(updateCheckToggle);
+      boolean currentParallel = VoxLinkMod.getConfig().isParallelP2P();
+      Button parallelToggle = Button.builder(
+            Component.translatable(
+               "voxlink.terracotta.toggle.join", new Object[]{Component.translatable(currentParallel ? "voxlink.terracotta.on" : "voxlink.terracotta.off")}
+            ),
             button -> {
-                if (TerracottaManager.isDownloadPaused()) {
-                    TerracottaManager.resumeDownload();
-                } else {
-                    TerracottaManager.pauseDownload();
-                }
-                lastPausedState = TerracottaManager.isDownloadPaused();
-                if (pauseResumeBtn != null) {
-                    pauseResumeBtn.setMessage(Component.translatable(
-                    lastPausedState ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"));
-                }
+               boolean newVal = !VoxLinkMod.getConfig().isParallelP2P();
+               VoxLinkMod.getConfig().setParallelP2P(newVal);
+               VoxLinkMod.getConfig().save();
+               button.setMessage(
+                  Component.translatable(
+                     "voxlink.terracotta.toggle.join", new Object[]{Component.translatable(newVal ? "voxlink.terracotta.on" : "voxlink.terracotta.off")}
+                  )
+               );
             }
-            ).bounds(centerX - BTN_W / 2, pauseCancelY, HALF_BTN_W, BTN_H).build();
-            addRenderableWidget(pauseResumeBtn);
-
-            cancelBtn = Button.builder(
-            Component.translatable("voxlink.terracotta.cancel"),
-            button -> {
-                TerracottaManager.cancelDownload();
-                Minecraft.getInstance().execute(() -> this.init());
-            }
-            ).bounds(centerX + GAP, pauseCancelY, HALF_BTN_W, BTN_H).build();
-            addRenderableWidget(cancelBtn);
-
-            addRenderableWidget(Button.builder(
-            Component.translatable("gui.done"),
-            button -> Minecraft.getInstance().setScreen(parent)
-            ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 5, BTN_W, BTN_H).build());
-        } else {
-            pauseResumeBtn = null;
-            cancelBtn = null;
-            addRenderableWidget(Button.builder(
-            Component.translatable("gui.done"),
-            button -> Minecraft.getInstance().setScreen(parent)
-            ).bounds(centerX - BTN_W / 2, y + (BTN_H + GAP) * 4, BTN_W, BTN_H).build());
-        }
-    }
-
-    private Component buildRedownloadLabel() {
-        if (TerracottaManager.isDownloading()) {
+         )
+         .bounds(centerX - 100, y + 20 + 4, 200, 20)
+         .build();
+      this.addRenderableWidget(parallelToggle);
+      this.deleteBinaryBtn = Button.builder(Component.translatable("voxlink.terracotta.delete_binary"), button -> this.deleteBinary())
+         .bounds(centerX - 100, y + 48, 200, 20)
+         .build();
+      this.deleteBinaryBtn.active = !isDownloading;
+      this.addRenderableWidget(this.deleteBinaryBtn);
+      int redownloadY = y + 72;
+      Component redownloadLabel = this.buildRedownloadLabel();
+      this.redownloadBtn = Button.builder(redownloadLabel, button -> this.startRedownload()).bounds(centerX - 100, redownloadY, 200, 20).build();
+      this.redownloadBtn.active = !isDownloading;
+      this.addRenderableWidget(this.redownloadBtn);
+      if (isDownloading) {
+         int pauseCancelY = y + 96;
+         boolean paused = TerracottaManager.isDownloadPaused();
+         this.pauseResumeBtn = Button.builder(Component.translatable(paused ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"), button -> {
             if (TerracottaManager.isDownloadPaused()) {
-                return Component.translatable("voxlink.terracotta.paused");
+               TerracottaManager.resumeDownload();
+            } else {
+               TerracottaManager.pauseDownload();
             }
-            TerracottaBinary.DownloadProgress p = TerracottaManager.getLastProgress();
-            if (p != null && p.stage != null) {
-                if ("connecting".equals(p.stage)) {
-                    return Component.translatable("voxlink.terracotta.connecting");
-                }
-                if ("extracting".equals(p.stage)) {
-                    return Component.translatable("voxlink.terracotta.extracting");
-                }
-                if ("verifying".equals(p.stage)) {
-                    return Component.translatable("voxlink.terracotta.verifying");
-                }
-            }
-            int pct = p != null ? p.percent : 0;
-            if (pct < 0) pct = 0;
-            String speedStr = p != null ? String.format("%.1f", p.speedBps / 1024.0 / 1024.0) : "0.0";
-            return Component.translatable("voxlink.terracotta.downloading", pct, speedStr);
-        } else if (TerracottaManager.isDownloadFailed()) {
-            return Component.translatable("voxlink.terracotta.download_failed");
-        } else {
-            return Component.translatable("voxlink.terracotta.redownload");
-        }
-    }
 
-    @Override
-    public void tick() {
-        if (TerracottaManager.isDownloading() && redownloadBtn != null) {
-            TerracottaBinary.DownloadProgress p = TerracottaManager.getLastProgress();
-            if (TerracottaManager.isDownloadPaused()) {
-                redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.paused"));
-            } else if (p != null && p.stage != null) {
-                if ("connecting".equals(p.stage)) {
-                    redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.connecting"));
-                } else if ("extracting".equals(p.stage)) {
-                    redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.extracting"));
-                } else if ("verifying".equals(p.stage)) {
-                    redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.verifying"));
-                }
-            } else if (p != null) {
-                String speedStr = String.format("%.1f", p.speedBps / 1024.0 / 1024.0);
-                int pct = p.percent < 0 ? 0 : p.percent;
-                redownloadBtn.setMessage(
-                Component.translatable("voxlink.terracotta.downloading", pct, speedStr));
+            this.lastPausedState = TerracottaManager.isDownloadPaused();
+            if (this.pauseResumeBtn != null) {
+               this.pauseResumeBtn.setMessage(Component.translatable(this.lastPausedState ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"));
             }
-            //暂停/继续按钮文字更新
-            boolean pausedNow = TerracottaManager.isDownloadPaused();
-            if (pausedNow != lastPausedState && pauseResumeBtn != null) {
-                pauseResumeBtn.setMessage(Component.translatable(
-                pausedNow ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"));
-                lastPausedState = pausedNow;
-            }
-        }
-        //下载结束 (完成/失败/取消): 重建页面
-        if (!TerracottaManager.isDownloading() && redownloadBtn != null && !redownloadBtn.active) {
-            redownloadBtn.active = true;
-            redownloadBtn.setMessage(buildRedownloadLabel());
-            if (deleteBinaryBtn != null) {
-                deleteBinaryBtn.active = true;
-            }
-            if (TerracottaManager.isBinaryReady() && !TerracottaManager.isDownloadFailed()) {
-                statusMessage = Component.translatable("voxlink.terracotta.download_success").getString();
-                statusColor = VoxLinkColors.SUCCESS;
-            }
-            //重建移除暂停/取消按钮
+         }).bounds(centerX - 100, pauseCancelY, 98, 20).build();
+         this.addRenderableWidget(this.pauseResumeBtn);
+         this.cancelBtn = Button.builder(Component.translatable("voxlink.terracotta.cancel"), button -> {
+            TerracottaManager.cancelDownload();
             Minecraft.getInstance().execute(() -> this.init());
-        }
-    }
+         }).bounds(centerX + 4, pauseCancelY, 98, 20).build();
+         this.addRenderableWidget(this.cancelBtn);
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("gui.done"), button -> Minecraft.getInstance().setScreen(this.parent))
+               .bounds(centerX - 100, y + 120, 200, 20)
+               .build()
+         );
+      } else {
+         this.pauseResumeBtn = null;
+         this.cancelBtn = null;
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("gui.done"), button -> Minecraft.getInstance().setScreen(this.parent))
+               .bounds(centerX - 100, y + 96, 200, 20)
+               .build()
+         );
+      }
+   }
 
-    private String statusKey() {
-        if (TerracottaManager.isReady()) {
-            if (TerracottaManager.isException()) {
-                return "voxlink.terracotta.status.exception";
+   private Component buildRedownloadLabel() {
+      if (TerracottaManager.isDownloading()) {
+         if (TerracottaManager.isDownloadPaused()) {
+            return Component.translatable("voxlink.terracotta.paused");
+         }
+
+         TerracottaBinary.DownloadProgress p = TerracottaManager.getLastProgress();
+         if (p != null && p.stage != null) {
+            if ("connecting".equals(p.stage)) {
+               return Component.translatable("voxlink.terracotta.connecting");
             }
-            return "voxlink.terracotta.status.running";
-        } else if (TerracottaBinary.isReady()) {
-            return "voxlink.terracotta.status.ready";
-        }
-        return "voxlink.terracotta.status.not_downloaded";
-    }
 
-    private void deleteBinary() {
-        try {
-            TerracottaManager.shutdown();
-        } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("Failed to stop Terracotta before delete: {}", e.getMessage());
-        }
-        Path cacheDir = TerracottaBinary.getCacheDir();
-        try {
-            deleteRecursively(cacheDir);
-            statusMessage = Component.translatable("voxlink.terracotta.binary_deleted").getString();
-            statusColor = VoxLinkColors.SUCCESS;
-        } catch (IOException e) {
-            VoxLinkMod.LOGGER.warn("Failed to delete Terracotta: {}", e.getMessage());
-            statusMessage = Component.translatable("voxlink.terracotta.download_failed").getString();
-            statusColor = VoxLinkColors.ERROR;
-        }
-        Minecraft.getInstance().execute(() -> this.init());
-    }
-
-    private static void deleteRecursively(Path path) throws IOException {
-        if (Files.isDirectory(path)) {
-            try (var stream = Files.list(path)) {
-                for (Path p : stream.toList()) {
-                    deleteRecursively(p);
-                }
+            if ("extracting".equals(p.stage)) {
+               return Component.translatable("voxlink.terracotta.extracting");
             }
-        }
-        Files.deleteIfExists(path);
-    }
 
-    private void startRedownload() {
-        if (TerracottaManager.isDownloading()) return;
-        try {
+            if ("verifying".equals(p.stage)) {
+               return Component.translatable("voxlink.terracotta.verifying");
+            }
+         }
+
+         int pct = p != null ? p.percent : 0;
+         if (pct < 0) {
+            pct = 0;
+         }
+
+         String speedStr = p != null ? String.format("%.1f", p.speedBps / 1024.0 / 1024.0) : "0.0";
+         return Component.translatable("voxlink.terracotta.downloading", new Object[]{pct, speedStr});
+      } else {
+         return TerracottaManager.isDownloadFailed()
+            ? Component.translatable("voxlink.terracotta.download_failed")
+            : Component.translatable("voxlink.terracotta.redownload");
+      }
+   }
+
+   public void tick() {
+      if (TerracottaManager.isDownloading() && this.redownloadBtn != null) {
+         TerracottaBinary.DownloadProgress p = TerracottaManager.getLastProgress();
+         if (TerracottaManager.isDownloadPaused()) {
+            this.redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.paused"));
+         } else if (p != null && p.stage != null) {
+            if ("connecting".equals(p.stage)) {
+               this.redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.connecting"));
+            } else if ("extracting".equals(p.stage)) {
+               this.redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.extracting"));
+            } else if ("verifying".equals(p.stage)) {
+               this.redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.verifying"));
+            }
+         } else if (p != null) {
+            String speedStr = String.format("%.1f", p.speedBps / 1024.0 / 1024.0);
+            int pct = p.percent < 0 ? 0 : p.percent;
+            this.redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.downloading", new Object[]{pct, speedStr}));
+         }
+
+         boolean pausedNow = TerracottaManager.isDownloadPaused();
+         if (pausedNow != this.lastPausedState && this.pauseResumeBtn != null) {
+            this.pauseResumeBtn.setMessage(Component.translatable(pausedNow ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"));
+            this.lastPausedState = pausedNow;
+         }
+      }
+
+      if (!TerracottaManager.isDownloading() && this.redownloadBtn != null && !this.redownloadBtn.active) {
+         this.redownloadBtn.active = true;
+         this.redownloadBtn.setMessage(this.buildRedownloadLabel());
+         if (this.deleteBinaryBtn != null) {
+            this.deleteBinaryBtn.active = true;
+         }
+
+         if (TerracottaManager.isBinaryReady() && !TerracottaManager.isDownloadFailed()) {
+            this.statusMessage = Component.translatable("voxlink.terracotta.download_success").getString();
+            this.statusColor = -11141291;
+         }
+
+         Minecraft.getInstance().execute(() -> this.init());
+      }
+   }
+
+   private String statusKey() {
+      if (TerracottaManager.isReady()) {
+         return TerracottaManager.isException() ? "voxlink.terracotta.status.exception" : "voxlink.terracotta.status.running";
+      } else {
+         return TerracottaBinary.isReady() ? "voxlink.terracotta.status.ready" : "voxlink.terracotta.status.not_downloaded";
+      }
+   }
+
+   private void deleteBinary() {
+      try {
+         TerracottaManager.shutdown();
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.warn("Failed to stop Terracotta before delete: {}", e.getMessage());
+      }
+
+      Path cacheDir = TerracottaBinary.getCacheDir();
+
+      try {
+         deleteRecursively(cacheDir);
+         this.statusMessage = Component.translatable("voxlink.terracotta.binary_deleted").getString();
+         this.statusColor = -11141291;
+      } catch (IOException e) {
+         VoxLinkMod.LOGGER.warn("Failed to delete Terracotta: {}", e.getMessage());
+         this.statusMessage = Component.translatable("voxlink.terracotta.download_failed").getString();
+         this.statusColor = -43691;
+      }
+
+      Minecraft.getInstance().execute(() -> this.init());
+   }
+
+   private static void deleteRecursively(Path path) throws IOException {
+      if (Files.isDirectory(path)) {
+         try (Stream<Path> stream = Files.list(path)) {
+            for (Path p : stream.toList()) {
+               deleteRecursively(p);
+            }
+         }
+      }
+
+      Files.deleteIfExists(path);
+   }
+
+   private void startRedownload() {
+      if (!TerracottaManager.isDownloading()) {
+         try {
             TerracottaManager.shutdown();
-        } catch (Exception e) {
+         } catch (Exception e) {
             VoxLinkMod.LOGGER.warn("Failed to stop Terracotta before re-download: {}", e.getMessage());
-        }
-        try {
+         }
+
+         try {
             Files.deleteIfExists(TerracottaBinary.getBinaryPath());
-        } catch (IOException ignored) {}
-        if (redownloadBtn != null) {
-            redownloadBtn.active = false;
-            redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.connecting"));
-        }
-        if (deleteBinaryBtn != null) {
-            deleteBinaryBtn.active = false;
-        }
-        TerracottaManager.startDownload(progress -> {
-            Minecraft.getInstance().execute(() -> {
-                if (progress.failed) {
-                    if (redownloadBtn != null) {
-                        redownloadBtn.active = true;
-                        redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.download_failed"));
-                    }
-                    if (deleteBinaryBtn != null) {
-                        deleteBinaryBtn.active = true;
-                    }
-                }
-            });
-        });
-    }
+         } catch (IOException var2) {
+         }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        int centerX = this.width / 2;
-        drawCenteredClipped(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.WHITE);
+         if (this.redownloadBtn != null) {
+            this.redownloadBtn.active = false;
+            this.redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.connecting"));
+         }
 
-        boolean isDownloading = TerracottaManager.isDownloading();
-        int itemCount = isDownloading ? 6 : 5;
-        int formHeight = itemCount * BTN_H + (itemCount - 1) * GAP;
-        int y = Math.max(MIN_FORM_HEIGHT, (this.height - formHeight) / 2);
+         if (this.deleteBinaryBtn != null) {
+            this.deleteBinaryBtn.active = false;
+         }
 
-        Component statusLabel = Component.translatable("voxlink.terracotta.status_label",
-        Component.translatable(statusKey()));
-        drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - STATUS_LABEL_Y_OFFSET, VoxLinkColors.MUTED);
+         TerracottaManager.startDownload(progress -> Minecraft.getInstance().execute(() -> {
+            if (progress.failed) {
+               if (this.redownloadBtn != null) {
+                  this.redownloadBtn.active = true;
+                  this.redownloadBtn.setMessage(Component.translatable("voxlink.terracotta.download_failed"));
+               }
 
-        if (!statusMessage.isEmpty()) {
-            drawCenteredClipped(graphics, statusMessage, centerX, y + formHeight + STATUS_MSG_Y_OFFSET, statusColor);
-        }
-    }
+               if (this.deleteBinaryBtn != null) {
+                  this.deleteBinaryBtn.active = true;
+               }
+            }
+         }));
+      }
+   }
 
-    @Override
-    public void onClose() {
-        Minecraft.getInstance().setScreen(parent);
-    }
+   public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+      int centerX = this.width / 2;
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, -1);
+      boolean isDownloading = TerracottaManager.isDownloading();
+      int itemCount = isDownloading ? 6 : 5;
+      int formHeight = itemCount * 20 + (itemCount - 1) * 4;
+      int y = Math.max(44, (this.height - formHeight) / 2);
+      Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});
+      this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, -5592406);
+      if (!this.statusMessage.isEmpty()) {
+         this.drawCenteredClipped(graphics, this.statusMessage, centerX, y + formHeight + 6, this.statusColor);
+      }
+   }
+
+   public void onClose() {
+      Minecraft.getInstance().setScreen(this.parent);
+   }
 }

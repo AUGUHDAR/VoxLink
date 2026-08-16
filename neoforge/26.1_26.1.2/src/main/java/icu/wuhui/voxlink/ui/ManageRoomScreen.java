@@ -9,309 +9,358 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 public class ManageRoomScreen extends VoxLinkScreenBase {
-    private final Screen parent;
-    private final RoomInfo roomInfo;
-    private EditBox nameField;
-    private EditBox passwordField;
-    private EditBox maxPlayersField;
-    private Button visibleButton;
-    private Button authButton;
-    private Button saveButton;
-    private String statusMessage = "";
-    private int statusColor = VoxLinkColors.TITLE;
+   private final Screen parent;
+   private final RoomInfo roomInfo;
+   private EditBox nameField;
+   private EditBox passwordField;
+   private EditBox maxPlayersField;
+   private Button visibleButton;
+   private Button authButton;
+   private Button saveButton;
+   private String statusMessage = "";
+   private int statusColor = -1;
+   private static final int BTN_W = 200;
+   private static final int BTN_H = 20;
+   private static final int MARGIN_X = 20;
+   private static final int FORM_HEIGHT = 230;
+   private static final int FORM_MIN_Y = 24;
+   private static final int LABEL_OFFSET_Y = 24;
+   private static final int FIELD_OFFSET_Y = 48;
+   private static final int ADV_OFFSET_Y = 76;
+   private static final int ADV_ROW1_OFFSET_Y = 24;
+   private static final int ADV_ROW2_OFFSET_Y = 48;
+   private static final int SAVE_BTN_OFFSET_Y = 80;
+   private static final int STATUS_OFFSET_Y = 186;
+   private static final int TITLE_Y = 8;
+   private static final int MIN_MAX_PLAYERS = 2;
+   private static final int MAX_MAX_PLAYERS = 100;
+   private boolean visible;
+   private boolean visibleBeforePassword = false;
+   private ManageRoomScreen.AuthType authType;
+   private int categoryIdx;
+   private boolean passwordChanged = false;
+   private volatile boolean saving = false;
+   private static final String[] CATEGORIES = new String[]{"survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"};
+   private static final String[] CATEGORY_TRANSLATION_KEYS = new String[]{
+      "voxlink.category.survival",
+      "voxlink.category.creative",
+      "voxlink.category.redstone",
+      "voxlink.category.pvp",
+      "voxlink.category.rpg",
+      "voxlink.category.minigame",
+      "voxlink.category.social",
+      "voxlink.category.other"
+   };
 
-    //布局常量
-    private static final int BTN_W = 200;
-    private static final int BTN_H = 20;
-    private static final int MARGIN_X = 20;
-    private static final int FORM_HEIGHT = 230;
-    private static final int FORM_MIN_Y = 24;
-    private static final int LABEL_OFFSET_Y = 24;
-    private static final int FIELD_OFFSET_Y = 48;
-    private static final int ADV_OFFSET_Y = 76;
-    private static final int ADV_ROW1_OFFSET_Y = 24;
-    private static final int ADV_ROW2_OFFSET_Y = 48;
-    private static final int SAVE_BTN_OFFSET_Y = 80;
-    private static final int STATUS_OFFSET_Y = 186;
-    private static final int TITLE_Y = 8;
-    //颜色常量
-    private static final int MIN_MAX_PLAYERS = 2;
-    private static final int MAX_MAX_PLAYERS = 100;
+   public ManageRoomScreen(Screen parent, RoomInfo roomInfo) {
+      super(Component.translatable("voxlink.manage_room.title", new Object[]{"****"}));
+      this.parent = parent;
+      this.roomInfo = roomInfo;
+      this.visible = roomInfo.hasPassword() ? false : roomInfo.isVisible();
+      this.visibleBeforePassword = roomInfo.isVisible();
+      this.authType = "ONLINE".equals(roomInfo.getAuthType()) ? ManageRoomScreen.AuthType.ONLINE : ManageRoomScreen.AuthType.OFFLINE;
+      String cat = roomInfo.getCategory();
+      this.categoryIdx = 7;
 
-    private boolean visible;
-    private boolean visibleBeforePassword = false;
-    private AuthType authType;
-    private int categoryIdx;
-    private boolean passwordChanged = false;
-    private volatile boolean saving = false;
-    private static final String[] CATEGORIES = {"survival", "creative", "redstone", "pvp", "rpg", "minigame", "social", "other"};
-    private static final String[] CATEGORY_TRANSLATION_KEYS = {
-        "voxlink.category.survival", "voxlink.category.creative", "voxlink.category.redstone",
-        "voxlink.category.pvp", "voxlink.category.rpg", "voxlink.category.minigame",
-        "voxlink.category.social", "voxlink.category.other"
-    };
+      for (int i = 0; i < CATEGORIES.length; i++) {
+         if (CATEGORIES[i].equals(cat)) {
+            this.categoryIdx = i;
+            break;
+         }
+      }
+   }
 
-    private enum AuthType {
-        OFFLINE("voxlink.auth_type.offline"),
-        ONLINE("voxlink.auth_type.online");
-        final String translationKey;
-        AuthType(String translationKey) { this.translationKey = translationKey; }
-    }
-
-    public ManageRoomScreen(Screen parent, RoomInfo roomInfo) {
-        super(Component.translatable("voxlink.manage_room.title", "****"));
-        this.parent = parent;
-        this.roomInfo = roomInfo;
-
-        this.visible = roomInfo.hasPassword() ? false : roomInfo.isVisible();
-        this.visibleBeforePassword = roomInfo.isVisible();
-        this.authType = "ONLINE".equals(roomInfo.getAuthType()) ? AuthType.ONLINE : AuthType.OFFLINE;
-
-        String cat = roomInfo.getCategory();
-        this.categoryIdx = 7;
-        for (int i = 0; i < CATEGORIES.length; i++) {
-            if (CATEGORIES[i].equals(cat)) { categoryIdx = i; break; }
-        }
-    }
-
-    @Override
-    protected void init() {
-        super.init();
-
-        int centerX = this.width / 2;
-        int formHeight = FORM_HEIGHT;
-        int y = Math.max(FORM_MIN_Y, (this.height - formHeight) / 2);
-
-        nameField = new EditBox(this.font, centerX - BTN_W / 2, y, BTN_W, BTN_H, Component.translatable("voxlink.room_name"));
-        nameField.setMaxLength(20);
-        nameField.setValue(roomInfo.getName() != null ? roomInfo.getName() : "");
-        this.addRenderableWidget(nameField);
-
-        passwordField = new EditBox(this.font, centerX - BTN_W / 2, y + LABEL_OFFSET_Y, BTN_W, BTN_H, Component.translatable("voxlink.room_password"));
-        passwordField.setMaxLength(32);
-        passwordField.setHint(Component.translatable("voxlink.manage_room.password_hint"));
-        passwordField.setResponder(s -> {
-            passwordChanged = true;
-            updateVisibleForPassword();
-        });
-        this.addRenderableWidget(passwordField);
-
-        maxPlayersField = new EditBox(this.font, centerX - BTN_W / 2, y + FIELD_OFFSET_Y, BTN_W, BTN_H, Component.translatable("voxlink.max_players"));
-        maxPlayersField.setMaxLength(3);
-        maxPlayersField.setValue(String.valueOf(roomInfo.getMaxPlayers()));
-        setInputFilter(maxPlayersField,s -> s.matches("\\d*"));
-        this.addRenderableWidget(maxPlayersField);
-
-        int advY = y + ADV_OFFSET_Y;
-
-        Button categoryBtn = Button.builder(Component.translatable("voxlink.manage_room.category", Component.translatable(CATEGORY_TRANSLATION_KEYS[categoryIdx])), button -> {
-            categoryIdx = (categoryIdx + 1) % CATEGORIES.length;
-            button.setMessage(Component.translatable("voxlink.manage_room.category", Component.translatable(CATEGORY_TRANSLATION_KEYS[categoryIdx])));
-        }).bounds(centerX - BTN_W / 2, advY, BTN_W, BTN_H).build();
-        this.addRenderableWidget(categoryBtn);
-
-        visibleButton = Button.builder(buildVisibleLabel(), button -> {
-            visible = !visible;
-            visibleButton.setMessage(buildVisibleLabel());
-        }).bounds(centerX - BTN_W / 2, advY + ADV_ROW1_OFFSET_Y, BTN_W, BTN_H).build();
-        this.addRenderableWidget(visibleButton);
-        updateVisibleForPassword();
-
-        authButton = Button.builder(buildAuthLabel(), button -> {
-            authType = authType == AuthType.OFFLINE ? AuthType.ONLINE : AuthType.OFFLINE;
-            authButton.setMessage(buildAuthLabel());
-        }).bounds(centerX - BTN_W / 2, advY + ADV_ROW2_OFFSET_Y, BTN_W, BTN_H).build();
-        this.addRenderableWidget(authButton);
-
-        this.addRenderableWidget(saveButton = Button.builder(Component.translatable("voxlink.manage_room.save_and_back"), button -> {
-            saveSettings(() -> Minecraft.getInstance().setScreen(parent));
-        }).bounds(centerX - BTN_W / 2, advY + SAVE_BTN_OFFSET_Y, BTN_W, BTN_H).build());
-
-        if (saving) {
-            saveButton.active = false;
-            nameField.setEditable(false);
-            passwordField.setEditable(false);
-            maxPlayersField.setEditable(false);
-            categoryBtn.active = false;
-            visibleButton.active = false;
-            authButton.active = false;
-        }
-    }
-
-    @Override
-    public boolean shouldCloseOnEsc() {
-        return !saving;
-    }
-
-    @Override
-    public void onClose() {
-        if (saving) return;
-        Minecraft.getInstance().setScreen(parent);
-    }
-
-    private void updateVisibleForPassword() {
-        boolean hasPassword = passwordField != null && !passwordField.getValue().trim().isEmpty();
-        if (hasPassword) {
-            if (visible) {
-                visibleBeforePassword = true;
+   @Override
+   protected void init() {
+      super.init();
+      int centerX = this.width / 2;
+      int formHeight = 230;
+      int y = Math.max(24, (this.height - formHeight) / 2);
+      this.nameField = new EditBox(this.font, centerX - 100, y, 200, 20, Component.translatable("voxlink.room_name"));
+      this.nameField.setMaxLength(20);
+      this.nameField.setValue(this.roomInfo.getName() != null ? this.roomInfo.getName() : "");
+      this.addRenderableWidget(this.nameField);
+      this.passwordField = new EditBox(this.font, centerX - 100, y + 24, 200, 20, Component.translatable("voxlink.room_password"));
+      this.passwordField.setMaxLength(32);
+      this.passwordField.setHint(Component.translatable("voxlink.manage_room.password_hint"));
+      this.passwordField.setResponder(s -> {
+         this.passwordChanged = true;
+         this.updateVisibleForPassword();
+      });
+      this.addRenderableWidget(this.passwordField);
+      this.maxPlayersField = new EditBox(this.font, centerX - 100, y + 48, 200, 20, Component.translatable("voxlink.max_players"));
+      this.maxPlayersField.setMaxLength(3);
+      this.maxPlayersField.setValue(String.valueOf(this.roomInfo.getMaxPlayers()));
+      this.setInputFilter(this.maxPlayersField, s -> s.matches("\\d*"));
+      this.addRenderableWidget(this.maxPlayersField);
+      int advY = y + 76;
+      Button categoryBtn = Button.builder(
+            Component.translatable("voxlink.manage_room.category", new Object[]{Component.translatable(CATEGORY_TRANSLATION_KEYS[this.categoryIdx])}),
+            button -> {
+               this.categoryIdx = (this.categoryIdx + 1) % CATEGORIES.length;
+               button.setMessage(
+                  Component.translatable("voxlink.manage_room.category", new Object[]{Component.translatable(CATEGORY_TRANSLATION_KEYS[this.categoryIdx])})
+               );
             }
-            visible = false;
-        } else if (passwordChanged) {
-            visible = visibleBeforePassword;
-        }
-        if (visibleButton != null) {
-            visibleButton.active = !hasPassword;
-            visibleButton.setMessage(hasPassword
-            ? Component.translatable("voxlink.visible.password_hidden").withStyle(ChatFormatting.RED)
-            : buildVisibleLabel());
-        }
-    }
+         )
+         .bounds(centerX - 100, advY, 200, 20)
+         .build();
+      this.addRenderableWidget(categoryBtn);
+      this.visibleButton = Button.builder(this.buildVisibleLabel(), button -> {
+         this.visible = !this.visible;
+         this.visibleButton.setMessage(this.buildVisibleLabel());
+      }).bounds(centerX - 100, advY + 24, 200, 20).build();
+      this.addRenderableWidget(this.visibleButton);
+      this.updateVisibleForPassword();
+      this.authButton = Button.builder(this.buildAuthLabel(), button -> {
+         this.authType = this.authType == ManageRoomScreen.AuthType.OFFLINE ? ManageRoomScreen.AuthType.ONLINE : ManageRoomScreen.AuthType.OFFLINE;
+         this.authButton.setMessage(this.buildAuthLabel());
+      }).bounds(centerX - 100, advY + 48, 200, 20).build();
+      this.addRenderableWidget(this.authButton);
+      this.addRenderableWidget(
+         this.saveButton = Button.builder(
+               Component.translatable("voxlink.manage_room.save_and_back"),
+               button -> this.saveSettings(() -> Minecraft.getInstance().setScreen(this.parent))
+            )
+            .bounds(centerX - 100, advY + 80, 200, 20)
+            .build()
+      );
+      if (this.saving) {
+         this.saveButton.active = false;
+         this.nameField.setEditable(false);
+         this.passwordField.setEditable(false);
+         this.maxPlayersField.setEditable(false);
+         categoryBtn.active = false;
+         this.visibleButton.active = false;
+         this.authButton.active = false;
+      }
+   }
 
-    private Component buildVisibleLabel() {
-        return visible ? Component.translatable("voxlink.visible.on") : Component.translatable("voxlink.visible.off");
-    }
+   public boolean shouldCloseOnEsc() {
+      return !this.saving;
+   }
 
-    private Component buildAuthLabel() {
-        return Component.translatable(authType.translationKey);
-    }
+   public void onClose() {
+      if (!this.saving) {
+         Minecraft.getInstance().setScreen(this.parent);
+      }
+   }
 
-    private void saveSettings(Runnable onSuccess) {
-        var mc = Minecraft.getInstance();
-        String name = nameField.getValue().trim();
-        if (name.isEmpty()) {
-            statusMessage = ChatFormatting.RED.toString() + Component.translatable("voxlink.manage_room.enter_name").getString();
-            statusColor = VoxLinkColors.ERROR;
-            return;
-        }
+   private void updateVisibleForPassword() {
+      boolean hasPassword = this.passwordField != null && !this.passwordField.getValue().trim().isEmpty();
+      if (hasPassword) {
+         if (this.visible) {
+            this.visibleBeforePassword = true;
+         }
 
-        String password = passwordField.getValue().trim();
-        String passwordToSend = null;
-        if (passwordChanged) {
+         this.visible = false;
+      } else if (this.passwordChanged) {
+         this.visible = this.visibleBeforePassword;
+      }
+
+      if (this.visibleButton != null) {
+         this.visibleButton.active = !hasPassword;
+         this.visibleButton
+            .setMessage(
+               (Component)(hasPassword ? Component.translatable("voxlink.visible.password_hidden").withStyle(ChatFormatting.RED) : this.buildVisibleLabel())
+            );
+      }
+   }
+
+   private Component buildVisibleLabel() {
+      return this.visible ? Component.translatable("voxlink.visible.on") : Component.translatable("voxlink.visible.off");
+   }
+
+   private Component buildAuthLabel() {
+      return Component.translatable(this.authType.translationKey);
+   }
+
+   private void saveSettings(Runnable onSuccess) {
+      Minecraft mc = Minecraft.getInstance();
+      String name = this.nameField.getValue().trim();
+      if (name.isEmpty()) {
+         this.statusMessage = ChatFormatting.RED.toString() + Component.translatable("voxlink.manage_room.enter_name").getString();
+         this.statusColor = -43691;
+      } else {
+         String password = this.passwordField.getValue().trim();
+         String passwordToSend = null;
+         if (this.passwordChanged) {
             passwordToSend = password.isEmpty() ? "" : password;
-        }
-        int maxPlayers;
-        try {
-            maxPlayers = Integer.parseInt(maxPlayersField.getValue());
-        } catch (NumberFormatException e) {
-            maxPlayers = roomInfo.getMaxPlayers();
-        }
-        if (maxPlayers < MIN_MAX_PLAYERS) maxPlayers = MIN_MAX_PLAYERS;
-        if (maxPlayers > MAX_MAX_PLAYERS) maxPlayers = MAX_MAX_PLAYERS;
+         }
 
-        saving = true;
-        statusMessage = Component.translatable("voxlink.manage_room.saving").getString();
-        statusColor = VoxLinkColors.WARNING;
-        saveButton.active = false;
+         int maxPlayers;
+         try {
+            maxPlayers = Integer.parseInt(this.maxPlayersField.getValue());
+         } catch (NumberFormatException e) {
+            maxPlayers = this.roomInfo.getMaxPlayers();
+         }
 
-        if (mc.player != null) {
+         if (maxPlayers < 2) {
+            maxPlayers = 2;
+         }
+
+         if (maxPlayers > 100) {
+            maxPlayers = 100;
+         }
+
+         this.saving = true;
+         this.statusMessage = Component.translatable("voxlink.manage_room.saving").getString();
+         this.statusColor = -171;
+         this.saveButton.active = false;
+         if (mc.player != null) {
             mc.player.sendSystemMessage(Component.translatable("voxlink.chat.saving_settings"));
-        }
+         }
 
-        VoxLinkMod.getRoomManager().updateRoom(
-        roomInfo.getCode(), roomInfo.getToken(),
-        name, passwordToSend,
-        maxPlayers, visible, authType.name(), CATEGORIES[categoryIdx]
-        ).thenAccept(updated -> {
-            mc.execute(() -> {
-                if (mc.screen != ManageRoomScreen.this) {
-                    saving = false;
-                    return;
-                }
-                saving = false;
-                saveButton.active = true;
-                if (updated != null && !updated.isNameApproved()) {
-                    //debounce 审核异步进行,不在此处下结论,避免与后续信号矛盾
-                    statusMessage = ChatFormatting.YELLOW.toString() + Component.translatable("voxlink.manage_room.name_pending_review").getString();
-                    statusColor = VoxLinkColors.WARNING;
-                } else {
-                    statusMessage = ChatFormatting.GREEN.toString() + Component.translatable("voxlink.manage_room.saved").getString();
-                    statusColor = VoxLinkColors.SUCCESS;
-                }
-
-                roomInfo.setVisible(visible);
-                roomInfo.setCategory(CATEGORIES[categoryIdx]);
-                roomInfo.setAuthType(authType.name());
-
-                if (mc.player != null) {
-                    String code = roomInfo.getCode();
-                    mc.player.sendSystemMessage(
-                    Component.translatable("voxlink.chat.room_settings_updated").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
-                    //debounce 不显示明文房间号
-                    mc.player.sendSystemMessage(
-                    Component.translatable("voxlink.chat.room_code_label")
-                    .append(Component.literal(ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
-                    + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]")
-                    .withStyle(ChatCompat.styleWithCopy(code,
-                    Component.translatable("voxlink.chat.click_to_copy")))));
-                    String hostIp = roomInfo.getHostIp();
-                    int hostPort = roomInfo.getHostPort();
-                    String hostIpv6 = roomInfo.getHostIpv6();
-                    boolean hasV4 = hostIp != null && !hostIp.isEmpty();
-                    boolean hasV6 = hostIpv6 != null && !hostIpv6.isEmpty();
-                    if (hasV4 || hasV6) {
-                        net.minecraft.network.chat.MutableComponent addrLine = Component.translatable("voxlink.chat.your_addresses").withStyle(ChatFormatting.YELLOW);
-                        if (hasV4) {
-                            String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
-                            addrLine.append(Component.translatable("voxlink.chat.ipv4_label")
-                            .withStyle(ChatCompat.styleWithCopy(addr,
-                            Component.translatable("voxlink.chat.copy_for_non_voxlink"))
-                            .withColor(VoxLinkColors.SUCCESS_RGB)));
+         VoxLinkMod.getRoomManager()
+            .updateRoom(
+               this.roomInfo.getCode(),
+               this.roomInfo.getToken(),
+               name,
+               passwordToSend,
+               maxPlayers,
+               this.visible,
+               this.authType.name(),
+               CATEGORIES[this.categoryIdx]
+            )
+            .thenAccept(
+               updated -> mc.execute(
+                  () -> {
+                     if (mc.screen != this) {
+                        this.saving = false;
+                     } else {
+                        this.saving = false;
+                        this.saveButton.active = true;
+                        if (updated != null && !updated.isNameApproved()) {
+                           this.statusMessage = ChatFormatting.YELLOW.toString()
+                              + Component.translatable("voxlink.manage_room.name_pending_review").getString();
+                           this.statusColor = -171;
+                        } else {
+                           this.statusMessage = ChatFormatting.GREEN.toString() + Component.translatable("voxlink.manage_room.saved").getString();
+                           this.statusColor = -11141291;
                         }
-                        if (hasV4 && hasV6) addrLine.append(Component.literal(" "));
-                        if (hasV6) {
-                            String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
-                            addrLine.append(Component.translatable("voxlink.chat.ipv6_label")
-                            .withStyle(ChatCompat.styleWithCopy(ipv6Addr,
-                            Component.translatable("voxlink.chat.copy_for_non_voxlink"))
-                            .withColor(VoxLinkColors.SUCCESS_RGB)));
+
+                        this.roomInfo.setVisible(this.visible);
+                        this.roomInfo.setCategory(CATEGORIES[this.categoryIdx]);
+                        this.roomInfo.setAuthType(this.authType.name());
+                        if (mc.player != null) {
+                           String code = this.roomInfo.getCode();
+                           mc.player
+                              .sendSystemMessage(
+                                 Component.translatable("voxlink.chat.room_settings_updated")
+                                    .withStyle(new ChatFormatting[]{ChatFormatting.GREEN, ChatFormatting.BOLD})
+                              );
+                           mc.player
+                              .sendSystemMessage(
+                                 Component.translatable("voxlink.chat.room_code_label")
+                                    .append(
+                                       Component.literal(
+                                             ChatFormatting.GREEN.toString()
+                                                + ChatFormatting.BOLD.toString()
+                                                + "["
+                                                + Component.translatable("voxlink.chat.click_to_copy").getString()
+                                                + "]"
+                                          )
+                                          .withStyle(ChatCompat.styleWithCopy(code, Component.translatable("voxlink.chat.click_to_copy")))
+                                    )
+                              );
+                           String hostIp = this.roomInfo.getHostIp();
+                           int hostPort = this.roomInfo.getHostPort();
+                           String hostIpv6 = this.roomInfo.getHostIpv6();
+                           boolean hasV4 = hostIp != null && !hostIp.isEmpty();
+                           boolean hasV6 = hostIpv6 != null && !hostIpv6.isEmpty();
+                           if (hasV4 || hasV6) {
+                              MutableComponent addrLine = Component.translatable("voxlink.chat.your_addresses").withStyle(ChatFormatting.YELLOW);
+                              if (hasV4) {
+                                 String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
+                                 addrLine.append(
+                                    Component.translatable("voxlink.chat.ipv4_label")
+                                       .withStyle(
+                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                       )
+                                 );
+                              }
+
+                              if (hasV4 && hasV6) {
+                                 addrLine.append(Component.literal(" "));
+                              }
+
+                              if (hasV6) {
+                                 String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
+                                 addrLine.append(
+                                    Component.translatable("voxlink.chat.ipv6_label")
+                                       .withStyle(
+                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                       )
+                                 );
+                              }
+
+                              mc.player.sendSystemMessage(addrLine);
+                           }
                         }
-                        mc.player.sendSystemMessage(addrLine);
-                    }
-                }
 
-                if (onSuccess != null && updated != null) {
-                    onSuccess.run();
-                }
+                        if (onSuccess != null && updated != null) {
+                           onSuccess.run();
+                        }
+                     }
+                  }
+               )
+            )
+            .exceptionally(e -> {
+               Throwable cause = e;
+
+               while (cause.getCause() != null) {
+                  cause = cause.getCause();
+               }
+
+               String msg = cause.getMessage();
+               VoxLinkMod.LOGGER.error("Room update failed: {}", msg, cause);
+               String finalMsg = msg != null ? msg : Component.translatable("voxlink.error.unknown").getString();
+               mc.execute(() -> {
+                  this.saving = false;
+                  this.saveButton.active = true;
+                  this.statusMessage = ChatFormatting.RED.toString() + finalMsg;
+                  this.statusColor = -43691;
+                  if (mc.player != null) {
+                     mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", new Object[]{finalMsg}));
+                  }
+               });
+               return null;
             });
-        }).exceptionally(e -> {
-            Throwable cause = e;
-            while (cause.getCause() != null) cause = cause.getCause();
-            String msg = cause.getMessage();
-            VoxLinkMod.LOGGER.error("Room update failed: {}", msg, cause);
-            final String finalMsg = msg != null ? msg : Component.translatable("voxlink.error.unknown").getString();
-            mc.execute(() -> {
-                saving = false;
-                saveButton.active = true;
-                statusMessage = ChatFormatting.RED.toString() + finalMsg;
-                statusColor = VoxLinkColors.ERROR;
-                if (mc.player != null) {
-                    mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", finalMsg));
-                }
-            });
-            return null;
-        });
-    }
+      }
+   }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        int centerX = this.width / 2;
-        drawCenteredClipped(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.TITLE);
-
-        if (!statusMessage.isEmpty()) {
-            String clipped = statusMessage;
-            int maxWidth = this.width - MARGIN_X;
-            if (fontWidth(statusMessage) > maxWidth) {
-                while (fontWidth(clipped + "...") > maxWidth && clipped.length() > 0) {
-                    clipped = clipped.substring(0, clipped.length() - 1);
-                }
-                clipped = clipped + "...";
+   public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+      int centerX = this.width / 2;
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
+      if (!this.statusMessage.isEmpty()) {
+         String clipped = this.statusMessage;
+         int maxWidth = this.width - 20;
+         if (this.fontWidth(this.statusMessage) > maxWidth) {
+            while (this.fontWidth(clipped + "...") > maxWidth && clipped.length() > 0) {
+               clipped = clipped.substring(0, clipped.length() - 1);
             }
-            int formHeight = FORM_HEIGHT;
-            int y = Math.max(FORM_MIN_Y, (this.height - formHeight) / 2);
-            drawCenteredString(graphics, clipped, centerX, y + STATUS_OFFSET_Y, statusColor);
-        }
-    }
+
+            clipped = clipped + "...";
+         }
+
+         int formHeight = 230;
+         int y = Math.max(24, (this.height - formHeight) / 2);
+         this.drawCenteredString(graphics, clipped, centerX, y + 186, this.statusColor);
+      }
+   }
+
+   private enum AuthType {
+      OFFLINE("voxlink.auth_type.offline"),
+      ONLINE("voxlink.auth_type.online");
+
+      final String translationKey;
+
+      AuthType(String translationKey) {
+         this.translationKey = translationKey;
+      }
+   }
 }
