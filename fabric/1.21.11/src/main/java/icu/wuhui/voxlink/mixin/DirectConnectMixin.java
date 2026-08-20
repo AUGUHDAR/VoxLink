@@ -130,11 +130,13 @@ public abstract class DirectConnectMixin extends Screen {
                            if (mc.player != null) {
                               mc.player
                                  .displayClientMessage(
+
                                     Component.translatable(
                                        "voxlink.chat.connection_failed_detail",
                                        new Object[]{Component.translatable("voxlink.connection.all_failed").getString()}
                                     )
-                                 , false);
+                                 
+, false);
                            }
 
                            VoxLinkMod.getRoomManager().leaveRoom();

@@ -1,9 +1,9 @@
 package icu.wuhui.voxlink.ui;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class CreatingRoomScreen extends VoxLinkScreenBase {
    private final CreateRoomScreen parent;

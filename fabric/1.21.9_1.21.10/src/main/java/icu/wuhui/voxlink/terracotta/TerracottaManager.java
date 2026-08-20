@@ -197,7 +197,7 @@ public final class TerracottaManager {
    }
 
    public static CompletableFuture<Integer> initialize() {
-      if (initialized && port > 0 && TerracottaProcess.isAlive()) {
+      if (initialized && port != 0 && TerracottaProcess.isAlive()) {
          return CompletableFuture.completedFuture(port);
       } else if (!TerracottaBinary.verifyInstallation()) {
          LOGGER.warn("Terracotta install self-check failed, fallback to VoxLink P2P");
@@ -220,7 +220,10 @@ public final class TerracottaManager {
             unknown.port = p;
             stateRef.set(unknown);
             startPolling();
-            return TerracottaClient.getMeta(p).thenApply(meta -> (Integer)p);
+            // JNI 模式(port==-1)没有 HTTP meta, 用 bridge 存活状态代替
+            return p == -1
+               ? CompletableFuture.completedFuture(p)
+               : TerracottaClient.getMeta(p).thenApply(meta -> p);
          });
       }
    }
@@ -281,7 +284,7 @@ public final class TerracottaManager {
          }
 
          pollTask = scheduler.scheduleAtFixedRate(() -> {
-            if (port > 0 && TerracottaProcess.isAlive()) {
+            if (port != 0 && TerracottaProcess.isAlive()) {
                long epoch = stateEpoch.get();
 
                try {
@@ -513,7 +516,7 @@ public final class TerracottaManager {
             if (!success) {
                throw new RuntimeException("加入陶瓦房间失败");
             } else {
-               return waitForGuestOk(30);
+               return waitForGuestOk(60);
             }
          }).exceptionally(e -> {
             Throwable cause = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
@@ -529,7 +532,7 @@ public final class TerracottaManager {
    }
 
    public static CompletableFuture<Void> setIdle() {
-      return port <= 0 ? CompletableFuture.completedFuture(null) : TerracottaClient.setIdle(port);
+      return port == 0 ? CompletableFuture.completedFuture(null) : TerracottaClient.setIdle(port);
    }
 
    private static CompletableFuture<Void> resetToWaiting() {
@@ -612,7 +615,7 @@ public final class TerracottaManager {
    }
 
    public static boolean isReady() {
-      return initialized && port > 0 && TerracottaProcess.isAlive();
+      return initialized && port != 0 && TerracottaProcess.isAlive();
    }
 
    public static boolean isBinaryReady() {

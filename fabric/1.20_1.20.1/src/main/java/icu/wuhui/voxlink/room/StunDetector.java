@@ -50,6 +50,14 @@ public final class StunDetector {
       return STUN_SERVER_GROUPS.size();
    }
 
+   // 连接级重置: 网络可能已变, 强制失效本地IP/IPv6缓存, 避免换网络后仍用旧值
+   public static void clearLocalCaches() {
+      cachedLocalIp = null;
+      localIpCacheTime = 0L;
+      cachedIpv6Reachable = null;
+      ipv6CacheTime = 0L;
+   }
+
    public static List<String> getAllStunUrls() {
       return STUN_SERVER_GROUPS.stream().flatMap(Collection::stream).toList();
    }

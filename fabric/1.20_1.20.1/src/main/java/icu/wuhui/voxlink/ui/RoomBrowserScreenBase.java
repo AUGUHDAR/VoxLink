@@ -15,11 +15,11 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    private static final int KEY_ENTER = 257;
@@ -781,18 +781,15 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    }
 
    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-      if (super.mouseClicked(mouseX, mouseY, button)) {
-         return true;
-      }
-      return this.handleClick(mouseX, mouseY, button);
+return this.handleClick(mouseX, mouseY, button) ? true : super.mouseClicked(mouseX, mouseY, button);
    }
 
    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
       return this.handleKeyPressed(keyCode, scanCode, modifiers) ? true : super.keyPressed(keyCode, scanCode, modifiers);
    }
 
-   public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-      return this.handleMouseScrolled(delta) ? true : super.mouseScrolled(mouseX, mouseY, delta);
+   public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+      return this.handleMouseScrolled(amount) ? true : super.mouseScrolled(mouseX, mouseY, amount);
    }
 
    public void removed() {

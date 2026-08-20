@@ -54,11 +54,11 @@ public abstract class DirectConnectMixin extends Screen {
             RoomManager rm = VoxLinkMod.getRoomManager();
             if (rm == null) {
                if (mc.player != null) {
-                  mc.player.displayClientMessage(Component.translatable("voxlink.error.not_available"), false);
+                  mc.player.sendSystemMessage(Component.translatable("voxlink.error.not_available"));
                }
             } else if (rm.isInRoom()) {
                if (mc.player != null) {
-                  mc.player.displayClientMessage(Component.translatable("voxlink.chat.already_in_room_leave_first"), false);
+                  mc.player.sendSystemMessage(Component.translatable("voxlink.chat.already_in_room_leave_first"));
                }
             } else {
                rm.joinRoom(code, null).thenAccept(roomInfo -> mc.execute(() -> {
@@ -66,7 +66,7 @@ public abstract class DirectConnectMixin extends Screen {
                      VoxLinkMod.getRoomManager().leaveRoom();
                   } else {
                      if (mc.player != null) {
-                        mc.player.displayClientMessage(Component.translatable("voxlink.chat.joined_waiting_host"), false);
+                        mc.player.sendSystemMessage(Component.translatable("voxlink.chat.joined_waiting_host"));
                      }
 
                      this.startDirectConnectMonitor(mc);
@@ -94,7 +94,7 @@ public abstract class DirectConnectMixin extends Screen {
                         }
 
                         if (mc.player != null) {
-                           mc.player.displayClientMessage(Component.translatable("voxlink.chat.error", new Object[]{msg}), false);
+                           mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", new Object[]{msg}));
                         }
                      }
                   });
@@ -129,12 +129,14 @@ public abstract class DirectConnectMixin extends Screen {
                         () -> {
                            if (mc.player != null) {
                               mc.player
-                                 .displayClientMessage(
+                                 .sendSystemMessage(
+
                                     Component.translatable(
                                        "voxlink.chat.connection_failed_detail",
                                        new Object[]{Component.translatable("voxlink.connection.all_failed").getString()}
                                     )
-                                 , false);
+                                 
+);
                            }
 
                            VoxLinkMod.getRoomManager().leaveRoom();
@@ -145,7 +147,7 @@ public abstract class DirectConnectMixin extends Screen {
                   if (DirectConnectMixin.this.monitorDone.compareAndSet(false, true)) {
                      mc.execute(() -> {
                         if (mc.player != null) {
-                           mc.player.displayClientMessage(Component.translatable("voxlink.chat.connected_entering_game"), false);
+                           mc.player.sendSystemMessage(Component.translatable("voxlink.chat.connected_entering_game"));
                         }
                      });
                   }
@@ -164,7 +166,7 @@ public abstract class DirectConnectMixin extends Screen {
                                     reason = Component.translatable("voxlink.connection.all_failed").getString();
                                  }
 
-                                 mc.player.displayClientMessage(Component.translatable("voxlink.chat.connection_failed_detail", new Object[]{reason}), false);
+                                 mc.player.sendSystemMessage(Component.translatable("voxlink.chat.connection_failed_detail", new Object[]{reason}));
                               }
 
                               VoxLinkMod.getRoomManager().leaveRoom("连接失败");

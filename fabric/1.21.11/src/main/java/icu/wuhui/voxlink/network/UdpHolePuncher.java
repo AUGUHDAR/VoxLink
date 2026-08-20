@@ -210,6 +210,12 @@ public class UdpHolePuncher {
    }
 
    public CompletableFuture<PunchResult> punchMultiSocket(String remoteIp, int targetPort, List<UdpHolePuncher> socketGroup, AtomicBoolean wonFlag) {
+      return this.punchMultiSocket(remoteIp, targetPort, socketGroup, wonFlag, 0);
+   }
+
+   // sweepSpread>0 时把整组socket分布到 targetPort±sweepSpread 的带宽上, 用于双对称扫对端易侧窄带;
+   // =0 保持旧语义(整组打单一稳定端口, 锥形对端有效)
+   public CompletableFuture<PunchResult> punchMultiSocket(String remoteIp, int targetPort, List<UdpHolePuncher> socketGroup, AtomicBoolean wonFlag, int sweepSpread) {
       this.punching.set(true);
       this.holeOpen.set(false);
       this.remoteReceived.set(false);
@@ -312,7 +318,7 @@ public class UdpHolePuncher {
                            byte b0 = buf.get(0);
                            byte b1 = buf.get(1);
                            byte b2 = buf.get(2);
-                           if (b0 == MAGIC[0] && b1 == MAGIC[1] && from.getAddress().equals(this.remoteAddress)) {
+                           if (b0 == MAGIC[0] && b1 == MAGIC[1] && this.acceptAddress(from.getAddress(), b2)) {
                               UdpHolePuncher sp = finalChannelToPuncher.get(ch);
                               int sIdx = finalChannelToIndex.get(ch);
                               if (b2 == 1) {
@@ -320,7 +326,8 @@ public class UdpHolePuncher {
                                  this.remoteReceived.set(true);
                                  sp.sendControlTo((byte)2, from.getAddress(), from.getPort());
                                  synchronized (completionLock) {
-                                    if (this.localConfirmed.get() && wonFlag.compareAndSet(false, true) && this.completed.compareAndSet(false, true)) {
+                                    // 一旦已确认过对端(收到过PUNCH或ACK)即可判赢，避免对称NAT host 因等不到"双确认"而永不建数据面
+                                    if ((this.localConfirmed.get() || this.remoteReceived.get()) && wonFlag.compareAndSet(false, true) && this.completed.compareAndSet(false, true)) {
                                        this.holeOpen.set(true);
                                        this.punching.set(false);
                                        sp.socketTransferred = true;
@@ -336,7 +343,7 @@ public class UdpHolePuncher {
                                  this.localConfirmed.set(true);
                                  sp.sendControlTo((byte)2, from.getAddress(), from.getPort());
                                  synchronized (completionLock) {
-                                    if (this.remoteReceived.get() && wonFlag.compareAndSet(false, true) && this.completed.compareAndSet(false, true)) {
+                                    if ((this.localConfirmed.get() || this.remoteReceived.get()) && wonFlag.compareAndSet(false, true) && this.completed.compareAndSet(false, true)) {
                                        this.holeOpen.set(true);
                                        this.punching.set(false);
                                        sp.socketTransferred = true;
@@ -394,11 +401,19 @@ public class UdpHolePuncher {
                }
             }
 
+            int sweepSpan = sweepSpread > 0 ? sweepSpread * 2 + 1 : 0;
+            int sweepIdx = 0;
+
             for (UdpHolePuncher sp : socketGroup) {
                DatagramSocket s = sp.getSocket();
                if (s != null && !s.isClosed()) {
+                  int destPort = this.remotePort;
+                  if (sweepSpread > 0) {
+                     destPort = this.remotePort + ((sweepIdx++ % sweepSpan) - sweepSpread);
+                  }
+
                   for (int r = 0; r < 3; r++) {
-                     DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, this.remotePort);
+                     DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, destPort);
                      sendPkt(s, pkt);
                   }
                }
@@ -451,21 +466,51 @@ public class UdpHolePuncher {
    }
 
    private static void sendPkt(DatagramSocket s, DatagramPacket pkt) {
-      try {
-         DatagramChannel ch = s.getChannel();
-         if (ch != null) {
-            ByteBuffer bb = ByteBuffer.wrap(pkt.getData(), 0, pkt.getLength());
-            ch.send(bb, pkt.getSocketAddress());
-         } else {
-            s.send(pkt);
+      for (int attempt = 0; attempt < 3; attempt++) {
+         try {
+            DatagramChannel ch = s.getChannel();
+            if (ch != null) {
+               ByteBuffer bb = ByteBuffer.wrap(pkt.getData(), 0, pkt.getLength());
+               ch.send(bb, pkt.getSocketAddress());
+            } else {
+               s.send(pkt);
+            }
+
+            return;
+         } catch (IOException | RuntimeException var5) {
+            // Windows对UDP socket有ICMP不可达锁存: 扫到未映射端口后路由器回ICMP, 下一次send
+            // 抛WSAECONNRESET且错误只报一次; 立即重试即恢复, 不重试=静默丢包(VPRFC6实证)
          }
-      } catch (IOException | RuntimeException var4) {
       }
    }
 
-   private boolean acceptPacket(byte[] buf, DatagramPacket packet) {
+   private boolean acceptAddress(InetAddress addr, byte type) {
       InetAddress exp = this.remoteAddress;
-      return exp != null && exp.equals(packet.getAddress());
+      if (exp == null) {
+         return false;
+      }
+      if (exp.equals(addr)) {
+         return true;
+      }
+      if ((type == 1 || type == 2) && this.punching.get()) {
+         byte[] a = exp.getAddress();
+         byte[] b = addr.getAddress();
+         boolean sameSegment = a != null && b != null && a.length == 4 && b.length == 4 && a[0] == b[0] && a[1] == b[1];
+         if (sameSegment) {
+            LOGGER.info(
+               "[UdpHolePuncher] CGNAT multi-IP accept {} (expected {})",
+               new Object[]{addr.getHostAddress(), exp.getHostAddress()}
+            );
+            this.remoteAddress = addr;
+            return true;
+         }
+      }
+      return false;
+   }
+
+   private boolean acceptPacket(byte[] buf, DatagramPacket packet) {
+      byte type = buf.length > 2 ? buf[2] : -1;
+      return this.acceptAddress(packet.getAddress(), type);
    }
 
    public CompletableFuture<PunchResult> punchMultiPort(String remoteIp, List<Integer> targetPorts) {
@@ -562,7 +607,7 @@ public class UdpHolePuncher {
                            this.remoteReceived.set(true);
                            this.sendControlTo((byte)2, packet.getAddress(), packet.getPort());
                            synchronized (completionLock) {
-                              if (this.localConfirmed.get() && this.completed.compareAndSet(false, true)) {
+                              if ((this.localConfirmed.get() || this.remoteReceived.get()) && this.completed.compareAndSet(false, true)) {
                                  this.holeOpen.set(true);
                                  this.punching.set(false);
                                  this.socketTransferred = true;
@@ -575,7 +620,7 @@ public class UdpHolePuncher {
                            this.localConfirmed.set(true);
                            this.sendControlTo((byte)2, packet.getAddress(), packet.getPort());
                            synchronized (completionLock) {
-                              if (this.remoteReceived.get() && this.completed.compareAndSet(false, true)) {
+                              if ((this.localConfirmed.get() || this.remoteReceived.get()) && this.completed.compareAndSet(false, true)) {
                                  this.holeOpen.set(true);
                                  this.punching.set(false);
                                  this.socketTransferred = true;
@@ -753,7 +798,7 @@ public class UdpHolePuncher {
                         this.remoteReceived.set(true);
                         this.sendControlTo((byte)2, packet.getAddress(), packet.getPort());
                         synchronized (completionLock) {
-                           if (this.localConfirmed.get() && this.completed.compareAndSet(false, true)) {
+                           if ((this.localConfirmed.get() || this.remoteReceived.get()) && this.completed.compareAndSet(false, true)) {
                               this.holeOpen.set(true);
                               this.punching.set(false);
                               this.socketTransferred = true;
@@ -766,7 +811,7 @@ public class UdpHolePuncher {
                         this.localConfirmed.set(true);
                         this.sendControlTo((byte)2, packet.getAddress(), packet.getPort());
                         synchronized (completionLock) {
-                           if (this.remoteReceived.get() && this.completed.compareAndSet(false, true)) {
+                           if ((this.localConfirmed.get() || this.remoteReceived.get()) && this.completed.compareAndSet(false, true)) {
                               this.holeOpen.set(true);
                               this.punching.set(false);
                               this.socketTransferred = true;
@@ -1006,36 +1051,23 @@ public class UdpHolePuncher {
          portsToSend.add(centerPort);
          Random rnd = new Random();
          if (useRandomScan) {
-            int windowSize = this.profile().send.sweepWindowSize;
-            int lowBound;
-            int highBound;
-            if (portRange >= 100) {
-               lowBound = 1;
-               highBound = 65535;
-            } else {
-               lowBound = Math.max(1, centerPort - portRange);
-               highBound = Math.min(65535, centerPort + portRange);
-            }
+            // 1.0.0算法: 从全范围(rangeSize个候选)中随机取满maxRandom+1个不同端口, 必然可终止。
+            // 旧滑窗算法候选恰好windowSize个且centerPort已预置进chosen, added永远差1 → while死循环,
+            // 发送线程空转卡死零发包且烧CPU(GBNPLE/7CSAJA/NAMTRG三轮全灭的真正根因)
+            int lowBound = Math.max(1, centerPort - portRange);
+            int highBound = Math.min(65535, centerPort + portRange);
 
             int rangeSize = highBound - lowBound + 1;
-            windowSize = Math.min(windowSize, rangeSize - 1);
-            if (windowSize > 0) {
-               int maxStart = rangeSize - windowSize;
-               int windowStart = lowBound + round * windowSize % (maxStart + 1);
-               Set<Integer> chosen = new HashSet<>();
-               chosen.add(centerPort);
-               int added = 0;
+            int maxRandom = Math.min(this.profile().send.sweepWindowSize, rangeSize - 1);
+            Set<Integer> chosen = new HashSet<>();
+            chosen.add(centerPort);
 
-               while (added < windowSize) {
-                  int p = windowStart + rnd.nextInt(windowSize);
-                  if (chosen.add(p)) {
-                     added++;
-                  }
-               }
-
-               portsToSend.addAll(chosen);
-               Collections.shuffle(portsToSend.subList(1, portsToSend.size()), rnd);
+            while (chosen.size() < maxRandom + 1) {
+               chosen.add(lowBound + rnd.nextInt(rangeSize));
             }
+
+            portsToSend.addAll(chosen);
+            Collections.shuffle(portsToSend.subList(1, portsToSend.size()), rnd);
          } else {
             for (int offset = 1; offset <= portRange; offset++) {
                int portLow = centerPort - offset;
@@ -1218,6 +1250,56 @@ public class UdpHolePuncher {
             Thread.currentThread().interrupt();
          }
       }
+   }
+
+   public boolean waitPunchStop(long timeoutMs) {
+      long deadline = System.currentTimeMillis() + timeoutMs;
+      if (this.punching.get()) {
+         this.stopPunch();
+      }
+
+      while (System.currentTimeMillis() < deadline && this.punching.get()) {
+         try {
+            Thread.sleep(20L);
+         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+         }
+      }
+
+      if (this.punching.get()) {
+         return false;
+      }
+
+      while (System.currentTimeMillis() < deadline) {
+         boolean alive = false;
+         List<Thread> rts = this.recvThreadsRef;
+         if (rts != null) {
+            for (Thread t : rts) {
+               if (t != null && t.isAlive()) {
+                  alive = true;
+               }
+            }
+         }
+
+         Thread st = this.sendThreadRef;
+         if (st != null && st.isAlive()) {
+            alive = true;
+         }
+
+         if (!alive) {
+            return true;
+         }
+
+         try {
+            Thread.sleep(20L);
+         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+         }
+      }
+
+      return false;
    }
 
    public void close() {

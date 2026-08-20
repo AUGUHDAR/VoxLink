@@ -44,6 +44,7 @@ public class VoxLinkConfig {
     private volatile boolean relayEnabled = true;
     private volatile boolean parallelP2P = true;
     private volatile boolean updateCheckEnabled = true;
+    private volatile boolean useWebSocket = true;
 
     public VoxLinkConfig() {
         this.serverUrl = DEFAULT_SERVER_URL;
@@ -56,6 +57,7 @@ public class VoxLinkConfig {
         this.relayEnabled = true;
         this.parallelP2P = true;
         this.updateCheckEnabled = true;
+        this.useWebSocket = true;
     }
 
     //debounce Gson默认绕过构造器+字段初始化器 旧配置缺字段会读成false
@@ -81,6 +83,7 @@ public class VoxLinkConfig {
                 config.relayEnabled = root.has("relayEnabled") ? root.get("relayEnabled").getAsBoolean() : true;
                 config.parallelP2P = root.has("parallelP2P") ? root.get("parallelP2P").getAsBoolean() : true;
                 config.updateCheckEnabled = root.has("updateCheckEnabled") ? root.get("updateCheckEnabled").getAsBoolean() : true;
+                config.useWebSocket = root.has("useWebSocket") ? root.get("useWebSocket").getAsBoolean() : true;
                 if (config.serverUrl == null || config.serverUrl.isEmpty()) {
                     config.serverUrl = DEFAULT_SERVER_URL;
                 }
@@ -158,5 +161,7 @@ public class VoxLinkConfig {
     public void setParallelP2P(boolean v) { this.parallelP2P = v; }
     public boolean isUpdateCheckEnabled() { return updateCheckEnabled; }
     public void setUpdateCheckEnabled(boolean v) { this.updateCheckEnabled = v; }
+    public boolean isUseWebSocket() { return useWebSocket; }
+    public void setUseWebSocket(boolean v) { this.useWebSocket = v; }
     public int getConfigVersion() { return configVersion; }
 }

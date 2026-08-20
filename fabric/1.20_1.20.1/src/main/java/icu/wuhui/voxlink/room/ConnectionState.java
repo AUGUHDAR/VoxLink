@@ -30,7 +30,7 @@ public enum ConnectionState {
          case IDLE -> next == STUN_PROBE || next == DISCONNECTED || next == UDP_PUNCH || next == TRANSPORT_SETUP;
          case STUN_PROBE -> next == SIGNAL_EXCHANGE || next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED;
          case SIGNAL_EXCHANGE -> next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED || next == TRANSPORT_SETUP;
-         case UDP_PUNCH -> next == TRANSPORT_SETUP || next == TCP_FALLBACK || next == FAILED || next == CONNECTED || next == IDLE;
+         case UDP_PUNCH -> next == TRANSPORT_SETUP || next == TCP_FALLBACK || next == FAILED || next == CONNECTED || next == IDLE || next == STUN_PROBE || next == SIGNAL_EXCHANGE;
          case TCP_FALLBACK -> next == TRANSPORT_SETUP || next == FAILED || next == CONNECTED || next == STUN_PROBE || next == UDP_PUNCH || next == IDLE;
          case TRANSPORT_SETUP -> next == CONNECTED || next == FAILED || next == UDP_PUNCH || next == IDLE;
          case CONNECTED -> next == DISCONNECTED || next == UDP_PUNCH || next == IDLE;

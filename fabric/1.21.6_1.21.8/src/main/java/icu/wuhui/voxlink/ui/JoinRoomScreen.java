@@ -3,11 +3,11 @@ package icu.wuhui.voxlink.ui;
 import icu.wuhui.voxlink.terracotta.RoomCodeRouter;
 import icu.wuhui.voxlink.terracotta.TerracottaManager;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class JoinRoomScreen extends VoxLinkScreenBase {
    private static final int BTN_W = 200;

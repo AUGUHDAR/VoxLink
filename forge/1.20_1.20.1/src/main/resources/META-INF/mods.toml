@@ -10,6 +10,9 @@ authors="AUGUHDAR"
 description='''轻松地与其他玩家进行联机/Easily connect with other players'''
 logoFile="assets/voxlink/icon.png"
 
+[[mixins]]
+config="voxlink.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="forge"
     mandatory=true

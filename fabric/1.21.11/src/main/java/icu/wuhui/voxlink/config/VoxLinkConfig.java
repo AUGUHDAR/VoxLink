@@ -41,6 +41,7 @@ public class VoxLinkConfig {
    private volatile boolean relayEnabled = true;
    private volatile boolean parallelP2P = true;
    private volatile boolean updateCheckEnabled = true;
+   private volatile boolean useWebSocket = true;
 
    public VoxLinkConfig() {
       this.serverUrl = "https://p2p.wuhui.icu";
@@ -53,6 +54,7 @@ public class VoxLinkConfig {
       this.relayEnabled = true;
       this.parallelP2P = true;
       this.updateCheckEnabled = true;
+      this.useWebSocket = true;
    }
 
    public static VoxLinkConfig load() {
@@ -76,6 +78,7 @@ public class VoxLinkConfig {
             config.relayEnabled = root.has("relayEnabled") ? root.get("relayEnabled").getAsBoolean() : true;
             config.parallelP2P = root.has("parallelP2P") ? root.get("parallelP2P").getAsBoolean() : true;
             config.updateCheckEnabled = root.has("updateCheckEnabled") ? root.get("updateCheckEnabled").getAsBoolean() : true;
+            config.useWebSocket = root.has("useWebSocket") ? root.get("useWebSocket").getAsBoolean() : true;
             if (config.serverUrl == null || config.serverUrl.isEmpty()) {
                config.serverUrl = "https://p2p.wuhui.icu";
             }
@@ -227,6 +230,13 @@ public class VoxLinkConfig {
 
    public void setUpdateCheckEnabled(boolean v) {
       this.updateCheckEnabled = v;
+   }
+   public boolean isUseWebSocket() {
+      return this.useWebSocket;
+   }
+
+   public void setUseWebSocket(boolean v) {
+      this.useWebSocket = v;
    }
 
    public int getConfigVersion() {

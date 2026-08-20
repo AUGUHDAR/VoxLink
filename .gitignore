@@ -55,5 +55,9 @@ net/
 voxlink-app/
 voxlink-app-rs/
 
+# 本地日志工具（token 与日志敏感）
+tools/voxlogs/config.json
+tools/voxlogs/logs/
+
 # 参考资料（非项目源码）
 相关MOD参考/

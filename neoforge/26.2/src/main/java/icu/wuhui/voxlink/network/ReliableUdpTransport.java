@@ -35,6 +35,7 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final byte TYPE_KEEPALIVE = 8;
    private static final byte TYPE_FEC_XOR = 9;
    private static final byte TYPE_RESTART = 10;
+   private static final byte TYPE_VOICE = 11;
    private static final int FEC_GROUP_SIZE = 4;
    private static final int HEADER_SIZE = 11;
    private static final int PAYLOAD_LEN_SIZE = 2;
@@ -81,6 +82,7 @@ public class ReliableUdpTransport implements AutoCloseable {
    private volatile int consecutiveFailures = 0;
    private final AtomicBoolean iceRestartTriggered = new AtomicBoolean(false);
    private volatile Runnable onIceRestartRequested;
+   private volatile java.util.function.Consumer<byte[]> onVoiceData;
    private volatile int nextSendSeq = 0;
    private volatile int oldestUnackedSeq = 0;
    private final ConcurrentSkipListMap<Integer, ReliableUdpTransport.PendingPacket> pendingAcks = new ConcurrentSkipListMap<>();
@@ -108,6 +110,7 @@ public class ReliableUdpTransport implements AutoCloseable {
    private final ConcurrentHashMap<Integer, int[]> fecRecvLengths = new ConcurrentHashMap<>();
    private volatile int minActiveGroupId = Integer.MAX_VALUE;
    private volatile int pendingRebindPort = -1;
+   private volatile long lastCurrentPortRecvMs = 0L;
    private volatile long pendingRebindTime = 0L;
 
    public ReliableUdpTransport(DatagramSocket socket, InetSocketAddress remoteAddress) {
@@ -157,6 +160,39 @@ public class ReliableUdpTransport implements AutoCloseable {
       this.onIceRestartRequested = r;
    }
 
+   public void setOnVoiceData(java.util.function.Consumer<byte[]> c) {
+      this.onVoiceData = c;
+   }
+
+   public void sendVoice(byte[] payload) {
+      if (payload == null || this.socket == null || this.socket.isClosed()) return;
+      if (payload.length > 1400) {
+         LOGGER.debug("[ReliableUdp] Voice payload too large ({}), dropped", payload.length);
+         return;
+      }
+      byte[] data = new byte[11 + payload.length];
+      System.arraycopy(MAGIC, 0, data, 0, 2);
+      data[2] = TYPE_VOICE;
+      System.arraycopy(payload, 0, data, 11, payload.length);
+      try {
+         this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+      } catch (IOException e) {
+         LOGGER.debug("[ReliableUdp] Voice send failed: {}", e.getMessage());
+      }
+   }
+
+   private void handleVoice(byte[] buf, int len) {
+      java.util.function.Consumer<byte[]> c = this.onVoiceData;
+      if (c != null && len > 11) {
+         try {
+            c.accept(java.util.Arrays.copyOfRange(buf, 11, len));
+         } catch (Throwable t) {
+            // 语音桥异常绝不能影响 MC 数据面
+            LOGGER.warn("[ReliableUdp] voice handler exception: {}", t.getMessage());
+         }
+      }
+   }
+
    public void requestIceRestart() {
       this.triggerIceRestart();
    }
@@ -204,16 +240,23 @@ public class ReliableUdpTransport implements AutoCloseable {
       if (fromCurrent) {
          this.remoteConfirmed = true;
          this.pendingRebindPort = -1;
+         this.lastCurrentPortRecvMs = System.currentTimeMillis();
       } else if (packet.getAddress().equals(cur.getAddress())) {
          long now = System.currentTimeMillis();
-         if (packet.getPort() == this.pendingRebindPort && now - this.pendingRebindTime < 5000L) {
-            this.remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
-            this.remoteConfirmed = true;
-            this.pendingRebindPort = -1;
-            LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
-         } else {
-            this.pendingRebindPort = packet.getPort();
-            this.pendingRebindTime = now;
+         // 1.0.0兼容(其remoteAddress为final无rebind): 当前端口仍存活(6s内收到过其有效包)时绝不rebind。
+         // 连接初期对端其它打洞socket的噪声包会把发送目标切到即将关闭的死映射, ACK全进黑洞
+         // (1.1.0-2实测: host重传1130次后70s断链)。仅当前端口真死(超时无包)才允许切换, 保留真漂移兜底。
+         boolean currentAlive = this.lastCurrentPortRecvMs > 0L && now - this.lastCurrentPortRecvMs < 6000L;
+         if (!currentAlive) {
+            if (packet.getPort() == this.pendingRebindPort && now - this.pendingRebindTime < 5000L) {
+               this.remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
+               this.remoteConfirmed = true;
+               this.pendingRebindPort = -1;
+               LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
+            } else {
+               this.pendingRebindPort = packet.getPort();
+               this.pendingRebindTime = now;
+            }
          }
       }
    }
@@ -225,6 +268,7 @@ public class ReliableUdpTransport implements AutoCloseable {
       while (this.running) {
          try {
             this.socket.receive(packet);
+            LogUploadManager.onTransportActivity();
             if (packet.getLength() >= 3 && buf[0] == MAGIC[0] && buf[1] == MAGIC[1]) {
                byte type = buf[2];
                if (type != 1 && type != 2) {
@@ -263,6 +307,10 @@ public class ReliableUdpTransport implements AutoCloseable {
                            this.lastRecvTime = System.currentTimeMillis();
                            LOGGER.info("[ReliableUdp] Received peer RESTART signal, trigger ICE Restart");
                            this.triggerIceRestart();
+                           break;
+                        case 11:
+                           this.handleVoice(buf, packet.getLength());
+                           break;
                      }
                   }
                } else {
@@ -699,12 +747,12 @@ public class ReliableUdpTransport implements AutoCloseable {
             }
          }
 
-         if (silenceMs > 60000L) {
+         if (!this.closed.get() && silenceMs > 60000L) {
             LOGGER.warn("[ReliableUdp] No data received for {}s, connection dead", 60);
             this.sendRestart();
             this.triggerIceRestart();
             this.close();
-         } else if (!this.pendingAcks.isEmpty() && silenceMs > 24000L) {
+         } else if (!this.closed.get() && !this.pendingAcks.isEmpty() && silenceMs > 24000L) {
             LOGGER.warn("[ReliableUdp] No packets received for {}ms, {} packets pending, peer probably dead", 24000L, this.pendingAcks.size());
             this.sendRestart();
             this.triggerIceRestart();

@@ -8,11 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class TerracottaConfigScreen extends VoxLinkScreenBase {
    private final Screen parent;
@@ -284,8 +284,9 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});
       this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, -5592406);
       if (!this.statusMessage.isEmpty()) {
-         this.drawCenteredClipped(graphics, this.statusMessage, centerX, y + formHeight + 6, this.statusColor);
       }
+
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, -5592406);
    }
 
    public void onClose() {

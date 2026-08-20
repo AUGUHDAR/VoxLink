@@ -2,6 +2,9 @@ package icu.wuhui.voxlink.ui;
 
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.network.ConnectionHelper;
+import icu.wuhui.voxlink.network.LogUploadManager;
+import icu.wuhui.voxlink.network.NatClass;
+import icu.wuhui.voxlink.room.ConnectionManager;
 import icu.wuhui.voxlink.room.RoomInfo;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -174,6 +177,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    private void startJoin() {
       this.active = true;
+      LogUploadManager.arm(this.roomCode, false);
       Minecraft mc = Minecraft.getInstance();
       String playerName = mc.getUser().getName();
       CompletableFuture<Void> joinFuture = VoxLinkMod.getRoomManager()
@@ -262,7 +266,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private String extractErrorMessage(String msg) {
       if (msg == null) {
          return Component.translatable("voxlink.error.unknown").getString();
-      } else if (msg.contains("ROOM_NOT_FOUND")) {
+      } else if (msg.contains("ROOM_NOT_FOUND") || msg.contains("SERVER_404")) {
          return Component.translatable("voxlink.join_room.error.not_found").getString();
       } else if (msg.contains("ROOM_FULL")) {
          return Component.translatable("voxlink.error.room_full").getString();
@@ -474,6 +478,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
+      this.renderNatOverlay(graphics);
       int centerX = this.width / 2;
       this.drawCenteredString(graphics, this.title.getString(), centerX, 15, -1);
       this.drawCenteredString(
@@ -534,6 +539,10 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
       String tipText = Component.translatable("voxlink.tip.prefix").getString() + Component.translatable(this.currentTipKey).getString();
       int tipMaxWidth = this.width - 8;
+      if (LogUploadManager.isUploadFinished()) {
+         int uploadTextWidth = this.fontWidth(Component.translatable("voxlink.log_upload.uploaded").getString());
+         tipMaxWidth = Math.max(80, this.width - uploadTextWidth - 16);
+      }
       if (this.fontWidth(tipText) > tipMaxWidth) {
          while (this.fontWidth(tipText + "...") > tipMaxWidth && tipText.length() > 0) {
             tipText = tipText.substring(0, tipText.length() - 1);
@@ -543,6 +552,53 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       }
 
       this.drawString(graphics, tipText, 4, this.height - 12, -5592406);
+
+      if (LogUploadManager.isUploadFinished()) {
+         String uploadText = Component.translatable("voxlink.log_upload.uploaded").getString();
+         int uploadWidth = this.fontWidth(uploadText);
+         this.drawString(graphics, uploadText, this.width - uploadWidth - 6, this.height - 12, 0xFF55FF55);
+      }
+   }
+
+   private void renderNatOverlay(GuiGraphics graphics) {
+      ConnectionManager cm = VoxLinkMod.getRoomManager().getConnectionManager();
+      NatClass local = cm.getLocalNatClass();
+      NatClass remote = cm.getRemoteNatClass();
+      if (local == null) {
+         local = NatClass.UNKNOWN;
+      }
+
+      if (remote == null) {
+         remote = NatClass.UNKNOWN;
+      }
+
+      boolean anyUnknown = local == NatClass.UNKNOWN || remote == NatClass.UNKNOWN;
+      String opponentText = this.natCnName(remote);
+      String mineText = this.natCnName(local);
+      String difficultyText = Component.translatable(cm.getConnectionDifficultyKey()).getString();
+      if (anyUnknown) {
+         difficultyText = difficultyText + Component.translatable("voxlink.nat.doubt").getString();
+      }
+
+      int x = 4;
+      int y = 18;
+      int line = 10;
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, -5592406);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, -5592406);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, -171);
+   }
+
+   private String natCnName(NatClass nat) {
+      switch (nat) {
+         case CONE:
+            return Component.translatable("voxlink.nat.cone").getString();
+         case EASY_SYM:
+            return Component.translatable("voxlink.nat.easy_sym").getString();
+         case HARD_SYM:
+            return Component.translatable("voxlink.nat.hard_sym").getString();
+         default:
+            return Component.translatable("voxlink.nat.unknown").getString();
+      }
    }
 
    private void refillTipQueue() {

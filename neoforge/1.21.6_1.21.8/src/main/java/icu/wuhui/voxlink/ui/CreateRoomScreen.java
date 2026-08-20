@@ -803,10 +803,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    }
 
    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-      if (super.mouseClicked(mouseX, mouseY, button)) {
-         return true;
-      }
-      return this.handleSuccessClick(mouseX, mouseY);
+      return this.handleSuccessClick(mouseX, mouseY) ? true : super.mouseClicked(mouseX, mouseY, button);
    }
 
    private enum AuthType {

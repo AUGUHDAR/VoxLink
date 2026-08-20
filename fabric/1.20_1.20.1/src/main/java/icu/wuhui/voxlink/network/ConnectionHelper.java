@@ -146,37 +146,7 @@ public final class ConnectionHelper {
    }
 
    private static ServerData createServerData(String name, String ip) throws Exception {
-      Class<?> typeClass = null;
-      Object otherType = null;
-      try {
-         typeClass = Class.forName("net.minecraft.client.multiplayer.ServerData$Type");
-         otherType = Enum.valueOf((Class<? extends Enum>)typeClass, "OTHER");
-      } catch (Throwable var20) {
-      }
-      Constructor<?>[] ctors = ServerData.class.getDeclaredConstructors();
-
-      for (Constructor<?> c : ctors) {
-         Class<?>[] p = c.getParameterTypes();
-         if (p.length >= 3 && p[0] == String.class && p[1] == String.class && (typeClass != null ? typeClass.isAssignableFrom(p[2]) : p[2] == boolean.class)) {
-            Object[] args = new Object[p.length];
-            args[0] = name;
-            args[1] = ip;
-            args[2] = typeClass != null ? otherType : false;
-
-            for (int i = 3; i < p.length; i++) {
-               args[i] = p[i] == boolean.class ? false : null;
-            }
-
-            c.setAccessible(true);
-
-            try {
-               return (ServerData)c.newInstance(args);
-            } catch (Exception var12) {
-            }
-         }
-      }
-
-      throw new RuntimeException("ServerData 构造函数未找到");
+      return new ServerData(name, ip, false);
    }
 
    private static void invokeStartConnecting(Screen parent, Minecraft mc, String addr, ServerData serverData) throws Exception {
@@ -216,7 +186,7 @@ public final class ConnectionHelper {
 
    private static void sendError(Minecraft mc, String msg) {
       if (mc.player != null) {
-         mc.player.displayClientMessage(Component.literal(msg), false);
+         mc.player.sendSystemMessage(Component.literal(msg));
       }
    }
 }

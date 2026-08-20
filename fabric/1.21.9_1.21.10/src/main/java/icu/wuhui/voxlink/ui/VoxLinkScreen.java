@@ -1,6 +1,7 @@
 package icu.wuhui.voxlink.ui;
 
 import icu.wuhui.voxlink.VoxLinkMod;
+import icu.wuhui.voxlink.config.LogUploadState;
 import icu.wuhui.voxlink.network.PunchProfile;
 import icu.wuhui.voxlink.room.ConnectionManager;
 import icu.wuhui.voxlink.room.ConnectionState;
@@ -14,11 +15,11 @@ import java.util.List;
 import java.util.Objects;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class VoxLinkScreen extends VoxLinkScreenBase {
    private static final int SIDE_MARGIN = 20;
@@ -32,7 +33,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
    private Button terracottaDownloadBtn;
    private Button pauseResumeBtn;
    private Button cancelDownloadBtn;
-   private final List<int[]> codeClickAreas = new ArrayList<>();
+      private final List<int[]> codeClickAreas = new ArrayList<>();
    private final List<String> codeClickTexts = new ArrayList<>();
    private static final int BTN_W = 200;
    private static final int BTN_H = 20;
@@ -110,7 +111,8 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       int bottomY = this.height - 28;
       int relayY = bottomY - 20 - 4;
       int hintSpace = currentRoom == null ? 28 : 0;
-      int configY = relayY - 20 - 4 - hintSpace;
+      int uploadLogY = relayY - 20 - 4;
+      int configY = uploadLogY - 20 - 4 - hintSpace;
       boolean platformSupported = TerracottaBinary.isPlatformSupported();
       boolean showDownload = platformSupported && !TerracottaManager.isBinaryReady();
       boolean isDownloading = TerracottaManager.isDownloading();
@@ -204,6 +206,17 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             .bounds(centerX - 100, configY, 200, 20)
             .build()
       );
+      boolean uploadLogOn = LogUploadState.isLogUploadEnabled();
+      Button uploadLogBtn = Button.builder(
+            Component.translatable("voxlink.log_upload.toggle", new Object[]{Component.translatable(uploadLogOn ? "voxlink.log_upload.on" : "voxlink.log_upload.off")}),
+            button -> {
+               LogUploadState.setLogUploadEnabled(!LogUploadState.isLogUploadEnabled());
+               this.needsRebuild = true;
+            }
+         )
+         .bounds(centerX - 100, uploadLogY, 200, 20)
+         .build();
+      this.addRenderableWidget(uploadLogBtn);
       boolean relayOn = VoxLinkMod.getConfig().isRelayEnabled();
       boolean usingRelay = currentRoom != null && currentRoom.isUsingRelay();
       Button relayBtn = Button.builder(
@@ -309,7 +322,8 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       int maxWidth = this.width - 20;
       int bottomY = this.height - 28;
       int relayY = bottomY - 20 - 4;
-      int configY = relayY - 20 - 4 - (currentRoom == null ? 28 : 0);
+      int uploadLogY = relayY - 20 - 4;
+      int configY = uploadLogY - 20 - 4 - (currentRoom == null ? 28 : 0);
       int downloadY = configY - 20 - 4;
       this.codeClickAreas.clear();
       this.codeClickTexts.clear();
@@ -369,8 +383,8 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             }
          }
       } else {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, relayY - 24, -7829368, maxWidth);
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, relayY - 12, -5592406, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, uploadLogY - 24, -7829368, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, uploadLogY - 12, -5592406, maxWidth);
       }
 
       if (TerracottaManager.isDownloading() && this.pauseResumeBtn != null) {

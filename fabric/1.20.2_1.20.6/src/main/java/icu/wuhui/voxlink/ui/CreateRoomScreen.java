@@ -15,6 +15,7 @@ import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -25,7 +26,6 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerConnectionListener;
 import net.minecraft.world.level.GameType;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class CreateRoomScreen extends VoxLinkScreenBase {
    private final Screen parent;
@@ -430,7 +430,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
       Minecraft mc = Minecraft.getInstance();
       if (mc.getSingleplayerServer() == null) {
          if (mc.player != null) {
-            mc.player.displayClientMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(16733525)), false);
+            mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(16733525)));
          }
       } else {
          String name = this.nameField.getValue().trim();
@@ -463,7 +463,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.createStartTime = System.currentTimeMillis();
          Minecraft.getInstance().setScreen(new CreatingRoomScreen(this));
          if (mc.player != null) {
-            mc.player.displayClientMessage(Component.translatable("voxlink.chat.creating_room"), false);
+            mc.player.sendSystemMessage(Component.translatable("voxlink.chat.creating_room"));
          }
 
          IntegratedServer server = mc.getSingleplayerServer();
@@ -485,7 +485,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             if (!published) {
                this.creating = false;
                if (mc.player != null) {
-                  mc.player.displayClientMessage(Component.translatable("voxlink.create_room.lan_failed").withStyle(style -> style.withColor(16733525)), false);
+                  mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.lan_failed").withStyle(style -> style.withColor(16733525)));
                }
 
                this.createButton.active = true;
@@ -514,9 +514,9 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                            this.closeLan();
                            if (mc.player != null) {
                               mc.player
-                                 .displayClientMessage(
+                                 .sendSystemMessage(
                                     Component.translatable("voxlink.chat.error_prefix").append(Component.translatable("voxlink.create_room.timeout"))
-                                 , false);
+                                 );
                            }
 
                            mc.setScreen(this);
@@ -548,7 +548,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                      this.creating = false;
                      this.closeLan();
                      if (mc.player != null) {
-                        mc.player.displayClientMessage(Component.translatable("voxlink.chat.error", new Object[]{displayMsg}), false);
+                        mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", new Object[]{displayMsg}));
                      }
 
                      mc.setScreen(this);
@@ -584,9 +584,9 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    private void sendChatMessages(Minecraft mc, RoomInfo roomInfo) {
       if (mc.player != null) {
          String code = roomInfo.getCode();
-         mc.player.displayClientMessage(Component.translatable("voxlink.chat.room_created").withStyle(Style.EMPTY.withBold(true)), false);
+         mc.player.sendSystemMessage(Component.translatable("voxlink.chat.room_created").withStyle(Style.EMPTY.withBold(true)));
          mc.player
-            .displayClientMessage(
+            .sendSystemMessage(
                Component.translatable("voxlink.chat.room_code_label")
                   .append(
                      Component.literal(
@@ -598,9 +598,9 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                         )
                         .withStyle(ChatCompat.styleWithCopy(code, Component.translatable("voxlink.chat.click_to_copy")))
                   )
-            , false);
-         mc.player.displayClientMessage(Component.translatable("voxlink.chat.friends_install_hint"), false);
-         mc.player.displayClientMessage(Component.translatable("voxlink.create_room.recommend_voxlink"), false);
+            );
+         mc.player.sendSystemMessage(Component.translatable("voxlink.chat.friends_install_hint"));
+         mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.recommend_voxlink"));
          String hostIp = roomInfo.getHostIp();
          int hostPort = roomInfo.getHostPort();
          String hostIpv6 = roomInfo.getHostIpv6();
@@ -628,7 +628,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                );
             }
 
-            mc.player.displayClientMessage(addrLine, false);
+            mc.player.sendSystemMessage(addrLine);
          }
       }
    }
@@ -791,7 +791,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                String label = this.successClickLabels.get(i);
                Minecraft.getInstance().keyboardHandler.setClipboard(text);
                if (Minecraft.getInstance().player != null) {
-                  Minecraft.getInstance().player.displayClientMessage(Component.translatable("voxlink.chat.copied_to_clipboard", new Object[]{label}), false);
+                  Minecraft.getInstance().player.sendSystemMessage(Component.translatable("voxlink.chat.copied_to_clipboard", new Object[]{label}));
                }
 
                return true;
@@ -803,10 +803,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    }
 
    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-      if (super.mouseClicked(mouseX, mouseY, button)) {
-         return true;
-      }
-      return this.handleSuccessClick(mouseX, mouseY);
+return this.handleSuccessClick(mouseX, mouseY) ? true : super.mouseClicked(mouseX, mouseY, button);
    }
 
    private enum AuthType {

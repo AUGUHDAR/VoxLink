@@ -54,7 +54,7 @@ public class RelayBridge {
             LOGGER.info("[Relay] Relay started: {} (A={}, B={})", new Object[]{relayKey, peerAId, peerBId});
             Minecraft mc = Minecraft.getInstance();
             if (mc.player != null) {
-               mc.player.displayClientMessage(Component.translatable("voxlink.relay.started"), false);
+               mc.player.sendSystemMessage(Component.translatable("voxlink.relay.started"));
             }
 
             if (this.running.compareAndSet(false, true)) {

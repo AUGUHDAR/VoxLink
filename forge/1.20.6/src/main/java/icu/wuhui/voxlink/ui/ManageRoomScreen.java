@@ -211,7 +211,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
          this.statusColor = -171;
          this.saveButton.active = false;
          if (mc.player != null) {
-            mc.player.displayClientMessage(Component.translatable("voxlink.chat.saving_settings"), false);
+            mc.player.sendSystemMessage(Component.translatable("voxlink.chat.saving_settings"));
          }
 
          VoxLinkMod.getRoomManager()
@@ -248,12 +248,15 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                         if (mc.player != null) {
                            String code = this.roomInfo.getCode();
                            mc.player
-                              .displayClientMessage(
+                              .sendSystemMessage(
+
                                  Component.translatable("voxlink.chat.room_settings_updated")
                                     .withStyle(new ChatFormatting[]{ChatFormatting.GREEN, ChatFormatting.BOLD})
-                              , false);
+                              
+);
                            mc.player
-                              .displayClientMessage(
+                              .sendSystemMessage(
+
                                  Component.translatable("voxlink.chat.room_code_label")
                                     .append(
                                        Component.literal(
@@ -265,7 +268,8 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                           )
                                           .withStyle(ChatCompat.styleWithCopy(code, Component.translatable("voxlink.chat.click_to_copy")))
                                     )
-                              , false);
+                              
+);
                            String hostIp = this.roomInfo.getHostIp();
                            int hostPort = this.roomInfo.getHostPort();
                            String hostIpv6 = this.roomInfo.getHostIpv6();
@@ -297,7 +301,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  );
                               }
 
-                              mc.player.displayClientMessage(addrLine, false);
+                              mc.player.sendSystemMessage(addrLine);
                            }
                         }
 
@@ -324,7 +328,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                   this.statusMessage = ChatFormatting.RED.toString() + finalMsg;
                   this.statusColor = -43691;
                   if (mc.player != null) {
-                     mc.player.displayClientMessage(Component.translatable("voxlink.chat.error", new Object[]{finalMsg}), false);
+                     mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", new Object[]{finalMsg}));
                   }
                });
                return null;

@@ -121,12 +121,12 @@ public final class UpdateChecker {
             () -> {
                if (mc.player != null) {
                   mc.player
-                     .displayClientMessage(
+                     .sendSystemMessage(
                         Component.translatable("voxlink.chat.error_prefix")
                            .withStyle(ChatFormatting.AQUA)
                            .append(Component.translatable("voxlink.update.available", new Object[]{latest}))
-                     , false);
-                  mc.player.displayClientMessage(Component.literal(url).withStyle(new ChatFormatting[]{ChatFormatting.UNDERLINE, ChatFormatting.BLUE}), false);
+                     );
+                  mc.player.sendSystemMessage(Component.literal(url).withStyle(new ChatFormatting[]{ChatFormatting.UNDERLINE, ChatFormatting.BLUE}));
                }
             }
          );

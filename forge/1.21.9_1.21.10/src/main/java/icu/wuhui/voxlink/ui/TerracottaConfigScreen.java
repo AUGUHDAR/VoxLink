@@ -284,8 +284,9 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});
       this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, -5592406);
       if (!this.statusMessage.isEmpty()) {
-         this.drawCenteredClipped(graphics, this.statusMessage, centerX, y + formHeight + 6, this.statusColor);
       }
+
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, -5592406);
    }
 
    public void onClose() {

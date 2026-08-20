@@ -11,6 +11,8 @@ Open your world, create a room, get a **6-digit code**, send it to your friend, 
 
 Starting from **1.0.4**, VoxLink integrates **Terracotta** — an external P2P networking tool. It is optional and can be downloaded directly within the mod. Enabling Terracotta significantly improves connection success rate, and you can also use it to play multiplayer with other Terracotta users.
 
+Terracotta is developed by [burningtnt](https://github.com/burningtnt/Terracotta) under AGPL-3.0 — huge thanks! The binary is downloaded from its official releases and SHA-256 verified. Notes: if the launcher (e.g. HMCL) already runs its own Terracotta, the mod attaches to the same instance — avoid controlling Terracotta from both UIs at once. On Android launchers (FCL etc.) the in-mod Terracotta integration is unavailable; use the launcher's built-in multiplayer feature instead.
+
 > Still in Beta. Sometimes connects in seconds, sometimes just... doesn't. Connection success depends heavily on both sides' network: same ISP home broadband usually works fine, campus WiFi, office network, phone hotspot not so much. Both sides on symmetric NAT? Lower success rate. If it fails, both restart the game to refresh NAT ports. We're improving the punch strategies every update. You can also enable Terracotta in the mod to boost success rate.
 
 Huge thanks to XIOPNM, he joined over 200 remote tests himself. We ran more than 300 total.
@@ -69,6 +71,8 @@ Website: `https://p2p.wuhui.icu/`
 打开你的存档，创建房间，获得一个 **6位房间码**，发给好友，好友输入即可。无需端口映射，无需改路由器，无需服务器，你甚至不需要知道公网IP是什么。装模组，建房间，发房间码，就这么简单。
 
 从 **1.0.4** 起，VoxLink 集成了 **Terracotta（陶瓦）** — 一个外部 P2P 联机工具。陶瓦为可选功能，可在模组内直接下载。启用陶瓦后可大幅提升连接成功率，并可以使用陶瓦与其他陶瓦玩家进行联机。
+
+陶瓦由 [burningtnt](https://github.com/burningtnt/Terracotta) 开发，遵循 AGPL-3.0 协议，特此致谢！其二进制仅从官方 release 下载并做 SHA-256 校验。注意：若启动器（如 HMCL）已自带并运行陶瓦，模组会以副实例接入同一进程，请勿同时在两边操作陶瓦；安卓启动器（FCL 等）上模组内陶瓦不可用，请使用启动器自带的联机功能。
 
 > 仍为 Beta 版本。有时几秒就能连上，有时就是连不上。连接成功率与双方网络环境密切相关：同运营商家用宽带通常没问题，校园网、企业网、手机热点成功率较低。双方都是对称 NAT？成功率会更低。连接失败时建议双方重启游戏刷新 NAT 端口。我们每个版本都在优化打洞策略。你也可以在模组内启用陶瓦来提升成功率。
 

@@ -781,10 +781,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    }
 
    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-      if (super.mouseClicked(mouseX, mouseY, button)) {
-         return true;
-      }
-      return this.handleClick(mouseX, mouseY, button);
+      return this.handleClick(mouseX, mouseY, button) ? true : super.mouseClicked(mouseX, mouseY, button);
    }
 
    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {

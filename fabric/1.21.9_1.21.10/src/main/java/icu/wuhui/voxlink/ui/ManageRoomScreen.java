@@ -4,12 +4,12 @@ import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.room.RoomInfo;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class ManageRoomScreen extends VoxLinkScreenBase {
    private final Screen parent;
@@ -249,11 +249,14 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                            String code = this.roomInfo.getCode();
                            mc.player
                               .displayClientMessage(
+
                                  Component.translatable("voxlink.chat.room_settings_updated")
                                     .withStyle(new ChatFormatting[]{ChatFormatting.GREEN, ChatFormatting.BOLD})
-                              , false);
+                              
+, false);
                            mc.player
                               .displayClientMessage(
+
                                  Component.translatable("voxlink.chat.room_code_label")
                                     .append(
                                        Component.literal(
@@ -265,7 +268,8 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                           )
                                           .withStyle(ChatCompat.styleWithCopy(code, Component.translatable("voxlink.chat.click_to_copy")))
                                     )
-                              , false);
+                              
+, false);
                            String hostIp = this.roomInfo.getHostIp();
                            int hostPort = this.roomInfo.getHostPort();
                            String hostIpv6 = this.roomInfo.getHostIpv6();

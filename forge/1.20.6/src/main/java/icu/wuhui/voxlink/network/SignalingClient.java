@@ -19,6 +19,8 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.LinkedHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -47,17 +49,20 @@ public class SignalingClient {
       Map.entry("get_categories", "/categories"),
       Map.entry("report_ready", "/topology/report_ready"),
       Map.entry("poll_topology", "/topology/poll"),
-      Map.entry("relay_register", "/relay/register")
+      Map.entry("relay_register", "/relay/register"),
+      Map.entry("relay_candidates", "/relay/candidates")
    );
    private final VoxLinkConfig config;
    private final HttpClient httpClient;
+   private volatile SignalingWsTransport wsTransport = null;
+   private final Object wsTransportLock = new Object();
    private volatile String joinIdempotencyNonce = null;
    private final ExecutorService executor;
    private final ScheduledExecutorService scheduler;
    private static final int CREATE_ROOM_TIMEOUT_MS = 8000;
    private static final int POLL_SIGNALS_TIMEOUT_MS = 5000;
    private static final int GET_PUBLIC_IP_TIMEOUT_MS = 3000;
-   private static final Set<String> TRANSIENT_ERRORS = Set.of("NETWORK_ERROR", "CDN_ERROR", "RATE_LIMITED", "QUEUED", "SERVER_404", "SERVER_403");
+   private static final Set<String> TRANSIENT_ERRORS = Set.of("NETWORK_ERROR", "CDN_ERROR", "RATE_LIMITED", "QUEUED", "SERVER_403");
 
    private String getRpcBaseUrl() {
       String url = this.config.getServerUrl();
@@ -385,6 +390,10 @@ public class SignalingClient {
       return this.post(this.buildPath("relay_register"), body);
    }
 
+   public CompletableFuture<SignalingClient.ApiResponse> getRelayCandidates() {
+      return this.get(this.buildGetPath("relay_candidates", null));
+   }
+
    public CompletableFuture<SignalingClient.ApiResponse> getCategories() {
       return this.get(this.buildGetPath("get_categories", null));
    }
@@ -473,6 +482,18 @@ public class SignalingClient {
    }
 
    private CompletableFuture<SignalingClient.ApiResponse> postOnce(String path, JsonObject body, long timeoutMs) {
+      if (this.wsEnabled()) {
+         WsRouteInfo info = this.parseWsRoute(path);
+         if (info != null) {
+            return this.getWsTransport()
+               .request(info.route, "POST", body, info.query, timeoutMs)
+               .exceptionallyCompose(ex -> this.httpPostOnce(path, body, timeoutMs));
+         }
+      }
+      return this.httpPostOnce(path, body, timeoutMs);
+   }
+
+   private CompletableFuture<SignalingClient.ApiResponse> httpPostOnce(String path, JsonObject body, long timeoutMs) {
       String url = path.startsWith("http") ? path : this.getRpcBaseUrl() + path;
       VoxLinkMod.LOGGER.debug("[SignalingClient] POST {}", url);
       long requestStart = System.currentTimeMillis();
@@ -543,6 +564,18 @@ public class SignalingClient {
    }
 
    private CompletableFuture<SignalingClient.ApiResponse> getOnce(String path, long timeoutMs) {
+      if (this.wsEnabled()) {
+         WsRouteInfo info = this.parseWsRoute(path);
+         if (info != null) {
+            return this.getWsTransport()
+               .request(info.route, "GET", null, info.query, timeoutMs)
+               .exceptionallyCompose(ex -> this.httpGetOnce(path, timeoutMs));
+         }
+      }
+      return this.httpGetOnce(path, timeoutMs);
+   }
+
+   private CompletableFuture<SignalingClient.ApiResponse> httpGetOnce(String path, long timeoutMs) {
       String url = path.startsWith("http") ? path : this.getRpcBaseUrl() + path;
       VoxLinkMod.LOGGER.debug("[SignalingClient] GET {}", url);
       long requestStart = System.currentTimeMillis();
@@ -616,8 +649,92 @@ public class SignalingClient {
    }
 
    public void shutdown() {
+      if (this.wsTransport != null) {
+         this.wsTransport.close();
+         this.wsTransport = null;
+      }
       this.executor.shutdownNow();
       this.scheduler.shutdownNow();
+   }
+
+   private boolean wsEnabled() {
+      if (!this.config.isUseWebSocket()) {
+         return false;
+      }
+      SignalingWsTransport t = this.getWsTransport();
+      return t != null && t.canUse();
+   }
+
+   private SignalingWsTransport getWsTransport() {
+      if (this.wsTransport == null) {
+         synchronized (this.wsTransportLock) {
+            if (this.wsTransport == null) {
+               this.wsTransport = new SignalingWsTransport(this.config.getServerUrl());
+            }
+         }
+      }
+      return this.wsTransport;
+   }
+
+   /** WS 是否已连接且存活（供 RoomManager 做轮询间隔自适应）。 */
+   public boolean isWsConnected() {
+      return this.wsTransport != null && this.wsTransport.isConnected();
+   }
+
+   /** 透传信号推送监听器（data 为 {"s":[...],"ts":N}）；传 null 取消。useWebSocket 关闭时不注册。 */
+   public void setSignalPushHandler(Consumer<JsonObject> handler) {
+      if (!this.config.isUseWebSocket()) {
+         return;
+      }
+      if (handler != null) {
+         this.getWsTransport().setPushListener(handler);
+      } else if (this.wsTransport != null) {
+         this.wsTransport.setPushListener(null);
+      }
+   }
+
+   /** 从完整 URL 解析出 WS 帧所需的 route 与 query；非 /?route= 形态（旧 PHP）返回 null 走 HTTP。 */
+   private WsRouteInfo parseWsRoute(String path) {
+      if (path == null || !path.startsWith("http")) {
+         return null;
+      }
+
+      try {
+         URI uri = URI.create(path);
+         String query = uri.getQuery();
+         if (query == null || query.isEmpty()) {
+            return null;
+         }
+
+         String route = null;
+         Map<String, String> queryMap = new LinkedHashMap<>();
+         for (String pair : query.split("&")) {
+            int idx = pair.indexOf('=');
+            String k = idx < 0 ? pair : pair.substring(0, idx);
+            String v = idx < 0 ? "" : pair.substring(idx + 1);
+            if ("route".equals(k)) {
+               route = v;
+            } else {
+               queryMap.put(k, v);
+            }
+         }
+
+         if (route == null || route.isEmpty()) {
+            return null;
+         }
+
+         WsRouteInfo info = new WsRouteInfo();
+         info.route = route;
+         info.query = queryMap.isEmpty() ? null : queryMap;
+         return info;
+      } catch (Exception e) {
+         return null;
+      }
+   }
+
+   private static final class WsRouteInfo {
+      String route;
+      Map<String, String> query;
    }
 
    public static class ApiResponse {
@@ -652,19 +769,28 @@ public class SignalingClient {
                return new SignalingClient.ApiResponse(false, "PARSE_ERROR", "空响应", null);
             }
 
-            boolean success = json.has("success") && json.get("success").getAsBoolean();
-            String error = json.has("error") ? json.get("error").getAsString() : null;
-            String message = json.has("message") ? json.get("message").getAsString() : null;
-            JsonObject data = json.has("data") && json.get("data").isJsonObject() ? json.getAsJsonObject("data") : null;
-            int position = json.has("position") ? json.get("position").getAsInt() : -1;
-            int retryAfter = json.has("retryAfter") ? json.get("retryAfter").getAsInt() : 0;
-            return new SignalingClient.ApiResponse(success, error, message, data, position, retryAfter);
+            return fromJson(json);
          } catch (Exception e) {
             String bodyPreview = body != null ? body.substring(0, Math.min(body.length(), 500)) : "null";
             VoxLinkMod.LOGGER.error("API response parse failed (status {}): {}", statusCode, bodyPreview);
             VoxLinkMod.LOGGER.error("Parse error: {}", e.getMessage());
             return new SignalingClient.ApiResponse(false, "PARSE_ERROR", "响应解析失败", null);
          }
+      }
+
+      /** 从已解析的 JSON 对象（HTTP 响应体或 WS 帧体，二者同构）构造 ApiResponse。 */
+      public static SignalingClient.ApiResponse fromJson(JsonObject json) {
+         if (json == null) {
+            return new SignalingClient.ApiResponse(false, "PARSE_ERROR", "空响应", null);
+         }
+
+         boolean success = json.has("success") && json.get("success").getAsBoolean();
+         String error = json.has("error") ? json.get("error").getAsString() : null;
+         String message = json.has("message") ? json.get("message").getAsString() : null;
+         JsonObject data = json.has("data") && json.get("data").isJsonObject() ? json.getAsJsonObject("data") : null;
+         int position = json.has("position") ? json.get("position").getAsInt() : -1;
+         int retryAfter = json.has("retryAfter") ? json.get("retryAfter").getAsInt() : 0;
+         return new SignalingClient.ApiResponse(success, error, message, data, position, retryAfter);
       }
 
       public static SignalingClient.ApiResponse tryParseError(String body) {

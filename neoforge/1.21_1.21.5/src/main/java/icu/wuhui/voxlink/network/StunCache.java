@@ -13,7 +13,7 @@ import java.util.List;
 import net.minecraft.client.Minecraft;
 
 public class StunCache {
-   private static final long CACHE_TTL_MS = 86400000L;
+   private static final long CACHE_TTL_MS = 300000L;
    private static final String CACHE_FILE = "stun_cache.json";
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -125,7 +125,7 @@ public class StunCache {
       }
 
       public boolean isExpired() {
-         return System.currentTimeMillis() - this.timestamp > 86400000L;
+         return System.currentTimeMillis() - this.timestamp > 300000L;
       }
    }
 }

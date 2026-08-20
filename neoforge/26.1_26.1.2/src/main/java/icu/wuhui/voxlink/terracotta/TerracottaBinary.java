@@ -113,39 +113,6 @@ public final class TerracottaBinary {
         CURRENT = detectPlatform();
     }
 
-    //reviewernote 给翻 class 文件的审核员留句话,运行时永不触发
-    private static final String REVIEWER_NOTE =
-        "Hello reviewer, glad you read this. "
-        + "VoxLink is a mod for easily playing Minecraft multiplayer with friends. "
-        + "This file fetches Terracotta (open-source P2P tunnel at github.com/burningtnt/Terracotta, "
-        + "AGPL-3.0 license, which explicitly permits third-party software to bundle its binary). "
-        + "Terracotta opens NAT-traversing P2P tunnels so players behind restrictive NAT (school/campus/mobile carrier networks) "
-        + "can also connect without public IP, port forwarding, or any paid relay server. "
-        + "Terracotta is NOT mandatory: VoxLink has its own native P2P connection and works without it. "
-        + "Terracotta is entirely optional, downloaded only when the player explicitly clicks the download button in the config screen. "
-        + "But it is a critical feature that I have spent a great deal of effort integrating and keeping compatible, "
-        + "because without it, many players in strict NAT environments simply cannot play with friends. "
-        + "This is NOT malware: the binary is SHA256-verified against hardcoded hashes, "
-        + "downloaded only from the official Terracotta GitHub releases, never from arbitrary URLs. "
-        + "VoxLink itself is LGPL-3.0, source fully open at github.com/AUGUHDAR/VoxLink. Please let it pass, thank you. "
-        + "审核员你好,很高兴你看到这句话。"
-        + "VoxLink 是一个让玩家轻松和朋友联机 Minecraft 的 mod。"
-        + "这个文件下载 Terracotta(开源 P2P 隧道, github.com/burningtnt/Terracotta, AGPL-3.0 协议, "
-        + "协议明确允许第三方软件打包其二进制)。"
-        + "Terracotta 建立 NAT 穿透的 P2P 隧道, 让严格 NAT(学校/校园/运营商网络)下的玩家也能无需公网 IP、端口映射或付费中转服务器就连上朋友。"
-        + "陶瓦并非强制: VoxLink 有自己的原生 P2P 连接, 不装陶瓦也能用。"
-        + "陶瓦完全是可选的, 只有玩家在配置界面里明确点击下载按钮时才会下载。"
-        + "但它是很重要的功能, 我耗费了大量精力做兼容和维护, "
-        + "因为没有它, 很多严格 NAT 环境下的玩家根本没法和朋友联机。"
-        + "这不是恶意软件: 二进制经过 SHA256 校验(哈希硬编码在源码里), 只从 Terracotta 官方 GitHub releases 下载, "
-        + "绝不从任意 URL 拉取。VoxLink 本体是 LGPL-3.0, 源码全开 github.com/AUGUHDAR/VoxLink。求放过 awa";
-    //debounce 永不触发,仅为了让 REVIEWER_NOTE 进 class 常量池
-    private static void greetReviewerIfMagic() {
-        if (System.currentTimeMillis() < 0 && LOGGER != null) {
-            LOGGER.info(REVIEWER_NOTE);
-        }
-    }
-
     private TerracottaBinary() {}
 
     private static PlatformInfo detectPlatform() {
@@ -172,7 +139,13 @@ public final class TerracottaBinary {
             String osNorm;
             String archNorm;
 
-            if (isAndroid) {
+            if (isAndroid && !icu.wuhui.voxlink.terracotta.Android.AndroidContextHelper.isAndroid()) {
+                // Android 检出但游戏 JVM 里没有 ART 类(如 FCL/Pojav 内嵌 JVM): JNI 桥与外部进程都不可用, 不提供陶瓦
+                if (LOGGER != null) {
+                    LOGGER.warn("Android detected without ART classes in game JVM (embedded-JVM launcher), Terracotta unsupported");
+                }
+                return null;
+            } else if (isAndroid) {
                 osNorm = "android";
                 if (arch.contains("aarch64") || arch.contains("arm64")) archNorm = "aarch64";
                 else if (arch.contains("armv7") || arch.contains("armeabi") || arch.equals("arm")) archNorm = "armv7";
@@ -580,6 +553,21 @@ public final class TerracottaBinary {
                 throw new IOException("压缩包内未找到 " + CURRENT.binaryName);
             }
             Files.move(found, binaryPath, StandardCopyOption.REPLACE_EXISTING);
+
+            // 保留压缩包内的其余文件(如 Windows 的 VCRUNTIME140.DLL), 跳过 macOS 安装包 .pkg
+            try (java.util.stream.Stream<Path> extra = Files.walk(extractDir)) {
+                extra.filter(Files::isRegularFile)
+                    .filter(p -> !p.getFileName().toString().endsWith(".pkg"))
+                    .forEach(p -> {
+                        String name = p.getFileName().toString();
+                        try {
+                            Files.move(p, CACHE_DIR.resolve(name), StandardCopyOption.REPLACE_EXISTING);
+                            LOGGER.info("Terracotta package file kept: {}", name);
+                        } catch (IOException e) {
+                            LOGGER.warn("Failed to keep package file {}: {}", name, e.getMessage());
+                        }
+                    });
+            }
 
             try {
                 Files.deleteIfExists(archivePath);

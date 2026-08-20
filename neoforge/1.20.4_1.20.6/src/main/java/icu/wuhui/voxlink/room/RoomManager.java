@@ -9,6 +9,7 @@ import icu.wuhui.voxlink.compat.GeyserCompat;
 import icu.wuhui.voxlink.compat.ViaCompat;
 import icu.wuhui.voxlink.network.ConnectionFallback;
 import icu.wuhui.voxlink.network.ConnectionHelper;
+import icu.wuhui.voxlink.network.LogUploadManager;
 import icu.wuhui.voxlink.network.P2PBridge;
 import icu.wuhui.voxlink.network.PeerServer;
 import icu.wuhui.voxlink.network.ReliableUdpTransport;
@@ -336,6 +337,10 @@ public class RoomManager {
                      return null;
                   }
 
+                  if (code != null && !code.isEmpty()) {
+                     LogUploadManager.arm(code, true);
+                  }
+
                   if (response.data.has("nameApproved") && !response.data.get("nameApproved").isJsonNull() && !response.data.get("nameApproved").getAsBoolean()
                      )
                    {
@@ -388,7 +393,8 @@ public class RoomManager {
                                           Minecraft mc = Minecraft.getInstance();
                                           if (mc.player != null) {
                                              mc.player
-                                                .displayClientMessage(
+                                                .sendSystemMessage(
+
                                                    Component.translatable("voxlink.chat.terracotta_code_label", new Object[]{""})
                                                       .append(
                                                          Component.literal(
@@ -400,7 +406,8 @@ public class RoomManager {
                                                             )
                                                             .withStyle(ChatCompat.styleWithCopy(tc, Component.translatable("voxlink.chat.click_to_copy")))
                                                       )
-                                                , false);
+                                                
+);
                                           }
                                        }
                                     );
@@ -996,6 +1003,8 @@ public class RoomManager {
          this.signalPollFuture = null;
       }
 
+      // 离开房间/关闭时清理 WS 推送监听器
+      this.signalingClient.setSignalPushHandler(null);
       this.connectionManager.stopAllConnectionWork();
    }
 
@@ -1020,21 +1029,21 @@ public class RoomManager {
                         if (mc.player != null) {
                            switch (status) {
                               case "approved":
-                                 mc.player.displayClientMessage(Component.translatable("voxlink.chat.name_approved"), false);
+                                 mc.player.sendSystemMessage(Component.translatable("voxlink.chat.name_approved"));
                                  if (newName != null && !newName.isEmpty()) {
-                                    mc.player.displayClientMessage(Component.literal("  " + newName).withStyle(ChatFormatting.GRAY), false);
+                                    mc.player.sendSystemMessage(Component.literal("  " + newName).withStyle(ChatFormatting.GRAY));
                                  }
                                  break;
                               case "rejected":
                                  String reasonText = reason != null && !reason.isEmpty()
                                     ? reason
                                     : Component.translatable("voxlink.chat.unknown_reason").getString();
-                                 mc.player.displayClientMessage(Component.translatable("voxlink.chat.name_rejected_with_hint"), false);
-                                 mc.player.displayClientMessage(Component.translatable("voxlink.chat.reason_label", new Object[]{reasonText}), false);
+                                 mc.player.sendSystemMessage(Component.translatable("voxlink.chat.name_rejected_with_hint"));
+                                 mc.player.sendSystemMessage(Component.translatable("voxlink.chat.reason_label", new Object[]{reasonText}));
                                  break;
                               case "unavailable":
-                                 mc.player.displayClientMessage(Component.translatable("voxlink.chat.name_unavailable"), false);
-                                 mc.player.displayClientMessage(Component.translatable("voxlink.chat.please_retry"), false);
+                                 mc.player.sendSystemMessage(Component.translatable("voxlink.chat.name_unavailable"));
+                                 mc.player.sendSystemMessage(Component.translatable("voxlink.chat.please_retry"));
                            }
                         }
                      }
@@ -1103,7 +1112,9 @@ public class RoomManager {
                            }
                         }
 
-                        P2PBridge.disconnect();
+                        if (!st.roomInfo.isHost()) {
+                           P2PBridge.disconnect();
+                        }
 
                         try {
                            TerracottaManager.shutdown();
@@ -1201,14 +1212,16 @@ public class RoomManager {
             msg = Component.translatable("voxlink.room_lost.host_closed");
          } else if ("HOST_DISCONNECTED".equals(reason)) {
             msg = Component.translatable("voxlink.room_lost.host_disconnected");
+         } else if ("ROOM_NOT_FOUND".equals(reason)) {
+            msg = Component.translatable("voxlink.room_lost.host_gone");
          } else if (!"TOKEN_INVALID".equals(reason) && !"INVALID_TOKEN".equals(reason)) {
             msg = Component.translatable("voxlink.room_lost.default");
          } else {
             msg = Component.translatable("voxlink.room_closed");
          }
 
-         mc.player.displayClientMessage(Component.translatable("voxlink.chat.error_prefix").append(msg), false);
-         mc.player.displayClientMessage(Component.translatable("voxlink.room_lost.hint"), false);
+         mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error_prefix").append(msg));
+         mc.player.sendSystemMessage(Component.translatable("voxlink.room_lost.hint"));
       } catch (NoClassDefFoundError | Exception e) {
          VoxLinkMod.LOGGER.debug("Show chat message failed: {}", e.getMessage());
       }
@@ -1426,12 +1439,35 @@ public class RoomManager {
       this.signalPollTimestamp.set(System.currentTimeMillis() - 10000L);
       RoomManager.RoomState state = this.currentRoom.get();
       if (state != null && !state.roomInfo.isHost()) {
-         this.currentSignalPollInterval = 200L;
+         this.currentSignalPollInterval = this.signalingClient.isWsConnected() ? 1000L : 200L;
       } else {
          this.currentSignalPollInterval = VoxLinkMod.getConfig().getSignalPollInterval();
       }
 
+      // 注册 WS 推送消费：推送 data 与轮询响应 data 同构，直接复用 handleSignalPollResponse 路径
+      this.registerSignalPushHandler();
       this.scheduleSignalPoll();
+   }
+
+   private void registerSignalPushHandler() {
+      this.signalingClient.setSignalPushHandler(data -> {
+         if (data == null) {
+            return;
+         }
+         RoomManager.RoomState state = this.currentRoom.get();
+         if (state == null || state == PENDING) {
+            return;
+         }
+         // 切到 RoomManager 轮询用的 scheduler，与 doSignalPoll 处于同一线程安全域
+         this.scheduler.execute(() -> {
+            try {
+               SignalingClient.ApiResponse pushResponse = new SignalingClient.ApiResponse(true, null, null, data);
+               this.handleSignalPollResponse(pushResponse);
+            } catch (Exception e) {
+               VoxLinkMod.LOGGER.warn("Signal push handle error: {}", e.getMessage());
+            }
+         });
+      });
    }
 
    private void scheduleSignalPoll() {
@@ -1571,7 +1607,9 @@ public class RoomManager {
    private void recoverSignalPollInterval() {
       RoomManager.RoomState state = this.currentRoom.get();
       boolean isJoiner = state != null && state != PENDING && !state.roomInfo.isHost();
-      long normalInterval = isJoiner ? 250L : VoxLinkMod.getConfig().getSignalPollInterval();
+      long normalInterval = isJoiner
+         ? (this.signalingClient.isWsConnected() ? 1000L : 250L)
+         : VoxLinkMod.getConfig().getSignalPollInterval();
       if (this.currentSignalPollInterval != normalInterval) {
          this.currentSignalPollInterval = normalInterval;
          this.rescheduleSignalPoll(normalInterval);
@@ -1692,6 +1730,10 @@ public class RoomManager {
       return this.connectionManager.isConnectionCycleActive();
    }
 
+   public boolean isConnectionActive() {
+      return this.connectionManager.isConnectionActive();
+   }
+
    private void handleConnected(String from, JsonObject data) {
       VoxLinkMod.LOGGER.info("Peer connected: {}", from);
       RoomManager.RoomState st = this.currentRoom.get();
@@ -1701,30 +1743,23 @@ public class RoomManager {
          } else {
             VoxLinkMod.LOGGER.info("[RoomManager] Peer connected but host transport not ready, keep punching");
          }
-         this.scheduler.schedule(() -> {
-            try {
-               Minecraft mc = Minecraft.getInstance();
-               if (mc == null) {
-                  return;
+         // 访客/宿主OP基线每个房间只应用一次(以roomCode记), 避免每次有玩家连接都重跑、
+         // 覆盖玩家手动 /op /deop
+         String roomCode = st.roomInfo.getCode();
+         if (roomCode != null && !roomCode.equals(this.guestOpPolicyRoomCode)) {
+            this.guestOpPolicyRoomCode = roomCode;
+            this.scheduler.schedule(() -> {
+               try {
+                  Minecraft mc = Minecraft.getInstance();
+                  if (mc == null) {
+                     return;
+                  }
+                  mc.execute(() -> this.applyGuestOpPolicy(st, mc));
+               } catch (Exception e) {
+                  VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected exception: {}", e.getMessage());
                }
-
-               mc.execute(() -> this.applyGuestOpPolicy(st, mc, false));
-            } catch (Exception e) {
-               VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected exception: {}", e.getMessage());
-            }
-         }, 2L, TimeUnit.SECONDS);
-         this.scheduler.schedule(() -> {
-            try {
-               Minecraft mc = Minecraft.getInstance();
-               if (mc == null) {
-                  return;
-               }
-
-               mc.execute(() -> this.applyGuestOpPolicy(st, mc, true));
-            } catch (Exception e) {
-               VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected retry exception: {}", e.getMessage());
-            }
-         }, 5L, TimeUnit.SECONDS);
+            }, 2L, TimeUnit.SECONDS);
+         }
       }
    }
 
@@ -1745,7 +1780,9 @@ public class RoomManager {
       }
    }
 
-   private void applyGuestOpPolicy(RoomManager.RoomState st, Minecraft mc, boolean retry) {
+   private volatile String guestOpPolicyRoomCode = "";
+
+   private void applyGuestOpPolicy(RoomManager.RoomState st, Minecraft mc) {
       try {
          IntegratedServer server = mc.getSingleplayerServer();
          if (server == null) {
@@ -1798,7 +1835,7 @@ public class RoomManager {
       if (mc != null) {
          mc.execute(() -> {
             if (mc.player != null) {
-               mc.player.displayClientMessage(Component.translatable("voxlink.chat.evicted_notice"), false);
+               mc.player.sendSystemMessage(Component.translatable("voxlink.chat.evicted_notice"));
             }
          });
       }
@@ -1822,7 +1859,7 @@ public class RoomManager {
                      msg = Component.translatable("voxlink.chat.ipv6_unreachable");
                   }
 
-                  mc.player.displayClientMessage(prefix.append(msg), false);
+                  mc.player.sendSystemMessage(prefix.append(msg));
                }
             });
          }

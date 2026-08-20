@@ -20,10 +20,9 @@ import org.slf4j.LoggerFactory;
 
 public final class TerracottaProcess {
    private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-terracotta");
-   private static final int PORT_WAIT_CYCLES = 60;
-   private static final int PORT_POLL_MS = 500;
-   private static final int GRACEFUL_SHUTDOWN_SEC = 3;
    private static final long START_TOTAL_TIMEOUT_MS = 120000L;
+   private static final long EXIT_GRACE_MS = 10000L;
+   private static final long POLL_INTERVAL_MS = 500L;
    private static final AtomicBoolean startingGuard = new AtomicBoolean(false);
    private static volatile long startingSince = 0L;
    private static final long STARTING_GUARD_TIMEOUT_MS = 60000L;
@@ -35,7 +34,6 @@ public final class TerracottaProcess {
    private static volatile String lastErrorLine = null;
    private static final AtomicBoolean restartUsed = new AtomicBoolean(false);
    private static volatile boolean isSecondary = false;
-   private static final int JNI_PORT = -1;
 
    private TerracottaProcess() {
    }
@@ -59,7 +57,7 @@ public final class TerracottaProcess {
                return CompletableFuture.failedFuture(new TerracottaNotReadyException("陶瓦 .so 加载失败"));
             }
 
-            if (httpPort > 0 && isAlive()) {
+            if (httpPort != 0 && isAlive()) {
                return CompletableFuture.completedFuture(httpPort);
             }
 
@@ -70,7 +68,7 @@ public final class TerracottaProcess {
                return CompletableFuture.failedFuture(new TerracottaNotReadyException("陶瓦二进制未就绪, 请先下载"));
             }
 
-            if (httpPort > 0) {
+            if (httpPort != 0) {
                if (isAlive()) {
                   return CompletableFuture.completedFuture(httpPort);
                }
@@ -174,143 +172,21 @@ public final class TerracottaProcess {
    }
 
    private static CompletableFuture<Integer> startInternal() {
-      return CompletableFuture.supplyAsync(
-         () -> {
-            Process proc = null;
-
-            try {
-               Path binary = TerracottaBinary.getBinaryPath();
-               Path portDir = Files.createTempDirectory("voxlink-terracotta-" + ThreadLocalRandom.current().nextLong());
-               portFile = portDir.resolve("http").toAbsolutePath();
-
-               try {
-                  Files.deleteIfExists(portFile);
-               } catch (IOException e) {
-                  LOGGER.warn("Failed to clean portFile: {}", e.getMessage());
-               }
-
-               ProcessBuilder pb = new ProcessBuilder(binary.toString(), "--hmcl", portFile.toString());
-               pb.redirectErrorStream(true);
-               proc = pb.start();
-               PROCESS.set(proc);
-               lastErrorLine = null;
-               Process procRef = proc;
-               Thread drainStdout = new Thread(
-                  () -> {
-                     try (BufferedReader br = new BufferedReader(new InputStreamReader(procRef.getInputStream(), StandardCharsets.UTF_8))) {
-                        int[] lineCount = new int[]{0};
-
-                        String line;
-                        while ((line = br.readLine()) != null) {
-                           String lower = line.toLowerCase(Locale.ROOT);
-                           boolean isError = lower.contains("error")
-                              || lower.contains("fatal")
-                              || lower.contains("panic")
-                              || lower.contains("failed to bind")
-                              || lower.contains("address already in use")
-                              || lower.contains("exception")
-                              || lower.contains("cannot ")
-                              || lower.contains("failed to");
-                           if (!isError && lineCount[0]++ >= 20) {
-                              LOGGER.debug("[terracotta] {}", line);
-                           } else {
-                              LOGGER.info("[terracotta] {}", line);
-                           }
-
-                           if (lower.contains("running in secondary mode")) {
-                              Matcher spm = SECONDARY_PORT_PATTERN.matcher(line);
-                              if (spm.find()) {
-                                 int sp = Integer.parseInt(spm.group(1));
-                                 if (sp > 0) {
-                                    httpPort = sp;
-                                    isSecondary = true;
-                                    LOGGER.info("Terracotta secondary mode, reuse primary port {}", sp);
-                                 }
-                              }
-                           }
-
-                           if (isError) {
-                              lastErrorLine = line;
-                           }
-                        }
-                     } catch (IOException var10x) {
-                     }
-                  },
-                  "terracotta-stdout-drain"
-               );
-               drainStdout.setDaemon(true);
-               drainStdout.start();
-               long waitStart = System.currentTimeMillis();
-               long lastLogMs = waitStart;
-               long procExitTime = -1L;
-
-               while (true) {
-                  if (!proc.isAlive()) {
-                     if (isSecondary && httpPort > 0) {
-                        restartUsed.set(false);
-                        LOGGER.info("Terracotta secondary process exited, reuse primary port {}", httpPort);
-                        return httpPort;
-                     }
-
-                     if (procExitTime == -1L) {
-                        procExitTime = System.currentTimeMillis();
-                     }
-
-                     if (System.currentTimeMillis() - procExitTime >= 10000L) {
-                        if (restartUsed.compareAndSet(false, true)) {
-                           LOGGER.warn("Terracotta process exited unexpectedly, try restart once. Error line: {}", lastErrorLine);
-                           stopInternalQuiet();
-                           return startInternalRetry();
-                        }
-
-                        String errLine = lastErrorLine != null ? lastErrorLine : "无stdout错误输出";
-                        throw new RuntimeException("Terracotta进程意外退出: " + errLine);
-                     }
-                  }
-
-                  if (Files.exists(portFile)) {
-                     String content = Files.readString(portFile).trim();
-                     Matcher m = PORT_PATTERN.matcher(content);
-                     if (m.find()) {
-                        int port = Integer.parseInt(m.group(1));
-                        if (port > 0) {
-                           httpPort = port;
-                           restartUsed.set(false);
-                           LOGGER.info("Terracotta process started, HTTP port {}", port);
-                           return port;
-                        }
-                     }
-                  }
-
-                  long now = System.currentTimeMillis();
-                  long elapsed = now - waitStart;
-                  if (elapsed > 120000L) {
-                     proc.destroyForcibly();
-                     throw new RuntimeException("陶瓦启动超时(120s)未写出端口文件: " + (lastErrorLine != null ? lastErrorLine : "无错误输出"));
-                  }
-
-                  if (now - lastLogMs >= 10000L) {
-                     LOGGER.info("Waiting for Terracotta start (UAC prompt may have appeared), waited {}ms", elapsed);
-                     lastLogMs = now;
-                  }
-
-                  Thread.sleep(500L);
-               }
-            } catch (Exception e) {
-               if (proc != null && proc.isAlive()) {
-                  proc.destroyForcibly();
-               }
-
-               throw new RuntimeException("启动 Terracotta 失败: " + e.getMessage(), e);
-            } finally {
-               startingGuard.set(false);
-               startingSince = 0L;
-            }
+      return CompletableFuture.supplyAsync(() -> {
+         try {
+            return launchAndAwait(false);
+         } catch (Exception e) {
+            throw new RuntimeException("启动 Terracotta 失败: " + e.getMessage(), e);
+         } finally {
+            startingGuard.set(false);
+            startingSince = 0L;
          }
-      );
+      });
    }
 
-   private static Integer startInternalRetry() {
+   private static Integer launchAndAwait(boolean isRetry) throws Exception {
+      Process proc = null;
+
       try {
          Path binary = TerracottaBinary.getBinaryPath();
          Path portDir = Files.createTempDirectory("voxlink-terracotta-" + ThreadLocalRandom.current().nextLong());
@@ -324,55 +200,10 @@ public final class TerracottaProcess {
 
          ProcessBuilder pb = new ProcessBuilder(binary.toString(), "--hmcl", portFile.toString());
          pb.redirectErrorStream(true);
-         Process proc = pb.start();
+         proc = pb.start();
          PROCESS.set(proc);
          lastErrorLine = null;
-         Process procRef = proc;
-         Thread drainStdout = new Thread(
-            () -> {
-               try (BufferedReader br = new BufferedReader(new InputStreamReader(procRef.getInputStream(), StandardCharsets.UTF_8))) {
-                  int[] lineCount = new int[]{0};
-
-                  String line;
-                  while ((line = br.readLine()) != null) {
-                     String lower = line.toLowerCase(Locale.ROOT);
-                     boolean isError = lower.contains("error")
-                        || lower.contains("fatal")
-                        || lower.contains("panic")
-                        || lower.contains("failed to bind")
-                        || lower.contains("address already in use")
-                        || lower.contains("exception")
-                        || lower.contains("cannot ")
-                        || lower.contains("failed to");
-                     if (!isError && lineCount[0]++ >= 20) {
-                        LOGGER.debug("[terracotta] {}", line);
-                     } else {
-                        LOGGER.info("[terracotta] {}", line);
-                     }
-
-                     if (lower.contains("running in secondary mode")) {
-                        Matcher spm = SECONDARY_PORT_PATTERN.matcher(line);
-                        if (spm.find()) {
-                           int sp = Integer.parseInt(spm.group(1));
-                           if (sp > 0) {
-                              httpPort = sp;
-                              isSecondary = true;
-                              LOGGER.info("Terracotta secondary mode (restart), reuse primary port {}", sp);
-                           }
-                        }
-                     }
-
-                     if (isError) {
-                        lastErrorLine = line;
-                     }
-                  }
-               } catch (IOException var10x) {
-               }
-            },
-            "terracotta-stdout-drain"
-         );
-         drainStdout.setDaemon(true);
-         drainStdout.start();
+         startOutputDrain(proc, isRetry);
          long waitStart = System.currentTimeMillis();
          long lastLogMs = waitStart;
          long procExitTime = -1L;
@@ -381,7 +212,7 @@ public final class TerracottaProcess {
             if (!proc.isAlive()) {
                if (isSecondary && httpPort > 0) {
                   restartUsed.set(false);
-                  LOGGER.info("Terracotta secondary process exited (restart), reuse primary port {}", httpPort);
+                  LOGGER.info("Terracotta secondary process exited, reuse primary port {}", httpPort);
                   return httpPort;
                }
 
@@ -389,9 +220,15 @@ public final class TerracottaProcess {
                   procExitTime = System.currentTimeMillis();
                }
 
-               if (System.currentTimeMillis() - procExitTime >= 10000L) {
+               if (System.currentTimeMillis() - procExitTime >= EXIT_GRACE_MS) {
+                  if (!isRetry && restartUsed.compareAndSet(false, true)) {
+                     LOGGER.warn("Terracotta process exited unexpectedly, try restart once. Error line: {}", lastErrorLine);
+                     stopInternalQuiet();
+                     return launchAndAwait(true);
+                  }
+
                   String errLine = lastErrorLine != null ? lastErrorLine : "无stdout错误输出";
-                  throw new RuntimeException("Terracotta重启后仍意外退出: " + errLine);
+                  throw new RuntimeException("Terracotta" + (isRetry ? "重启后仍" : "进程") + "意外退出: " + errLine);
                }
             }
 
@@ -403,7 +240,7 @@ public final class TerracottaProcess {
                   if (port > 0) {
                      httpPort = port;
                      restartUsed.set(false);
-                     LOGGER.info("Terracotta process restart succeeded, HTTP port {}", port);
+                     LOGGER.info("Terracotta process{} started, HTTP port {}", isRetry ? " (restart)" : "", port);
                      return port;
                   }
                }
@@ -411,21 +248,73 @@ public final class TerracottaProcess {
 
             long now = System.currentTimeMillis();
             long elapsed = now - waitStart;
-            if (elapsed > 120000L) {
+            if (elapsed > START_TOTAL_TIMEOUT_MS) {
                proc.destroyForcibly();
-               throw new RuntimeException("陶瓦重启超时(120s)未写出端口文件: " + (lastErrorLine != null ? lastErrorLine : "无错误输出"));
+               throw new RuntimeException("陶瓦" + (isRetry ? "重启" : "启动") + "超时(120s)未写出端口文件: " + (lastErrorLine != null ? lastErrorLine : "无错误输出"));
             }
 
             if (now - lastLogMs >= 10000L) {
-               LOGGER.info("Waiting for Terracotta restart, waited {}ms", elapsed);
+               LOGGER.info("Waiting for Terracotta {}, waited {}ms", isRetry ? "restart" : "start", elapsed);
                lastLogMs = now;
             }
 
-            Thread.sleep(500L);
+            Thread.sleep(POLL_INTERVAL_MS);
          }
       } catch (Exception e) {
-         throw new RuntimeException("重启 Terracotta 失败: " + e.getMessage(), e);
+         if (proc != null && proc.isAlive()) {
+            proc.destroyForcibly();
+         }
+
+         throw e;
       }
+   }
+
+   private static void startOutputDrain(Process proc, boolean isRetry) {
+      Thread drainStdout = new Thread(
+         () -> {
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+               int[] lineCount = new int[]{0};
+
+               String line;
+               while ((line = br.readLine()) != null) {
+                  String lower = line.toLowerCase(Locale.ROOT);
+                  boolean isError = lower.contains("error")
+                     || lower.contains("fatal")
+                     || lower.contains("panic")
+                     || lower.contains("failed to bind")
+                     || lower.contains("address already in use")
+                     || lower.contains("exception")
+                     || lower.contains("cannot ")
+                     || lower.contains("failed to");
+                  if (!isError && lineCount[0]++ >= 20) {
+                     LOGGER.debug("[terracotta] {}", line);
+                  } else {
+                     LOGGER.info("[terracotta] {}", line);
+                  }
+
+                  if (lower.contains("running in secondary mode")) {
+                     Matcher spm = SECONDARY_PORT_PATTERN.matcher(line);
+                     if (spm.find()) {
+                        int sp = Integer.parseInt(spm.group(1));
+                        if (sp > 0) {
+                           httpPort = sp;
+                           isSecondary = true;
+                           LOGGER.info("Terracotta secondary mode{}, reuse primary port {}", isRetry ? " (restart)" : "", sp);
+                        }
+                     }
+                  }
+
+                  if (isError) {
+                     lastErrorLine = line;
+                  }
+               }
+            } catch (IOException var10x) {
+            }
+         },
+         "terracotta-stdout-drain"
+      );
+      drainStdout.setDaemon(true);
+      drainStdout.start();
    }
 
    public static int getHttpPort() {

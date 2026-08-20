@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.FileDescriptor;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,8 +47,9 @@ public final class TerracottaAndroidBridge {
 
       if (!initialized) {
          try {
-            String baseDir = File.createTempFile("voxlink-terracotta-", "").getAbsolutePath();
-            new File(baseDir).mkdirs();
+            // Terracotta 要求 baseDir 是已存在的目录(machine-id 等写入其下), 不能传文件路径
+            Path baseDirPath = Files.createTempDirectory("voxlink-terracotta-");
+            String baseDir = baseDirPath.toAbsolutePath().toString();
             File logFile = File.createTempFile("voxlink-terracotta-log-", ".log");
             loggingFile = new RandomAccessFile(logFile, "rw");
             int fd = (int)invokeParcelFdDetach(loggingFile.getFD());

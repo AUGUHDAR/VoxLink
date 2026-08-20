@@ -47,13 +47,14 @@ public class VoxLinkClient implements ClientModInitializer {
                      Component reasonMsg = switch (reason != null ? reason : "") {
                         case "HOST_CLOSED" -> Component.translatable("voxlink.room_lost.host_closed");
                         case "HOST_DISCONNECTED" -> Component.translatable("voxlink.room_lost.host_disconnected");
+                        case "ROOM_NOT_FOUND" -> Component.translatable("voxlink.room_lost.host_gone");
                         case "TOKEN_INVALID" -> Component.translatable("voxlink.room_closed");
                         case "ROOM_EXPIRED" -> Component.translatable("voxlink.room_lost.room_expired");
                         case "ROOM_EVICTED" -> Component.translatable("voxlink.room_lost.room_evicted");
                         default -> Component.translatable("voxlink.room_lost.default");
                      };
-                     mc.player.displayClientMessage(Component.translatable("voxlink.chat.error_prefix").append(reasonMsg), false);
-                     mc.player.displayClientMessage(Component.translatable("voxlink.room_lost.hint"), false);
+                     mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error_prefix").append(reasonMsg));
+                     mc.player.sendSystemMessage(Component.translatable("voxlink.room_lost.hint"));
                   }
                });
             }

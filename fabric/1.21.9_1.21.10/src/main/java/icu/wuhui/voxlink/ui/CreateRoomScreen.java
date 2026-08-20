@@ -15,6 +15,7 @@ import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -26,7 +27,6 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerConnectionListener;
 import net.minecraft.world.level.GameType;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class CreateRoomScreen extends VoxLinkScreenBase {
    private final Screen parent;
@@ -516,8 +516,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                            if (mc.player != null) {
                               mc.player
                                  .displayClientMessage(
+
                                     Component.translatable("voxlink.chat.error_prefix").append(Component.translatable("voxlink.create_room.timeout"))
-                                 , false);
+                                 
+, false);
                            }
 
                            mc.setScreen(this);
@@ -588,6 +590,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          mc.player.displayClientMessage(Component.translatable("voxlink.chat.room_created").withStyle(Style.EMPTY.withBold(true)), false);
          mc.player
             .displayClientMessage(
+
                Component.translatable("voxlink.chat.room_code_label")
                   .append(
                      Component.literal(
@@ -599,7 +602,8 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                         )
                         .withStyle(ChatCompat.styleWithCopy(code, Component.translatable("voxlink.chat.click_to_copy")))
                   )
-            , false);
+            
+, false);
          mc.player.displayClientMessage(Component.translatable("voxlink.chat.friends_install_hint"), false);
          mc.player.displayClientMessage(Component.translatable("voxlink.create_room.recommend_voxlink"), false);
          String hostIp = roomInfo.getHostIp();

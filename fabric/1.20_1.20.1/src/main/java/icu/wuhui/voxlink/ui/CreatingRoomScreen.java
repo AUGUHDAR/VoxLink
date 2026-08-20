@@ -1,9 +1,9 @@
 package icu.wuhui.voxlink.ui;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class CreatingRoomScreen extends VoxLinkScreenBase {
    private final CreateRoomScreen parent;
@@ -45,7 +45,7 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
    private void onCancel() {
       Minecraft mc = Minecraft.getInstance();
       if (mc.player != null) {
-         mc.player.displayClientMessage(Component.translatable("voxlink.create_room.cancelled").withStyle(s -> s.withColor(16733525)), false);
+         mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.cancelled").withStyle(s -> s.withColor(16733525)));
       }
 
       this.parent.onCancelCreate();
@@ -57,7 +57,7 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
       if (System.currentTimeMillis() - this.startTime > 30000L) {
          Minecraft mc = Minecraft.getInstance();
          if (mc.player != null) {
-            mc.player.displayClientMessage(Component.translatable("voxlink.create_room.timeout").withStyle(s -> s.withColor(16733525)), false);
+            mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.timeout").withStyle(s -> s.withColor(16733525)));
          }
 
          this.parent.onCreateTimeout();
