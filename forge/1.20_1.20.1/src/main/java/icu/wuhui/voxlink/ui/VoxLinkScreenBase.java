@@ -25,6 +25,12 @@ public abstract class VoxLinkScreenBase extends Screen {
       this.clearOurWidgets();
    }
 
+   @Override
+   public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+      this.renderBackground(graphics);
+      super.render(graphics, mouseX, mouseY, partialTick);
+   }
+
    protected void clearOurWidgets() {
       for (GuiEventListener l : new ArrayList<>(this.myWidgets)) {
          super.removeWidget(l);
@@ -97,12 +103,12 @@ public abstract class VoxLinkScreenBase extends Screen {
    }
 
    protected void drawTitle(GuiGraphics graphics, int y) {
-      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, -1, this.width - 20);
+      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, VoxLinkColors.TITLE, this.width - 20);
    }
 
    protected void drawCenteredComponent(GuiGraphics graphics, Component component, int centerX, int y, int color) {
       int width = Minecraft.getInstance().font.width(component);
-      graphics.drawString(Minecraft.getInstance().font, component.getString(), centerX - width / 2, y, color);
+      graphics.drawString(Minecraft.getInstance().font, component, centerX - width / 2, y, color);
    }
 
    protected int fontWidth(Component component) {

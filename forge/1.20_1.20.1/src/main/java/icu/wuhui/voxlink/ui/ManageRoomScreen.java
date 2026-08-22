@@ -21,7 +21,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
    private Button authButton;
    private Button saveButton;
    private String statusMessage = "";
-   private int statusColor = -1;
+   private int statusColor = VoxLinkColors.WHITE;
    private static final int BTN_W = 200;
    private static final int BTN_H = 20;
    private static final int MARGIN_X = 20;
@@ -183,7 +183,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
       String name = this.nameField.getValue().trim();
       if (name.isEmpty()) {
          this.statusMessage = ChatFormatting.RED.toString() + Component.translatable("voxlink.manage_room.enter_name").getString();
-         this.statusColor = -43691;
+         this.statusColor = VoxLinkColors.ERROR;
       } else {
          String password = this.passwordField.getValue().trim();
          String passwordToSend = null;
@@ -208,7 +208,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
 
          this.saving = true;
          this.statusMessage = Component.translatable("voxlink.manage_room.saving").getString();
-         this.statusColor = -171;
+         this.statusColor = VoxLinkColors.WARNING;
          this.saveButton.active = false;
          if (mc.player != null) {
             mc.player.sendSystemMessage(Component.translatable("voxlink.chat.saving_settings"));
@@ -236,10 +236,10 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                         if (updated != null && !updated.isNameApproved()) {
                            this.statusMessage = ChatFormatting.YELLOW.toString()
                               + Component.translatable("voxlink.manage_room.name_pending_review").getString();
-                           this.statusColor = -171;
+                           this.statusColor = VoxLinkColors.WARNING;
                         } else {
                            this.statusMessage = ChatFormatting.GREEN.toString() + Component.translatable("voxlink.manage_room.saved").getString();
-                           this.statusColor = -11141291;
+                           this.statusColor = VoxLinkColors.SUCCESS;
                         }
 
                         this.roomInfo.setVisible(this.visible);
@@ -282,7 +282,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv4_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
                                        )
                                  );
                               }
@@ -296,7 +296,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv6_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
                                        )
                                  );
                               }
@@ -326,7 +326,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                   this.saving = false;
                   this.saveButton.active = true;
                   this.statusMessage = ChatFormatting.RED.toString() + finalMsg;
-                  this.statusColor = -43691;
+                  this.statusColor = VoxLinkColors.ERROR;
                   if (mc.player != null) {
                      mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", new Object[]{finalMsg}));
                   }
@@ -339,7 +339,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, VoxLinkColors.WHITE);
       if (!this.statusMessage.isEmpty()) {
          String clipped = this.statusMessage;
          int maxWidth = this.width - 20;

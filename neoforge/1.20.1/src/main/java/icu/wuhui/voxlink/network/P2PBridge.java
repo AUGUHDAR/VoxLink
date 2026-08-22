@@ -190,7 +190,7 @@ public class P2PBridge {
             }
 
             LOGGER.info("Joiner: connected to host {}:{}", hostIp, hostPort);
-            ServerSocket js = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+            ServerSocket js = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
             int jpx = js.getLocalPort();
             synchronized (P2PBridge.class) {
                joinerServer = js;
@@ -293,7 +293,7 @@ public class P2PBridge {
             }
 
             LOGGER.info("Joiner: connected to host [{}]:{}", hostIpv6, hostPort);
-            ServerSocket js = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+            ServerSocket js = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
             int jpx = js.getLocalPort();
             synchronized (P2PBridge.class) {
                joinerServer = js;
@@ -766,7 +766,7 @@ public class P2PBridge {
             joinerServer.close();
          }
 
-         joinerServer = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+         joinerServer = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
          joinerPort = joinerServer.getLocalPort();
          running.set(true);
          activeUdpTransports.add(transport);
@@ -799,7 +799,7 @@ public class P2PBridge {
       int consecutiveTimeouts = 0;
       String label = "UDP joiner";
 
-      while (running.get() && !js.isClosed() && transport.isConnected() && !joinerBridgeConnected.get()) {
+      while (running.get() && !js.isClosed() && !joinerBridgeConnected.get()) {
          try {
             Socket mcClient;
             try {

@@ -198,6 +198,9 @@ public class ReliableUdpTransport implements AutoCloseable {
    }
 
    private void triggerIceRestart() {
+      if (this.closed.get()) {
+         return;
+      }
       if (this.iceRestartTriggered.compareAndSet(false, true)) {
          Runnable r = this.onIceRestartRequested;
          if (r != null) {

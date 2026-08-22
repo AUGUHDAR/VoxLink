@@ -35,6 +35,7 @@ public class StunProbe {
    private static final int CHANGE_PORT_FLAG = 2;
    private static final int RFC5780_MAX_TRIES = 3;
    private static final long CACHE_TTL_MS = 300000L;
+   private static final long WARM_REUSE_TTL_MS = 20000L;
    private static final int TIMEOUT_MULTIPLIER = 2;
    private static final int SYM_DETECT_TIMEOUT_MS = 1500;
    private static volatile ExecutorService STUN_EXECUTOR = createExecutor();
@@ -538,6 +539,7 @@ public class StunProbe {
 
    public static void invalidateCache() {
       cachedEntry.set(null);
+      StunCache.clear();
    }
 
    public static boolean isNetworkChanged() {
@@ -561,7 +563,7 @@ public class StunProbe {
 
    public static StunProbe.ProbeResult getCachedResult() {
       StunProbe.CacheEntry entry = cachedEntry.get();
-      return entry != null && System.currentTimeMillis() - entry.timestamp < 300000L ? entry.result : null;
+      return entry != null && System.currentTimeMillis() - entry.timestamp < WARM_REUSE_TTL_MS ? entry.result : null;
    }
 
    private static void setCachedResult(StunProbe.ProbeResult result) {
@@ -569,50 +571,29 @@ public class StunProbe {
    }
 
    public static CompletableFuture<StunProbe.ProbeResult> probeAsync(List<List<String>> stunGroups) {
-      StunProbe.ProbeResult cached = getCachedResult();
-      if (cached != null) {
-         VoxLinkMod.LOGGER.info("[StunProbe] Using memory cache: NAT={}, reachable={}", cached.natType.key, cached.reachableStunUrls.size());
-         return CompletableFuture.completedFuture(cached);
-      }
+      return CompletableFuture.supplyAsync(() -> {
+         StunProbe.ProbeResult result = probe(stunGroups);
+         setCachedResult(result);
+         if (!result.serverResults.isEmpty()) {
+            StunProbe.StunServerResult saveResult = null;
+            List<String> urls = new ArrayList<>();
 
-      StunCache.Entry diskCache = StunCache.load();
-      if (diskCache == null) {
-         return CompletableFuture.supplyAsync(() -> {
-            StunProbe.ProbeResult result = probe(stunGroups);
-            setCachedResult(result);
-            if (!result.serverResults.isEmpty()) {
-               StunProbe.StunServerResult saveResult = null;
-               List<String> urls = new ArrayList<>();
-
-               for (StunProbe.StunServerResult r : result.serverResults) {
-                  if (r.reachable) {
-                     urls.add(r.url);
-                     if (saveResult == null && r.mappedIp != null && r.mappedPort > 0) {
-                        saveResult = r;
-                     }
+            for (StunProbe.StunServerResult r : result.serverResults) {
+               if (r.reachable) {
+                  urls.add(r.url);
+                  if (saveResult == null && r.mappedIp != null && r.mappedPort > 0) {
+                     saveResult = r;
                   }
-               }
-
-               if (saveResult != null) {
-                  StunCache.save(result.natType.key, saveResult.mappedIp, saveResult.mappedPort, urls);
                }
             }
 
-            return result;
-         }, executor());
-      }
+            if (saveResult != null) {
+               StunCache.save(result.natType.key, saveResult.mappedIp, saveResult.mappedPort, urls);
+            }
+         }
 
-      StunProbe.NatType nat = parseNatType(diskCache.natType);
-      List<StunProbe.StunServerResult> results = new ArrayList<>();
-
-      for (String url : diskCache.stunUrls) {
-         results.add(new StunProbe.StunServerResult(url, null, 0, true, -1L, diskCache.mappedIp, diskCache.mappedPort));
-      }
-
-      StunProbe.ProbeResult result = new StunProbe.ProbeResult(nat, results);
-      setCachedResult(result);
-      VoxLinkMod.LOGGER.info("[StunProbe] Using disk cache: NAT={}, mapped={}:{}", new Object[]{nat.key, diskCache.mappedIp, diskCache.mappedPort});
-      return CompletableFuture.completedFuture(result);
+         return result;
+      }, executor());
    }
 
    private static StunProbe.NatType parseNatType(String key) {

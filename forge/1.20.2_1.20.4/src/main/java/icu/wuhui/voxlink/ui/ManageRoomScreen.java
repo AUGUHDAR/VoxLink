@@ -282,7 +282,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv4_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
                                        )
                                  );
                               }
@@ -296,7 +296,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv6_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
                                        )
                                  );
                               }

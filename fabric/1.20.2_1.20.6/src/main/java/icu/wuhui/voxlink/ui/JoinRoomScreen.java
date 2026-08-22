@@ -27,7 +27,7 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
    private EditBox passwordField;
    private Button joinButton;
    private String statusMessage = "";
-   private int statusColor = -1;
+   private int statusColor = VoxLinkColors.WHITE;
    private String savedCode = "";
    private String savedPassword = "";
 
@@ -94,13 +94,13 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
       String code = this.codeField.getValue().trim().toUpperCase();
       if (code.isEmpty()) {
          this.statusMessage = Component.translatable("voxlink.join_room.enter_code").getString();
-         this.statusColor = -43691;
+         this.statusColor = VoxLinkColors.ERROR;
       } else if (!RoomCodeRouter.isVoxLinkCode(code) && !RoomCodeRouter.isTerracottaCode(code)) {
          this.statusMessage = Component.translatable("voxlink.error.invalid_room_code").getString();
-         this.statusColor = -43691;
+         this.statusColor = VoxLinkColors.ERROR;
       } else if (RoomCodeRouter.isTerracottaCode(code) && !TerracottaManager.isBinaryReady()) {
          this.statusMessage = Component.translatable("voxlink.join.terracotta_not_ready").getString();
-         this.statusColor = -43691;
+         this.statusColor = VoxLinkColors.ERROR;
       } else {
          this.savedCode = code;
          this.savedPassword = this.passwordField.getValue().trim();
@@ -115,9 +115,9 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
       int formHeight = 102;
       int startY = Math.max(40, (this.height - formHeight) / 2);
       int backY = startY + 68 + 20 + 4;
-      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, -1);
-      this.drawCenteredString(graphics, Component.translatable("voxlink.join.recommend_voxlink").getString(), centerX, backY + 20 + 6, -5592321);
-      this.drawCenteredString(graphics, Component.translatable("voxlink.join.terracotta_code_hint").getString(), centerX, backY + 20 + 18, -5592406);
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, VoxLinkColors.WHITE);
+      this.drawCenteredString(graphics, Component.translatable("voxlink.join.recommend_voxlink").getString(), centerX, backY + 20 + 6, VoxLinkColors.INFO);
+      this.drawCenteredString(graphics, Component.translatable("voxlink.join.terracotta_code_hint").getString(), centerX, backY + 20 + 18, VoxLinkColors.MUTED);
       if (!this.statusMessage.isEmpty()) {
          this.drawCenteredClipped(graphics, this.statusMessage, centerX, backY + 20 + 32, this.statusColor);
       }

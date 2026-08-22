@@ -14,8 +14,6 @@ public final class StunDetector {
       List.of("stun:stun.miwifi.com"),
       List.of("stun:stun.hitv.com"),
       List.of("stun:stun.chat.bilibili.com"),
-      List.of("stun:stun.cdnbye.com"),
-      List.of("stun:stun.qq.com"),
       List.of("stun:stun.l.google.com:19302"),
       List.of("stun:stun1.l.google.com:19302"),
       List.of("stun:stun2.l.google.com:19302"),
@@ -24,13 +22,8 @@ public final class StunDetector {
       List.of("stun:stun.nextcloud.com"),
       List.of("stun:stun.nfon.net"),
       List.of("stun:stun.freeswitch.org"),
-      List.of("stun:stun.syncthing.net"),
-      List.of("stun:stun.ekiga.net"),
       List.of("stun:stun.sipnet.com"),
-      List.of("stun:stun.voipbuster.com"),
-      List.of("stun:stun.sipgate.com"),
-      List.of("stun:stun.1und1.de"),
-      List.of("stun:stun.zoiper.com")
+      List.of("stun:stun.voipbuster.com")
    );
    private static volatile String cachedLocalIp;
    private static volatile long localIpCacheTime;

@@ -775,6 +775,10 @@ public class RoomManager {
    }
 
    public void leaveRoom(String detail) {
+      if (this.connectionManager.isConnectionInHandoff() && "用户主动离开".equals(detail)) {
+         return;
+      }
+
       this.intentionalLeave = true;
       this.stopScheduledTasks();
       this.roomLostHandled.set(true);
@@ -1094,10 +1098,13 @@ public class RoomManager {
                         }
 
                         if (st.roomInfo.isHost()) {
-                           try {
-                              this.signalingClient.leaveRoom(st.roomInfo.getCode(), st.roomInfo.getToken(), true);
-                           } catch (Exception e) {
-                              VoxLinkMod.LOGGER.debug("Leave failed on room lost (host): {}", e.getMessage());
+                           // 仅房主主动离开才发host_closing踢房客; 意外断连(心跳失败)不关房, 让已连房客存活
+                           if (this.intentionalLeave) {
+                              try {
+                                 if (this.intentionalLeave) { this.signalingClient.leaveRoom(st.roomInfo.getCode(), st.roomInfo.getToken(), true); }
+                              } catch (Exception e) {
+                                 VoxLinkMod.LOGGER.debug("Leave failed on room lost (host): {}", e.getMessage());
+                              }
                            }
 
                            int bridgePort = P2PBridge.getHostPort();
@@ -1155,10 +1162,12 @@ public class RoomManager {
                }
 
                if (captured.roomInfo.isHost()) {
-                  try {
-                     this.signalingClient.leaveRoom(captured.roomInfo.getCode(), captured.roomInfo.getToken(), true);
-                  } catch (Exception ex) {
-                     VoxLinkMod.LOGGER.debug("Leave failed on room lost (sync fallback): {}", ex.getMessage());
+                  if (this.intentionalLeave) {
+                     try {
+                        if (this.intentionalLeave) { this.signalingClient.leaveRoom(captured.roomInfo.getCode(), captured.roomInfo.getToken(), true); }
+                     } catch (Exception ex) {
+                        VoxLinkMod.LOGGER.debug("Leave failed on room lost (sync fallback): {}", ex.getMessage());
+                     }
                   }
 
                   int bridgePort = P2PBridge.getHostPort();
@@ -1768,20 +1777,21 @@ public class RoomManager {
    }
 
    public void applyOpPolicy(MinecraftServer server, boolean hostOp, boolean guestOp) {
-      try {
-         String hostName = Minecraft.getInstance().getUser().getName();
-
-         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            String name = player.getName().getString();
-            boolean isHost = name.equals(hostName);
-            boolean want = isHost ? hostOp : guestOp;
-            String cmd = want ? "op " + name : "deop " + name;
-            server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), cmd);
-            VoxLinkMod.LOGGER.info("[RoomManager] {}{}: {}", new Object[]{isHost ? "Host" : "Visitor", want ? "OP" : "DEOP", name});
+      String hostName = Minecraft.getInstance().getUser().getName();
+      server.execute(() -> {
+         try {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+               String name = player.getName().getString();
+               boolean isHost = name.equals(hostName);
+               boolean want = isHost ? hostOp : guestOp;
+               String cmd = want ? "op " + name : "deop " + name;
+               server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), cmd);
+               VoxLinkMod.LOGGER.info("[RoomManager] {}{}: {}", new Object[]{isHost ? "Host" : "Visitor", want ? "OP" : "DEOP", name});
+            }
+         } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[RoomManager] OP policy apply failed: {}", e.getMessage());
          }
-      } catch (Exception e) {
-         VoxLinkMod.LOGGER.warn("[RoomManager] OP policy apply failed: {}", e.getMessage());
-      }
+      });
    }
 
    private void applyGuestOpPolicy(RoomManager.RoomState st, Minecraft mc) {

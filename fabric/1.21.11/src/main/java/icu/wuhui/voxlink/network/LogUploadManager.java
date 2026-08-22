@@ -67,12 +67,6 @@ public final class LogUploadManager
          return;
       }
       String existing = ACTIVE_CODE.get();
-      if (normalized.equals(existing)) {
-         if (UPLOADED.get()) {
-            UPLOADED.set(false);
-         }
-         return;
-      }
       if (existing != null && uploadFuture != null) {
          uploadFuture.cancel(false);
       }
@@ -160,6 +154,14 @@ public final class LogUploadManager
       }
       String code = activeCode;
       if (code == null || UPLOADED.get()) {
+         return;
+      }
+      // 本端已连接且稳定时, 不因对端(可能是无关玩家的失败样本)上传而跟着上传
+      if (connectedAtMs > 0L && System.currentTimeMillis() - connectedAtMs >= STABLE_WINDOW_MS) {
+         if (pollFuture != null) {
+            pollFuture.cancel(false);
+            pollFuture = null;
+         }
          return;
       }
       if (System.currentTimeMillis() - punchStartMs > HOST_WAIT_TIMEOUT_MS) {

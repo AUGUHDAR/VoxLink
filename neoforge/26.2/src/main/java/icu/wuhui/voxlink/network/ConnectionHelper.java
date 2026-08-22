@@ -6,6 +6,9 @@ import icu.wuhui.voxlink.room.RoomInfo;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -177,37 +180,37 @@ public final class ConnectionHelper {
 
    private static void invokeStartConnecting(Screen parent, Minecraft mc, String addr, ServerData serverData) throws Exception {
       ServerAddress serverAddress = ServerAddress.parseString(addr);
-
+      // 按参数升序尝试, 优先命中真正最小重载, 避免撞上不发起连接的7参内部重载
+      List<Method> candidates = new ArrayList<>();
       for (Method m : ConnectScreen.class.getDeclaredMethods()) {
          if (Modifier.isStatic(m.getModifiers())) {
             Class<?>[] p = m.getParameterTypes();
-            if (p.length >= 4 && p[0] == Screen.class && p[1] == Minecraft.class && p[2] == ServerAddress.class && p[3].isAssignableFrom(serverData.getClass())
-               )
-             {
-               Object[] args = new Object[p.length];
-               args[0] = parent;
-               args[1] = mc;
-               args[2] = serverAddress;
-               args[3] = serverData;
-
-               for (int i = 4; i < p.length; i++) {
-                  args[i] = p[i] == boolean.class ? false : null;
-               }
-
-               m.setAccessible(true);
-
-               try {
-                  m.invoke(null, args);
-                  VoxLinkMod.LOGGER.info("[ConnectionHelper] startConnecting success, signature param count={}", p.length);
-                  return;
-               } catch (Exception e) {
-                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] startConnecting signature matched but call failed: {}", e.getMessage());
-               }
+            if (p.length >= 4 && p[0] == Screen.class && p[1] == Minecraft.class && p[2] == ServerAddress.class && p[3].isAssignableFrom(serverData.getClass())) {
+               candidates.add(m);
             }
          }
       }
-
-      throw new RuntimeException("ConnectScreen.startConnecting 未找到匹配签名");
+      candidates.sort(Comparator.comparingInt(Method::getParameterCount));
+      for (Method m : candidates) {
+         Class<?>[] p = m.getParameterTypes();
+         Object[] args = new Object[p.length];
+         args[0] = parent;
+         args[1] = mc;
+         args[2] = serverAddress;
+         args[3] = serverData;
+         for (int i = 4; i < p.length; i++) {
+            args[i] = p[i] == boolean.class ? false : null;
+         }
+         m.setAccessible(true);
+         try {
+            m.invoke(null, args);
+            VoxLinkMod.LOGGER.info("[ConnectionHelper] startConnecting success, signature param count={}", p.length);
+            return;
+         } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[ConnectionHelper] startConnecting signature matched but call failed: {}", e.getMessage());
+         }
+      }
+      throw new RuntimeException("ConnectScreen.startConnecting 未找到可调用签名");
    }
 
    private static void sendError(Minecraft mc, String msg) {

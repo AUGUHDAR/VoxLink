@@ -83,7 +83,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    protected Button joinBtn;
    protected int selectedIdx = -1;
    protected String statusMsg = "";
-   protected int statusColor = -5592406;
+   protected int statusColor = VoxLinkColors.MUTED;
    protected boolean initialFetchDone = false;
    protected int currentPage = 1;
    protected int totalRooms = 0;
@@ -379,7 +379,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                this.allRooms.clear();
                this.scrollOffset = 0;
                this.statusMsg = Component.translatable("voxlink.browser.loading").getString();
-               this.statusColor = -171;
+               this.statusColor = VoxLinkColors.WARNING;
             }
 
             String category = "all".equals(this.selectedCategory) ? null : this.selectedCategory;
@@ -398,7 +398,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                                  if (!apiResponse.success || apiResponse.data == null) {
                                     if (clear) {
                                        this.statusMsg = ChatFormatting.RED.toString() + Component.translatable("voxlink.browser.load_failed").getString();
-                                       this.statusColor = -43691;
+                                       this.statusColor = VoxLinkColors.ERROR;
                                     }
 
                                     return;
@@ -448,7 +448,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                                  this.fetchP2PDetails();
                               } catch (Exception ex) {
                                  this.statusMsg = Component.translatable("voxlink.browser.load_rooms_failed").getString();
-                                 this.statusColor = -43691;
+                                 this.statusColor = VoxLinkColors.ERROR;
                               }
                            }
                         }
@@ -459,7 +459,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                   Minecraft.getInstance().execute(() -> {
                      this.loadingMore = false;
                      this.statusMsg = Component.translatable("voxlink.error.network_error").getString();
-                     this.statusColor = -43691;
+                     this.statusColor = VoxLinkColors.ERROR;
                   });
                   return null;
                });
@@ -470,7 +470,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    protected void fetchP2PDetails() {
       this.applyFilter();
       this.statusMsg = this.allRooms.size() + " " + Component.translatable("voxlink.browser.rooms_count").getString();
-      this.statusColor = -11141291;
+      this.statusColor = VoxLinkColors.SUCCESS;
    }
 
    protected void applyFilter() {
@@ -604,7 +604,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             RoomBrowserScreenBase.RoomEntry r = this.displayedRooms.get(i);
             boolean sel = i == this.selectedIdx;
             boolean hover = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH;
-            int bg = sel ? -586010998 : (hover ? -581610155 : -583847117);
+            int bg = sel ? COLOR_BG_SELECTED : (hover ? COLOR_BG_HOVER : COLOR_BG_NORMAL);
             graphics.fill(x, y, x + cardW, y + cardH, bg);
             String roomName = r.name;
             if ("name_not_approved".equals(roomName)) {
@@ -613,24 +613,26 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
 
             int textX = x + 6;
             int textY = y + 5;
-            this.drawString(graphics, this.truncate(roomName, cardW / 6), textX, textY, -1);
-            this.drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + 11, -5592406);
-            this.drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + 22, -3355444);
+            this.drawString(graphics, this.truncate(roomName, cardW / 6), textX, textY, VoxLinkColors.WHITE);
+            this.drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + 11, VoxLinkColors.MUTED);
+            this.drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + 22, VoxLinkColors.TEXT_LIGHT);
             String catLabel = this.getCategoryLabel(r.category);
             int catW = this.fontWidth(catLabel) + 4;
-            graphics.fill(x + cardW - catW - 3, y + 3, x + cardW - 3, y + 13, 1144206131);
-            this.drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + 4, -6710887);
+            graphics.fill(x + cardW - catW - 3, y + 3, x + cardW - 3, y + 13, COLOR_CAT_BADGE_BG);
+            this.drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + 4, VoxLinkColors.CAT_BADGE_TEXT);
             String loaderKey = r.loader != null && !r.loader.isEmpty() ? r.loader : "unknown";
             String loaderLabel = Component.translatable("voxlink.loader." + loaderKey).getString();
             int loaderW = this.fontWidth(loaderLabel) + 4;
-            graphics.fill(x + cardW - loaderW - 3, y + 35, x + cardW - 3, y + 45, 1144206131);
-            this.drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + 36, -6710887);
+            graphics.fill(x + cardW - loaderW - 3, y + 35, x + cardW - 3, y + 45, COLOR_CAT_BADGE_BG);
+            this.drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + 36, VoxLinkColors.CAT_BADGE_TEXT);
          }
       }
 
       if (this.displayedRooms.isEmpty()) {
-         this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + 30, -7829368);
-         this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms_hint").getString(), this.width / 2, gridY + 44, -10066330);
+         this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + 30, VoxLinkColors.GRAY);
+         this.drawCenteredString(
+            graphics, Component.translatable("voxlink.browser.no_rooms_hint").getString(), this.width / 2, gridY + 44, COLOR_NO_ROOMS_HINT
+         );
       }
 
       if (!this.statusMsg.isEmpty()) {
@@ -712,9 +714,9 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    ) {
       boolean active = enabled && page == currentPage;
       boolean hover = enabled && mx >= x && mx < x + w && my >= y && my < y + h;
-      int bg = !enabled ? 1149798536 : (active ? -586010998 : (hover ? -580491674 : -582728636));
+      int bg = !enabled ? COLOR_PAGE_BTN_DISABLED_BG : (active ? COLOR_BG_SELECTED : (hover ? COLOR_PAGE_BTN_HOVER : COLOR_PAGE_BTN_NORMAL));
       graphics.fill(x, y, x + w, y + h, bg);
-      int tc = !enabled ? -7829368 : (active ? -1 : -3355444);
+      int tc = !enabled ? VoxLinkColors.TEXT_DIM : (active ? VoxLinkColors.WHITE : VoxLinkColors.TEXT_LIGHT);
       int labelWidth = this.fontWidth(label);
       this.drawString(graphics, label, x + w / 2 - labelWidth / 2, y + 3, tc);
       if (enabled) {

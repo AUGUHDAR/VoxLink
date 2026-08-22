@@ -430,7 +430,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
       Minecraft mc = Minecraft.getInstance();
       if (mc.getSingleplayerServer() == null) {
          if (mc.player != null) {
-            mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(16733525)));
+            mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)));
          }
       } else {
          String name = this.nameField.getValue().trim();
@@ -485,7 +485,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             if (!published) {
                this.creating = false;
                if (mc.player != null) {
-                  mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.lan_failed").withStyle(style -> style.withColor(16733525)));
+                  mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.lan_failed").withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)));
                }
 
                this.createButton.active = true;
@@ -616,7 +616,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
                addrLine.append(
                   Component.translatable("voxlink.chat.ipv4_label")
-                     .withStyle(ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925))
+                     .withStyle(ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB))
                );
             }
 
@@ -628,7 +628,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
                addrLine.append(
                   Component.translatable("voxlink.chat.ipv6_label")
-                     .withStyle(ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925))
+                     .withStyle(ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB))
                );
             }
 
@@ -706,7 +706,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.successClickLabels.clear();
          Font font = Minecraft.getInstance().font;
          int y = Math.max(20, this.height / 2 - 40);
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.success").getString(), centerX, y, -11141291);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.success").getString(), centerX, y, VoxLinkColors.SUCCESS);
          y += 18;
          String code = this.createdRoom.getCode();
          Component codeLine = Component.translatable("voxlink.chat.room_code_label")
@@ -723,7 +723,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.successClickTexts.add(code);
          this.successClickLabels.add(Component.translatable("voxlink.chat.room_code_label").getString());
          y += 12;
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.recommend_voxlink").getString(), centerX, y, -5592321);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.recommend_voxlink").getString(), centerX, y, VoxLinkColors.INFO);
          y += 14;
          String tc = this.createdRoom.getTerracottaCode();
          if (tc != null && !tc.isEmpty()) {
@@ -757,10 +757,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             int spaceW = hasV4 && hasV6 ? font.width(" ") : 0;
             int totalW = labelW + v4W + spaceW + v6W;
             int startX = centerX - totalW / 2;
-            this.drawString(graphics, addrLabel, startX, y, -1);
+            this.drawString(graphics, addrLabel, startX, y, VoxLinkColors.WHITE);
             int curX = startX + labelW;
             if (hasV4) {
-               this.drawString(graphics, ChatFormatting.GREEN.toString() + v4Label + ChatFormatting.RESET.toString(), curX, y, -11141291);
+               this.drawString(graphics, ChatFormatting.GREEN.toString() + v4Label + ChatFormatting.RESET.toString(), curX, y, VoxLinkColors.SUCCESS);
                this.successClickAreas.add(new int[]{curX, y, v4W, 9});
                this.successClickTexts.add((hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort);
                this.successClickLabels.add(v4Label);
@@ -768,12 +768,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             }
 
             if (hasV4 && hasV6) {
-               this.drawString(graphics, " ", curX, y, -1);
+               this.drawString(graphics, " ", curX, y, VoxLinkColors.WHITE);
                curX += spaceW;
             }
 
             if (hasV6) {
-               this.drawString(graphics, ChatFormatting.GREEN.toString() + v6Label + ChatFormatting.RESET.toString(), curX, y, -11141291);
+               this.drawString(graphics, ChatFormatting.GREEN.toString() + v6Label + ChatFormatting.RESET.toString(), curX, y, VoxLinkColors.SUCCESS);
                this.successClickAreas.add(new int[]{curX, y, v6W, 9});
                this.successClickTexts.add("[" + hostIpv6 + "]:" + hostPort);
                this.successClickLabels.add(v6Label);
@@ -782,7 +782,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             y += 14;
          }
       } else {
-         this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
+         this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, VoxLinkColors.TITLE);
       }
    }
 

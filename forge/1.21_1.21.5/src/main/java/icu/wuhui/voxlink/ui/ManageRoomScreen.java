@@ -278,7 +278,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv4_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
                                        )
                                  );
                               }
@@ -292,7 +292,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv6_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
+                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
                                        )
                                  );
                               }
@@ -335,7 +335,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, VoxLinkColors.TITLE);
       if (!this.statusMessage.isEmpty()) {
          String clipped = this.statusMessage;
          int maxWidth = this.width - 20;

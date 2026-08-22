@@ -282,11 +282,11 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       int formHeight = itemCount * 20 + (itemCount - 1) * 4;
       int y = Math.max(44, (this.height - formHeight) / 2);
       Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});
-      this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, -5592406);
+      this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, VoxLinkColors.MUTED);
       if (!this.statusMessage.isEmpty()) {
       }
 
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, -5592406);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, VoxLinkColors.MUTED);
    }
 
    public void onClose() {

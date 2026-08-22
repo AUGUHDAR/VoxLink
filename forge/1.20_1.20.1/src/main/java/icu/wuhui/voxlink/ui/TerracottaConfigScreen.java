@@ -21,7 +21,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    private Button pauseResumeBtn;
    private Button cancelBtn;
    private String statusMessage = "";
-   private int statusColor = -1;
+   private int statusColor = VoxLinkColors.WHITE;
    private boolean lastPausedState = false;
    private static final int BTN_W = 200;
    private static final int BTN_H = 20;
@@ -187,7 +187,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
 
          if (TerracottaManager.isBinaryReady() && !TerracottaManager.isDownloadFailed()) {
             this.statusMessage = Component.translatable("voxlink.terracotta.download_success").getString();
-            this.statusColor = -11141291;
+            this.statusColor = VoxLinkColors.SUCCESS;
          }
 
          Minecraft.getInstance().execute(() -> this.init());
@@ -214,11 +214,11 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       try {
          deleteRecursively(cacheDir);
          this.statusMessage = Component.translatable("voxlink.terracotta.binary_deleted").getString();
-         this.statusColor = -11141291;
+         this.statusColor = VoxLinkColors.SUCCESS;
       } catch (IOException e) {
          VoxLinkMod.LOGGER.warn("Failed to delete Terracotta: {}", e.getMessage());
          this.statusMessage = Component.translatable("voxlink.terracotta.download_failed").getString();
-         this.statusColor = -43691;
+         this.statusColor = VoxLinkColors.ERROR;
       }
 
       Minecraft.getInstance().execute(() -> this.init());
@@ -276,17 +276,17 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, -1);
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, VoxLinkColors.WHITE);
       boolean isDownloading = TerracottaManager.isDownloading();
       int itemCount = isDownloading ? 6 : 5;
       int formHeight = itemCount * 20 + (itemCount - 1) * 4;
       int y = Math.max(44, (this.height - formHeight) / 2);
       Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});
-      this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, -5592406);
+      this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, VoxLinkColors.MUTED);
       if (!this.statusMessage.isEmpty()) {
       }
 
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, -5592406);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, VoxLinkColors.MUTED);
    }
 
    public void onClose() {

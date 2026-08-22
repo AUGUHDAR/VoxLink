@@ -97,7 +97,7 @@ public abstract class VoxLinkScreenBase extends Screen {
    }
 
    protected void drawTitle(GuiGraphicsExtractor graphics, int y) {
-      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, -1, this.width - 20);
+      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, VoxLinkColors.TITLE, this.width - 20);
    }
 
    protected void drawCenteredComponent(GuiGraphicsExtractor graphics, Component component, int centerX, int y, int color) {

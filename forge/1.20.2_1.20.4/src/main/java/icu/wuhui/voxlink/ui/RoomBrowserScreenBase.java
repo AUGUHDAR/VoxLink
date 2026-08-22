@@ -604,7 +604,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             RoomBrowserScreenBase.RoomEntry r = this.displayedRooms.get(i);
             boolean sel = i == this.selectedIdx;
             boolean hover = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH;
-            int bg = sel ? -586010998 : (hover ? -581610155 : -583847117);
+            int bg = sel ? COLOR_BG_SELECTED : (hover ? COLOR_BG_HOVER : COLOR_BG_NORMAL);
             graphics.fill(x, y, x + cardW, y + cardH, bg);
             String roomName = r.name;
             if ("name_not_approved".equals(roomName)) {
@@ -613,24 +613,24 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
 
             int textX = x + 6;
             int textY = y + 5;
-            this.drawString(graphics, this.truncate(roomName, cardW / 6), textX, textY, -1);
-            this.drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + 11, -5592406);
-            this.drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + 22, -3355444);
+            this.drawString(graphics, this.truncate(roomName, cardW / 6), textX, textY, VoxLinkColors.WHITE);
+            this.drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + 11, VoxLinkColors.MUTED);
+            this.drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + 22, VoxLinkColors.TEXT_LIGHT);
             String catLabel = this.getCategoryLabel(r.category);
             int catW = this.fontWidth(catLabel) + 4;
-            graphics.fill(x + cardW - catW - 3, y + 3, x + cardW - 3, y + 13, 1144206131);
-            this.drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + 4, -6710887);
+            graphics.fill(x + cardW - catW - 3, y + 3, x + cardW - 3, y + 13, COLOR_CAT_BADGE_BG);
+            this.drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + 4, VoxLinkColors.CAT_BADGE_TEXT);
             String loaderKey = r.loader != null && !r.loader.isEmpty() ? r.loader : "unknown";
             String loaderLabel = Component.translatable("voxlink.loader." + loaderKey).getString();
             int loaderW = this.fontWidth(loaderLabel) + 4;
-            graphics.fill(x + cardW - loaderW - 3, y + 35, x + cardW - 3, y + 45, 1144206131);
-            this.drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + 36, -6710887);
+            graphics.fill(x + cardW - loaderW - 3, y + 35, x + cardW - 3, y + 45, COLOR_CAT_BADGE_BG);
+            this.drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + 36, VoxLinkColors.CAT_BADGE_TEXT);
          }
       }
 
       if (this.displayedRooms.isEmpty()) {
-         this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + 30, -7829368);
-         this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms_hint").getString(), this.width / 2, gridY + 44, -10066330);
+         this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + 30, VoxLinkColors.GRAY);
+         this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms_hint").getString(), this.width / 2, gridY + 44, COLOR_NO_ROOMS_HINT);
       }
 
       if (!this.statusMsg.isEmpty()) {
@@ -712,9 +712,9 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    ) {
       boolean active = enabled && page == currentPage;
       boolean hover = enabled && mx >= x && mx < x + w && my >= y && my < y + h;
-      int bg = !enabled ? 1149798536 : (active ? -586010998 : (hover ? -580491674 : -582728636));
+      int bg = !enabled ? COLOR_PAGE_BTN_DISABLED_BG : (active ? COLOR_BG_SELECTED : (hover ? COLOR_PAGE_BTN_HOVER : COLOR_PAGE_BTN_NORMAL));
       graphics.fill(x, y, x + w, y + h, bg);
-      int tc = !enabled ? -7829368 : (active ? -1 : -3355444);
+      int tc = !enabled ? VoxLinkColors.GRAY : (active ? VoxLinkColors.WHITE : VoxLinkColors.TEXT_LIGHT);
       int labelWidth = this.fontWidth(label);
       this.drawString(graphics, label, x + w / 2 - labelWidth / 2, y + 3, tc);
       if (enabled) {

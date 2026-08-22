@@ -317,7 +317,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredString(graphics, this.title.getString(), centerX, 20, -1);
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 20, VoxLinkColors.WHITE);
       RoomInfo currentRoom = VoxLinkMod.getRoomManager().getCurrentRoom();
       int maxWidth = this.width - 20;
       int bottomY = this.height - 28;
@@ -334,7 +334,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             + "["
             + Component.translatable("voxlink.chat.click_to_copy").getString()
             + "]";
-         this.drawCenteredClipped(graphics, codeText, centerX, 36, -171, maxWidth);
+         this.drawCenteredClipped(graphics, codeText, centerX, 36, VoxLinkColors.WARNING, maxWidth);
          int codeW = this.font.width(codeText);
          this.codeClickAreas.add(new int[]{centerX - codeW / 2, 36, codeW, 9});
          this.codeClickTexts.add(currentRoom.getCode());
@@ -349,7 +349,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                + "["
                + Component.translatable("voxlink.chat.click_to_copy").getString()
                + "]";
-            this.drawCenteredClipped(graphics, tcText, centerX, 50, -5592321, maxWidth);
+            this.drawCenteredClipped(graphics, tcText, centerX, 50, VoxLinkColors.INFO, maxWidth);
             int tcW = this.font.width(tcText);
             this.codeClickAreas.add(new int[]{centerX - tcW / 2, 50, tcW, 9});
             this.codeClickTexts.add(tcCode);
@@ -364,7 +364,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             }
 
             if (connMode != null && !connMode.getString().isEmpty()) {
-               this.drawCenteredClipped(graphics, connMode.getString(), centerX, modeY, -7829368, maxWidth);
+               this.drawCenteredClipped(graphics, connMode.getString(), centerX, modeY, VoxLinkColors.GRAY, maxWidth);
                ConnectionState cs = ConnectionState.getCurrent();
                if (cs != ConnectionState.CONNECTED && cs != ConnectionState.IDLE && cs != ConnectionState.FAILED) {
                   StringBuilder detail = new StringBuilder();
@@ -378,23 +378,23 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                      detail.append(" | ").append(natType);
                   }
 
-                  this.drawCenteredClipped(graphics, detail.toString(), centerX, modeY + 11, -5592406, maxWidth);
+                  this.drawCenteredClipped(graphics, detail.toString(), centerX, modeY + 11, VoxLinkColors.MUTED, maxWidth);
                }
             }
          }
       } else {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, uploadLogY - 24, -7829368, maxWidth);
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, uploadLogY - 12, -5592406, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, uploadLogY - RELAY_HINT_Y_OFFSET, VoxLinkColors.GRAY, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, uploadLogY - RELAY_SLOGAN_Y_OFFSET, VoxLinkColors.MUTED, maxWidth);
       }
 
       if (TerracottaManager.isDownloading() && this.pauseResumeBtn != null) {
          TerracottaBinary.DownloadProgress p = TerracottaManager.getLastProgress();
          Component progressLabel = buildDownloadLabel(p);
-         this.drawCenteredString(graphics, progressLabel.getString(), centerX, downloadY - 12, -5592321);
+         this.drawCenteredString(graphics, progressLabel.getString(), centerX, downloadY - 12, VoxLinkColors.INFO);
       }
 
       if (!TerracottaBinary.isPlatformSupported()) {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.unsupported_platform").getString(), centerX, 36, -22016, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.unsupported_platform").getString(), centerX, 36, COLOR_ORANGE, maxWidth);
       }
    }
 

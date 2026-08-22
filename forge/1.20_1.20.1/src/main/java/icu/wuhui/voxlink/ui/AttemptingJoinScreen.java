@@ -62,11 +62,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private final String roomCode;
    private final String password;
    private String voxlinkStatusText = "";
-   private int voxlinkStatusColor = -5592406;
+   private int voxlinkStatusColor = VoxLinkColors.MUTED;
    private volatile boolean voxlinkFinal = false;
    private volatile long voxlinkStatusLastUpdate = 0L;
    private String terracottaStatusText = "";
-   private int terracottaStatusColor = -5592406;
+   private int terracottaStatusColor = VoxLinkColors.MUTED;
    private volatile boolean terracottaFinal = false;
    private volatile boolean active = false;
    private boolean joinApiDone = false;
@@ -98,15 +98,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
          this.voxlinkFinal = true;
          this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-         this.voxlinkStatusColor = -11141291;
+         this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
       } else if (room != null && room.isConnectionFailed()) {
          this.active = false;
          this.voxlinkFinal = true;
          this.voxlinkStatusText = Component.translatable("voxlink.connection.all_failed").getString();
-         this.voxlinkStatusColor = -43691;
+         this.voxlinkStatusColor = VoxLinkColors.ERROR;
       } else if (room != null && room.getLocalBridgePort() > 0) {
          this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-         this.voxlinkStatusColor = -171;
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
       }
 
       int centerX = this.width / 2;
@@ -225,20 +225,20 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    private int colorForStatus(String statusKey) {
       if (statusKey == null) {
-         return -5592406;
+         return VoxLinkColors.MUTED;
       } else if (statusKey.endsWith(".connected") || statusKey.endsWith(".p2p_established")) {
-         return -11141291;
+         return VoxLinkColors.SUCCESS;
       } else if (statusKey.endsWith(".all_failed") || statusKey.endsWith(".channel_failed")) {
-         return -43691;
+         return VoxLinkColors.ERROR;
       } else {
-         return statusKey.endsWith(".status_cancelled") ? -5592406 : -171;
+         return statusKey.endsWith(".status_cancelled") ? VoxLinkColors.MUTED : VoxLinkColors.WARNING;
       }
    }
 
    private void onFailed(String msg) {
       this.voxlinkFinal = true;
       this.voxlinkStatusText = msg;
-      this.voxlinkStatusColor = -43691;
+      this.voxlinkStatusColor = VoxLinkColors.ERROR;
       this.active = false;
       this.stopConnectionMonitor();
       VoxLinkMod.getRoomManager().getConnectionManager().killAllConnectionAttempts();
@@ -344,7 +344,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                            if (mc.screen == AttemptingJoinScreen.this) {
                               AttemptingJoinScreen.this.voxlinkFinal = true;
                               AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-                              AttemptingJoinScreen.this.voxlinkStatusColor = -11141291;
+                              AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
                               AttemptingJoinScreen.this.active = false;
                            }
                         });
@@ -374,7 +374,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                         if (mc.screen == AttemptingJoinScreen.this) {
                            if (!AttemptingJoinScreen.this.voxlinkFinal) {
                               AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-                              AttemptingJoinScreen.this.voxlinkStatusColor = -171;
+                              AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.WARNING;
                            }
                         }
                      });
@@ -428,7 +428,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                                  }
 
                                  AttemptingJoinScreen.this.voxlinkStatusText = newText;
-                                 AttemptingJoinScreen.this.voxlinkStatusColor = -171;
+                                 AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.WARNING;
                                  AttemptingJoinScreen.this.voxlinkStatusLastUpdate = now;
                               }
                            }
@@ -480,18 +480,18 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       super.render(graphics, mouseX, mouseY, partialTick);
       this.renderNatOverlay(graphics);
       int centerX = this.width / 2;
-      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, -1);
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, VoxLinkColors.WHITE);
       this.drawCenteredString(
          graphics,
          ChatFormatting.YELLOW.toString() + ChatFormatting.BOLD.toString() + Component.translatable("voxlink.chat.room_code_label").getString().trim(),
          centerX,
          this.height / 2 - 30,
-         -171
+         VoxLinkColors.WARNING
       );
       if (this.relayFailedMsgTime > 0L) {
          long elapsed = System.currentTimeMillis() - this.relayFailedMsgTime;
          if (elapsed < 3000L) {
-            this.drawCenteredString(graphics, Component.translatable("voxlink.relay.failed_retry_punch").getString(), centerX, this.height / 2 - 30 - 12, -171);
+            this.drawCenteredString(graphics, Component.translatable("voxlink.relay.failed_retry_punch").getString(), centerX, this.height / 2 - 30 - 12, VoxLinkColors.WARNING);
          } else {
             this.relayFailedMsgTime = 0L;
          }
@@ -551,12 +551,12 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          tipText = tipText + "...";
       }
 
-      this.drawString(graphics, tipText, 4, this.height - 12, -5592406);
+      this.drawString(graphics, tipText, 4, this.height - 12, VoxLinkColors.MUTED);
 
       if (LogUploadManager.isUploadFinished()) {
          String uploadText = Component.translatable("voxlink.log_upload.uploaded").getString();
          int uploadWidth = this.fontWidth(uploadText);
-         this.drawString(graphics, uploadText, this.width - uploadWidth - 6, this.height - 12, 0xFF55FF55);
+         this.drawString(graphics, uploadText, this.width - uploadWidth - 6, this.height - 12, VoxLinkColors.SUCCESS);
       }
    }
 
@@ -583,9 +583,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       int x = 4;
       int y = 18;
       int line = 10;
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, -5592406);
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, -5592406);
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, -171);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, VoxLinkColors.WARNING);
    }
 
    private String natCnName(NatClass nat) {

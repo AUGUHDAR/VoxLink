@@ -142,6 +142,8 @@ public class ConnectionManager {
    private volatile CompletableFuture<Void> dualResultRef;
    private final AtomicInteger dualFailedCount = new AtomicInteger(0);
    private final AtomicBoolean dualRaceWon = new AtomicBoolean(false);
+   private static final long HANDOFF_GRACE_MS = 5000L;
+   private volatile long connectionEstablishedAtMs = 0L;
    private volatile PunchResult lastPunchResult;
    private volatile NatClass localNatClass = NatClass.UNKNOWN;
    private volatile NatClass remoteNatClass = NatClass.UNKNOWN;
@@ -1993,13 +1995,19 @@ public class ConnectionManager {
                for (int i = 0; i < stunFutures.size(); i++) {
                   try {
                      StunProbe.PublicMappedAddress[] addrs = stunFutures.get(i).getNow(null);
-                     if (addrs != null && addrs[1] != null) {
-                        mappedAddrs.add(addrs[1]);
-                        if (mappedIp == null) {
-                           mappedIp = addrs[1].ip();
+                     if (addrs != null && (addrs[0] != null || addrs[1] != null)) {
+                        // 双栈时优先通告 IPv4 映射(常规访客为IPv4), 避免把IPv6映射通告给IPv4访客导致打不中
+                        StunProbe.PublicMappedAddress chosen = addrs[0] != null && addrs[0].ip().indexOf(58) < 0
+                           ? addrs[0]
+                           : (addrs[1] != null && addrs[1].ip().indexOf(58) < 0 ? addrs[1] : (addrs[0] != null ? addrs[0] : addrs[1]));
+                        if (chosen != null) {
+                           mappedAddrs.add(chosen);
+                           if (mappedIp == null) {
+                              mappedIp = chosen.ip();
+                           }
                         }
 
-                        if (addrs[0] != null && addrs[0].port() != addrs[1].port()) {
+                        if (addrs[0] != null && addrs[1] != null && sameIpFamily(addrs[0].ip(), addrs[1].ip()) && addrs[0].port() != addrs[1].port()) {
                            hostPunchSocketSymmetric = true;
                            if (hostPunchSocketDelta == 0) {
                               hostPunchSocketDelta = addrs[1].port() - addrs[0].port();
@@ -2479,7 +2487,7 @@ public class ConnectionManager {
                            int hostRevDelta = 0;
                            StunProbe.PublicMappedAddress hostMapped = null;
                            if (hostMapped1 != null && hostMapped2 != null) {
-                              if (hostMapped1.port() != hostMapped2.port()) {
+                              if (sameIpFamily(hostMapped1.ip(), hostMapped2.ip()) && hostMapped1.port() != hostMapped2.port()) {
                                  hostPunchSocketSymmetric = true;
                                  hostRevDelta = hostMapped2.port() - hostMapped1.port();
                                  VoxLinkMod.LOGGER
@@ -2971,6 +2979,14 @@ public class ConnectionManager {
             : Math.max(1, Math.min(reachable, this.punchProfile().maxCycles));
       } else {
          return this.punchProfile().fallbackCycles;
+      }
+   }
+
+   private static boolean sameIpFamily(String a, String b) {
+      if (a == null || b == null) {
+         return false;
+      } else {
+         return a.indexOf(58) >= 0 == b.indexOf(58) >= 0;
       }
    }
 
@@ -3517,7 +3533,7 @@ public class ConnectionManager {
          StunProbe.PublicMappedAddress myMapped1 = quadResult[0] != null ? quadResult[0] : (quadResult[2] != null ? quadResult[2] : quadResult[3]);
          StunProbe.PublicMappedAddress myMapped2 = quadResult[1] != null ? quadResult[1] : (quadResult[3] != null ? quadResult[3] : quadResult[2]);
          if (myMapped1 != null && myMapped2 != null) {
-            if (myMapped1.port() != myMapped2.port()) {
+            if (sameIpFamily(myMapped1.ip(), myMapped2.ip()) && myMapped1.port() != myMapped2.port()) {
                joinerPunchSocketSymmetric = true;
                joinerMappedPortDelta = myMapped2.port() - myMapped1.port();
                VoxLinkMod.LOGGER
@@ -4515,7 +4531,7 @@ public class ConnectionManager {
       int joinerMappedPortDelta = 0;
       StunProbe.PublicMappedAddress myMappedAddr = null;
       if (myMapped1 != null && myMapped2 != null) {
-         if (myMapped1.port() != myMapped2.port()) {
+         if (sameIpFamily(myMapped1.ip(), myMapped2.ip()) && myMapped1.port() != myMapped2.port()) {
             joinerSymmetric = true;
             joinerMappedPortDelta = myMapped2.port() - myMapped1.port();
             VoxLinkMod.LOGGER
@@ -4837,13 +4853,12 @@ public class ConnectionManager {
       if (result.mode == ConnectionFallback.ConnectionMode.IPV6_DIRECT) {
          P2PBridge.connectToHostIpv6(remoteHost, remotePort).thenAccept(localPort -> {
             if (localPort > 0) {
-               if (this.dualRaceActive && !this.claimVoxlinkDualWin()) {
-                  this.connectionCycleActive.set(false);
-                  ConnectionHelper.resetConnecting();
-                  P2PBridge.disconnect();
-                  this.notifyDualVoxlinkBridge(false);
-                  return;
+               if (this.dualRaceActive) {
+                  this.claimVoxlinkDualWin();
                }
+
+               this.connectionWon.set(true);
+               this.markConnectionEstablished();
 
                this.connectionCycleActive.set(false);
                this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "connected", new JsonObject(), "host");
@@ -4865,13 +4880,12 @@ public class ConnectionManager {
       } else {
          P2PBridge.connectToHost(remoteHost, remotePort).thenAccept(localPort -> {
             if (localPort > 0) {
-               if (this.dualRaceActive && !this.claimVoxlinkDualWin()) {
-                  this.connectionCycleActive.set(false);
-                  ConnectionHelper.resetConnecting();
-                  P2PBridge.disconnect();
-                  this.notifyDualVoxlinkBridge(false);
-                  return;
+               if (this.dualRaceActive) {
+                  this.claimVoxlinkDualWin();
                }
+
+               this.connectionWon.set(true);
+               this.markConnectionEstablished();
 
                this.connectionCycleActive.set(false);
                this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "connected", new JsonObject(), "host");
@@ -6073,6 +6087,16 @@ public class ConnectionManager {
       }
    }
 
+   public void markConnectionEstablished() {
+      this.connectionEstablishedAtMs = System.currentTimeMillis();
+   }
+
+   public boolean isConnectionInHandoff() {
+      return this.connectionEstablishedAtMs > 0L
+         && System.currentTimeMillis() - this.connectionEstablishedAtMs < HANDOFF_GRACE_MS
+         && !ConnectionHelper.isMcTrulyConnected();
+   }
+
    public void notifyDualVoxlinkBridge(boolean success) {
       CompletableFuture<Void> f = this.dualVoxlinkBridgeFuture;
       if (f != null) {
@@ -6101,6 +6125,7 @@ public class ConnectionManager {
       this.resetContinuousRetryState();
       this.connectionWon.set(false);
       this.connectionWon.set(false);
+      this.connectionEstablishedAtMs = 0L;
       VoxLinkMod.LOGGER
          .info(
             "[DualP2P] startDualP2P roomCode={} parallel={} isTerracotta={} isVoxLink={}",
@@ -6292,21 +6317,14 @@ public class ConnectionManager {
       if (!this.terracottaWon && !this.voxlinkSideDisabled) {
          int localPort = P2PBridge.startUdpJoinerBridge(transport);
          if (localPort > 0) {
-            if (this.dualRaceActive && !this.claimVoxlinkDualWin()) {
-               try {
-                  transport.close();
-               } catch (Exception var5) {
-               }
-
-               P2PBridge.disconnect();
-               this.connectionCycleActive.set(false);
-               this.notifyDualVoxlinkBridge(false);
-               return;
+            if (this.dualRaceActive) {
+               this.claimVoxlinkDualWin();
             }
 
             this.stopAllPunchingAfterHostBridge();
             this.connectionCycleActive.set(false);
             ConnectionState.transitionTo(ConnectionState.CONNECTED, "Joiner桥接建立 port=" + localPort);
+            this.markConnectionEstablished();
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_setup"));
             ConnectionHelper.connectToServer(localPort, state.roomInfo);
             this.notifyDualVoxlinkBridge(true);

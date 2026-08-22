@@ -276,17 +276,17 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, -1);
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, VoxLinkColors.TITLE);
       boolean isDownloading = TerracottaManager.isDownloading();
       int itemCount = isDownloading ? 6 : 5;
       int formHeight = itemCount * 20 + (itemCount - 1) * 4;
       int y = Math.max(44, (this.height - formHeight) / 2);
       Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});
-      this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, -5592406);
+      this.drawCenteredClipped(graphics, statusLabel.getString(), centerX, y - 14, VoxLinkColors.MUTED);
       if (!this.statusMessage.isEmpty()) {
       }
 
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, -5592406);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, VoxLinkColors.MUTED);
    }
 
    public void onClose() {

@@ -89,6 +89,15 @@ public class StunCache {
       }
    }
 
+   public static void clear() {
+      try {
+         Path path = getCachePath();
+         Files.deleteIfExists(path);
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.debug("[StunCache] Clear failed: {}", e.getMessage());
+      }
+   }
+
    public static void save(String natType, String mappedIp, int mappedPort, List<String> stunUrls) {
       if (mappedIp != null && !mappedIp.isEmpty() && mappedPort > 0) {
          try {

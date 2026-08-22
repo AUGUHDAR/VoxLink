@@ -480,7 +480,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       super.render(graphics, mouseX, mouseY, partialTick);
       this.renderNatOverlay(graphics);
       int centerX = this.width / 2;
-      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, -1);
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, VoxLinkColors.TITLE);
       this.drawCenteredString(
          graphics,
          ChatFormatting.YELLOW.toString() + ChatFormatting.BOLD.toString() + Component.translatable("voxlink.chat.room_code_label").getString().trim(),
@@ -551,7 +551,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          tipText = tipText + "...";
       }
 
-      this.drawString(graphics, tipText, 4, this.height - 12, -5592406);
+      this.drawString(graphics, tipText, 4, this.height - 12, VoxLinkColors.MUTED);
 
       if (LogUploadManager.isUploadFinished()) {
          String uploadText = Component.translatable("voxlink.log_upload.uploaded").getString();
@@ -583,9 +583,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       int x = 4;
       int y = 18;
       int line = 10;
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, -5592406);
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, -5592406);
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, -171);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, VoxLinkColors.WARNING);
    }
 
    private String natCnName(NatClass nat) {

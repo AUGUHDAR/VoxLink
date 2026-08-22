@@ -2,59 +2,29 @@ package icu.wuhui.voxlink.ui;
 
 import icu.wuhui.voxlink.VoxLinkMod;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.Style;
 
 public final class ChatCompat {
-   private static Constructor<?> copyToClipboardCtor;
-   private static Constructor<?> oldClickEventCtor;
-   private static Object copyAction;
-   private static boolean copyChecked = false;
-   private static Constructor<?> showTextCtor;
-   private static Constructor<?> oldHoverEventCtor;
-   private static Object showTextAction;
-   private static boolean hoverChecked = false;
-
    private ChatCompat() {
    }
 
    public static ClickEvent copyToClipboard(String value) {
-      checkClickEvent();
-
       try {
-         if (copyToClipboardCtor != null) {
-            return (ClickEvent)copyToClipboardCtor.newInstance(value);
-         }
-
-         if (oldClickEventCtor != null && copyAction != null) {
-            return (ClickEvent)oldClickEventCtor.newInstance(copyAction, value);
-         }
-      } catch (Exception e) {
-         VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
+         return ModernApi.copy(value);
+      } catch (Throwable t) {
+         return LegacyApi.copy(value);
       }
-
-      return null;
    }
 
    public static HoverEvent showText(Component text) {
-      checkHoverEvent();
-
       try {
-         if (showTextCtor != null) {
-            return (HoverEvent)showTextCtor.newInstance(text);
-         }
-
-         if (oldHoverEventCtor != null && showTextAction != null) {
-            return (HoverEvent)oldHoverEventCtor.newInstance(showTextAction, text);
-         }
-      } catch (Exception e) {
-         VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
+         return ModernApi.showText(text);
+      } catch (Throwable t) {
+         return LegacyApi.showText(text);
       }
-
-      return null;
    }
 
    public static Style styleWithCopy(String copyValue, Component hoverText) {
@@ -72,127 +42,101 @@ public final class ChatCompat {
       return style;
    }
 
-   private static void checkClickEvent() {
-      if (!copyChecked) {
-         copyChecked = true;
+   // 新API隔离: 1.21.5以下链接此类的NCDFE由外层try捕获
+   private static final class ModernApi {
+      private ModernApi() {
+      }
 
-         for (Class<?> inner : ClickEvent.class.getDeclaredClasses()) {
-            try {
-               Constructor<?> c = inner.getDeclaredConstructor(String.class);
-               if (ClickEvent.class.isAssignableFrom(inner)) {
-                  copyToClipboardCtor = c;
-                  copyToClipboardCtor.setAccessible(true);
-                  return;
-               }
-            } catch (NoSuchMethodException e) {
-               VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
-            }
-         }
+      static ClickEvent copy(String value) {
+         return new ClickEvent.CopyToClipboard(value);
+      }
 
-         try {
-            Class<?> actionClass = null;
-
-            for (Class<?> inner : ClickEvent.class.getDeclaredClasses()) {
-               if (inner.isEnum()) {
-                  actionClass = inner;
-                  break;
-               }
-            }
-
-            if (actionClass != null) {
-               Object action = tryByName(actionClass, "copy_to_clipboard");
-               if (action == null) {
-                  for (Object e : actionClass.getEnumConstants()) {
-                     String s = e.toString();
-                     if (s.contains("COPY") || s.contains("copy")) {
-                        action = e;
-                        break;
-                     }
-                  }
-               }
-
-               if (action == null && actionClass.getEnumConstants().length >= 6) {
-                  action = actionClass.getEnumConstants()[5];
-               }
-
-               if (action != null) {
-                  copyAction = action;
-                  oldClickEventCtor = ClickEvent.class.getDeclaredConstructor(actionClass, String.class);
-                  oldClickEventCtor.setAccessible(true);
-               }
-            }
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
-         }
+      static HoverEvent showText(Component text) {
+         return new HoverEvent.ShowText(text);
       }
    }
 
-   private static void checkHoverEvent() {
-      if (!hoverChecked) {
-         hoverChecked = true;
+   private static final class LegacyApi {
+      private static Constructor<?> clickCtor;
+      private static Object copyAction;
+      private static Constructor<?> hoverCtor;
+      private static Object showTextAction;
+      private static boolean inited = false;
 
-         for (Class<?> inner : HoverEvent.class.getDeclaredClasses()) {
-            try {
-               Constructor<?> c = inner.getDeclaredConstructor(Component.class);
-               if (HoverEvent.class.isAssignableFrom(inner)) {
-                  showTextCtor = c;
-                  showTextCtor.setAccessible(true);
-                  return;
-               }
-            } catch (NoSuchMethodException var8) {
+      private LegacyApi() {
+      }
+
+      static ClickEvent copy(String value) {
+         try {
+            init();
+            if (clickCtor != null && copyAction != null) {
+               return (ClickEvent)clickCtor.newInstance(copyAction, value);
             }
+         } catch (Throwable t) {
+            VoxLinkMod.LOGGER.debug("ChatCompat legacy copy failed", t);
          }
 
+         return null;
+      }
+
+      static HoverEvent showText(Component text) {
          try {
-            Class<?> actionClass = null;
+            init();
+            if (hoverCtor != null && showTextAction != null) {
+               return (HoverEvent)hoverCtor.newInstance(showTextAction, text);
+            }
+         } catch (Throwable t) {
+            VoxLinkMod.LOGGER.debug("ChatCompat legacy hover failed", t);
+         }
+
+         return null;
+      }
+
+      private static void init() {
+         if (inited) {
+            return;
+         }
+         inited = true;
+
+         try {
+            for (Class<?> inner : ClickEvent.class.getDeclaredClasses()) {
+               if (inner.isEnum()) {
+                  Object[] consts = inner.getEnumConstants();
+                  // Action枚举序: CHANGE_PAGE(4), COPY_TO_CLIPBOARD(5)
+                  if (consts != null && consts.length >= 6) {
+                     copyAction = consts[5];
+                     clickCtor = ClickEvent.class.getDeclaredConstructor(inner, String.class);
+                     clickCtor.setAccessible(true);
+                  }
+                  break;
+               }
+            }
 
             for (Class<?> inner : HoverEvent.class.getDeclaredClasses()) {
                if (inner.isEnum()) {
-                  actionClass = inner;
-                  break;
-               }
-            }
-
-            if (actionClass != null) {
-               Object action = tryByName(actionClass, "show_text");
-               if (action == null) {
-                  for (Object e : actionClass.getEnumConstants()) {
-                     String s = e.toString();
-                     if (s.contains("SHOW_TEXT") || s.contains("show_text")) {
-                        action = e;
+                  for (Object c : inner.getEnumConstants()) {
+                     if (c.toString().contains("SHOW_TEXT")) {
+                        showTextAction = c;
                         break;
                      }
                   }
-               }
 
-               if (action == null && actionClass.getEnumConstants().length >= 1) {
-                  action = actionClass.getEnumConstants()[0];
-               }
+                  if (showTextAction != null) {
+                     try {
+                        hoverCtor = HoverEvent.class.getDeclaredConstructor(inner, Component.class);
+                     } catch (NoSuchMethodException e) {
+                        // 泛型擦除后value参数为Object
+                        hoverCtor = HoverEvent.class.getDeclaredConstructor(inner, Object.class);
+                     }
 
-               if (action != null) {
-                  showTextAction = action;
-
-                  try {
-                     oldHoverEventCtor = HoverEvent.class.getDeclaredConstructor(actionClass, Component.class);
-                  } catch (NoSuchMethodException e) {
-                     oldHoverEventCtor = HoverEvent.class.getDeclaredConstructor(actionClass, Object.class);
+                     hoverCtor.setAccessible(true);
                   }
-
-                  oldHoverEventCtor.setAccessible(true);
+                  break;
                }
             }
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("ChatCompat reflection failed", e);
+         } catch (Throwable t) {
+            VoxLinkMod.LOGGER.debug("ChatCompat legacy init failed", t);
          }
-      }
-   }
-
-   private static Object tryByName(Class<?> actionClass, String name) {
-      try {
-         Method byName = actionClass.getMethod("byName", String.class);
-         return byName.invoke(null, name);
-      } catch (Exception e) {
-         return null;
       }
    }
 }

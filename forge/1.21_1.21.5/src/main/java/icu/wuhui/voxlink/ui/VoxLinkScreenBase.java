@@ -93,11 +93,11 @@ public abstract class VoxLinkScreenBase extends Screen {
    }
 
    protected void drawCenteredClipped(GuiGraphics graphics, String text, int centerX, int y, int color) {
-      this.drawCenteredClipped(graphics, text, centerX, y, color, this.width - 20);
+      this.drawCenteredClipped(graphics, text, centerX, y, color, this.width - MARGIN_X);
    }
 
    protected void drawTitle(GuiGraphics graphics, int y) {
-      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, -1, this.width - 20);
+      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, VoxLinkColors.TITLE, this.width - MARGIN_X);
    }
 
    protected void drawCenteredComponent(GuiGraphics graphics, Component component, int centerX, int y, int color) {
