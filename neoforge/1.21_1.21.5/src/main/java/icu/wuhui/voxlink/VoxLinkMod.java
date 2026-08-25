@@ -1,6 +1,8 @@
 package icu.wuhui.voxlink;
 
 import icu.wuhui.voxlink.command.LanCommandRegistry;
+import icu.wuhui.voxlink.command.LanHostRegistry;
+import icu.wuhui.voxlink.config.LogUploadState;
 import icu.wuhui.voxlink.config.VoxLinkConfig;
 import icu.wuhui.voxlink.network.P2PBridge;
 import icu.wuhui.voxlink.network.PeerServer;
@@ -41,6 +43,8 @@ public class VoxLinkMod {
         LOGGER.info("VoxLink NeoForge initializing (dist={})", FMLEnvironment.dist);
 
         config = VoxLinkConfig.load();
+        // 日志上传默认关闭：内存开关以持久化配置初始化（用户在 GUI 主动开启后行为如旧）
+        LogUploadState.setLogUploadEnabled(config.isLogUploadEnabled());
         //debounce SignalingClient构造失败不崩整个mod 客户端联机功能退化但不影响游戏
         try {
             signalingClient = new SignalingClient(config);
@@ -80,6 +84,7 @@ public class VoxLinkMod {
     private static void onServerStopping(ServerStoppingEvent event) {
         if (event.getServer() instanceof net.minecraft.client.server.IntegratedServer) {
             VoxLinkMod.LOGGER.info("Built-in server stopped, leaving room (network kept)");
+            LanHostRegistry.clear();
             if (roomManager != null && roomManager.isInRoom()) {
                 roomManager.leaveRoom();
             }

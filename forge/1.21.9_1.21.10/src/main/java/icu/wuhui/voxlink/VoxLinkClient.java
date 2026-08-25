@@ -1,5 +1,6 @@
 package icu.wuhui.voxlink;
 
+import icu.wuhui.voxlink.command.LanHostRegistry;
 import icu.wuhui.voxlink.network.ConnectionHelper;
 import icu.wuhui.voxlink.network.PeerServer;
 import icu.wuhui.voxlink.network.SignalingClient;
@@ -96,6 +97,12 @@ public class VoxLinkClient {
                 event.getServer().setUsesAuthentication(false);
                 VoxLinkMod.LOGGER.info("Host room offline mode enabled");
             }
+
+        // P0 安全修复：集成服务器启动后在服务端线程上安排"启动快照"捕获
+        // （此刻场上只有房主本人，后来者不在快照中 → LAN 主机特权按快照 UUID 判定）
+        if (event.getServer() instanceof IntegratedServer) {
+            LanHostRegistry.scheduleCapture(event.getServer());
+        }
         }
     }
 

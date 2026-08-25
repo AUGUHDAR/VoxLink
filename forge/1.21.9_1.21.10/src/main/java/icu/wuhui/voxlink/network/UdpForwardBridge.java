@@ -132,7 +132,8 @@ public class UdpForwardBridge implements AutoCloseable {
          int payloadLen = envelope.length - PORT_HEADER_LEN;
          byte[] payload = new byte[payloadLen];
          System.arraycopy(envelope, PORT_HEADER_LEN, payload, 0, payloadLen);
-         InetSocketAddress target = UdpForwardBridge.this.hostSide ? this.localService : this.localService;
+         // 清理死三元表达式：原 `hostSide ? this.localService : this.localService` 两分支相同
+         InetSocketAddress target = this.localService;
          if (target == null) {
             target = new InetSocketAddress(InetAddress.getLoopbackAddress(), this.port);
          }

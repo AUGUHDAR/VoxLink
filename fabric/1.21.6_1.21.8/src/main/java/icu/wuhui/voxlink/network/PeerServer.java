@@ -15,6 +15,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -73,7 +74,9 @@ public class PeerServer {
             }
 
             RoomInfo room = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
-            if (room != null && token != null && token.equals(room.getToken())) {
+            // 安全修复：token 比较改常量时间（防 HTTP 接口 timing 侧信道逐字节猜测房间令牌）
+            boolean tokenValid = room != null && token != null && MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), room.getToken().getBytes(StandardCharsets.UTF_8));
+            if (tokenValid) {
                JsonObject info = buildInfo();
                byte[] data = GSON.toJson(info).getBytes(StandardCharsets.UTF_8);
                exchange.getResponseHeaders().set("Content-Type", "application/json");

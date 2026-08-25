@@ -19,6 +19,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.atomic.AtomicBoolean;
+import icu.wuhui.voxlink.room.ConnectionState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +36,7 @@ public class P2PBridge {
    private static final int AWAIT_SEC = 3;
    private static final int AWAIT_FINAL_SEC = 1;
    private static final int RETRY_DELAY_MS = 500;
+   private static final int FIRST_PACKET_WATCHDOG_MS = 30000;
    private static final AtomicBoolean running = new AtomicBoolean(false);
    private static final AtomicBoolean cancelled = new AtomicBoolean(false);
    private static volatile ExecutorService bridgeExecutor;
@@ -71,6 +73,14 @@ public class P2PBridge {
 
       return CompletableFuture.supplyAsync(() -> {
          try {
+            // 暴露面说明（本次仅分析、未改绑定，结论见下）：
+            // 该端口必须保持 0.0.0.0 绑定——它是"直连模式/ConnectionFallback"的入站数据面：
+            // 加入方通过 connectToHost(hostIp, hostPort) 从公网主动 TCP 连入房主的
+            // bridge 端口（该端口经信令 holepunch_offer.hostPort 对端可见），
+            // 改绑 127.0.0.1 会直接打断全部远程直连场景，属于功能回归。
+            // 实际暴露面：任意主机可连入此端口并借由桥接到本机 MC 服务端口；
+            // 鉴权依赖 MC 自身（在线模式/房间白名单），桥本身不额外鉴权。
+            // 缓解现状：端口为临时端口（ServerSocket(0)）、仅在开房期间存活。
             ServerSocket ss = new ServerSocket(0, 50, InetAddress.getByName("0.0.0.0"));
             int bridgePort = ss.getLocalPort();
             LOGGER.info("Host bridge listening on port {}, forwarding to MC port {}", bridgePort, minecraftPort);
@@ -181,7 +191,7 @@ public class P2PBridge {
          }
 
          try {
-            LOGGER.info("Joiner: connecting to host {}:{} (attempt {}/{})", new Object[]{hostIp, hostPort, attempt + 1, 4});
+            LOGGER.info("Joiner: connecting to host {}:{} (attempt {}/{})", new Object[]{hostIp, hostPort, attempt + 1, MAX_RETRY + 1});
             Socket hostSocket = tryConnectWithRetry(hostIp, hostPort);
             if (hostSocket == null) {
                LOGGER.error("Joiner: failed to connect to host {}:{}", hostIp, hostPort);
@@ -208,7 +218,7 @@ public class P2PBridge {
             exec.submit(() -> acceptJoinerConnectionPreconnected(serv, hostSocket));
             return jpx;
          } catch (IOException e) {
-            LOGGER.error("Joiner: failed to create local bridge (attempt {}/{}): {}", new Object[]{attempt + 1, 4, e.getMessage()});
+            LOGGER.error("Joiner: failed to create local bridge (attempt {}/{}): {}", new Object[]{attempt + 1, MAX_RETRY + 1, e.getMessage()});
             running.set(false);
             return -1;
          }
@@ -284,7 +294,7 @@ public class P2PBridge {
          }
 
          try {
-            LOGGER.info("Joiner: connecting to host [{}]:{} (attempt {}/{})", new Object[]{hostIpv6, hostPort, attempt + 1, 4});
+            LOGGER.info("Joiner: connecting to host [{}]:{} (attempt {}/{})", new Object[]{hostIpv6, hostPort, attempt + 1, MAX_RETRY + 1});
             Socket hostSocket = tryConnectWithRetry(hostIpv6, hostPort);
             if (hostSocket == null) {
                LOGGER.error("Joiner: failed to connect to host [{}]:{}", hostIpv6, hostPort);
@@ -311,7 +321,7 @@ public class P2PBridge {
             exec.submit(() -> acceptJoinerConnectionPreconnected(serv, hostSocket));
             return jpx;
          } catch (IOException e) {
-            LOGGER.error("Joiner: failed to create IPv6 local bridge (attempt {}/{}): {}", new Object[]{attempt + 1, 4, e.getMessage()});
+            LOGGER.error("Joiner: failed to create IPv6 local bridge (attempt {}/{}): {}", new Object[]{attempt + 1, MAX_RETRY + 1, e.getMessage()});
             running.set(false);
             return -1;
          }
@@ -879,10 +889,14 @@ public class P2PBridge {
                   byte[] firstBuf = new byte[32768];
                   Thread firstPacketWatchdog = new Thread(() -> {
                      try {
-                        Thread.sleep(15000L);
+                        Thread.sleep(FIRST_PACKET_WATCHDOG_MS);
                         if (!firstPacketArrived.get() && transport.isConnected() && running.get()) {
-                           LOGGER.warn("UDP host bridge for client {} first packet timeout (15s), request ICE restart", clientId);
-                           transport.requestIceRestart();
+                           if (ConnectionState.getCurrent() == ConnectionState.CONNECTED) {
+                              LOGGER.info("UDP host bridge for client {} idle {}s, session active on other channel, skip ICE restart", clientId, FIRST_PACKET_WATCHDOG_MS / 1000);
+                           } else {
+                              LOGGER.warn("UDP host bridge for client {} first packet timeout ({}s), request ICE restart", clientId, FIRST_PACKET_WATCHDOG_MS / 1000);
+                              transport.requestIceRestart();
+                           }
                         }
                      } catch (InterruptedException var3) {
                      }

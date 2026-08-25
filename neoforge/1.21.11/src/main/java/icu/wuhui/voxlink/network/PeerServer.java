@@ -3,6 +3,7 @@ package icu.wuhui.voxlink.network;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpServer;
+import java.security.MessageDigest;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.compat.GeyserCompat;
 import icu.wuhui.voxlink.compat.ViaCompat;
@@ -66,7 +67,10 @@ public class PeerServer {
                     }
                 }
                 RoomInfo room = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
-                if (room == null || token == null || !token.equals(room.getToken())) {
+                // 安全修复：token 比较改常量时间（防 HTTP 接口 timing 侧信道逐字节猜测房间令牌）
+                boolean tokenValid = room != null && token != null
+                        && MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), room.getToken().getBytes(StandardCharsets.UTF_8));
+                if (!tokenValid) {
                     byte[] err = "{\"error\":\"unauthorized\"}".getBytes(StandardCharsets.UTF_8);
                     exchange.getResponseHeaders().set("Content-Type", "application/json");
                     exchange.sendResponseHeaders(403, err.length);

@@ -14,6 +14,7 @@ import icu.wuhui.voxlink.network.P2PBridge;
 import icu.wuhui.voxlink.network.PortPredictor;
 import icu.wuhui.voxlink.network.ProtocolNegotiator;
 import icu.wuhui.voxlink.network.PunchFailureClassifier;
+import icu.wuhui.voxlink.network.PunchAuth;
 import icu.wuhui.voxlink.network.PunchParams;
 import icu.wuhui.voxlink.network.PunchProfile;
 import icu.wuhui.voxlink.network.PunchResult;
@@ -126,11 +127,9 @@ public class ConnectionManager {
    private volatile int connectionTimeoutSec;
    private volatile StunProbe.ProbeResult stunProbeResult;
    private final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
-   private volatile String lastPunchInfoId = "";
    private volatile List<Integer> lastHostMappedPorts;
-   private volatile boolean hostPunching = false;
    private static final int TARGET_CHANGE_IGNORE_MS = 3000;
-   private volatile long lastPunchStartMs = 0L;
+   private final java.util.concurrent.ConcurrentHashMap<String, ConnectionManager.HostPunchContext> hostPunchContexts = new java.util.concurrent.ConcurrentHashMap<>();
    private volatile boolean relayConnectedSignaled = false;
    private static final int RELAY_REGISTRATION_RENEWAL_SEC = 60;
    private volatile CompletableFuture<Void> dualVoxlinkBridgeFuture;
@@ -154,7 +153,9 @@ public class ConnectionManager {
    private static final int PUNCH_INFO_WAIT_TIMEOUT_S = 15;
    private static final long[] BACKOFF_DELAYS_MS = new long[]{1000L, 2000L, 4000L};
    private static final int JOIN_QUEUE_RETRY_SEC = 10;
-   private final AddressBlacklist addressBlacklist = new AddressBlacklist();
+   private final AddressBlacklist addressBlacklist = AddressBlacklist.get();
+   // punchAuthV1：当前连接周期的打洞认证密钥（applyPunchTemplate 注入每个 puncher）
+   private volatile byte[] activePunchAuthKey;
    private volatile ConnectionManager.UdpSocketArray cachedUdpArray;
    private static final long UDP_ARRAY_REUSE_WINDOW_MS = 30000L;
    private static volatile ConnectionManager instance;
@@ -378,6 +379,50 @@ public class ConnectionManager {
       if (puncher != null) {
          puncher.setProfile(this.punchProfile());
          puncher.setPunchParams(this.activePunchParams);
+         // punchAuthV1：双方声明能力时启用打洞控制面 MAC 认证；否则 null=旧线上格式
+         puncher.setAuthKey(this.activePunchAuthKey);
+      }
+   }
+
+   /**
+    * punchAuthV1 密钥派生（直连 host↔joiner 链路）：
+    * key = SHA-256(tag || roomToken || joinerClientId)，两端可独立、无损地算出同一密钥。
+    * 激活门控 = 对端能力表含 punchAuthV1（host 视角查 joiner 能力，joiner 视角查房主能力）。
+    * 任一端为旧版本 → 返回 null，完全走旧格式（互操作不回归）。
+    */
+   private byte[] derivePunchAuthKey(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
+      try {
+         if (state == null || state.roomInfo == null) {
+            return null;
+         }
+
+         boolean peerSupports;
+         if (peerIsHost) {
+            peerSupports = ProtocolNegotiator.hostSupportsPunchAuth(state.roomInfo);
+         } else {
+            RoomInfo.PeerInfo peer = state.roomInfo.getPeer(peerClientId);
+            peerSupports = ProtocolNegotiator.supportsPunchAuth(peer);
+         }
+
+         if (!peerSupports) {
+            return null;
+         }
+
+         // 密钥材料=房间码+加入者ID（两端一致；token 两端不同不可用）
+         String code = state.roomInfo.getCode();
+         String joinerId = peerIsHost ? state.roomInfo.getClientId() : peerClientId;
+         return PunchAuth.deriveDirectKey(code, joinerId);
+      } catch (Exception e) {
+         return null;
+      }
+   }
+
+   /** 装载当前连接周期的打洞认证密钥（在打洞发起前的信令处理点调用）。 */
+   private void setupPunchAuthForPeer(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
+      byte[] key = this.derivePunchAuthKey(state, peerClientId, peerIsHost);
+      this.activePunchAuthKey = key;
+      if (key != null) {
+         VoxLinkMod.LOGGER.info("[PunchAuth] Auth mode armed for peer {} ({})", new Object[]{peerClientId != null ? peerClientId : "host", peerIsHost ? "isHost" : "isJoiner"});
       }
    }
 
@@ -411,7 +456,7 @@ public class ConnectionManager {
       return this.connectionCycleActive.get();
    }
    public boolean isConnectionActive() {
-      return this.connectionCycleActive.get() || this.hostPunching || this.connectionWon.get() || this.continuousRetryRound.get() > 0;
+      return this.connectionCycleActive.get() || this.isAnyHostPunching() || this.connectionWon.get() || this.continuousRetryRound.get() > 0;
    }
 
    public StunProbe.ProbeResult getStunProbeResult() {
@@ -514,7 +559,7 @@ public class ConnectionManager {
    }
 
    public void clearHostPunchingState() {
-      this.hostPunching = false;
+      this.clearHostPunchContexts();
       UdpHolePuncher hp = this.activeHolePunchers.remove("host");
       if (hp != null) {
          try {
@@ -553,8 +598,7 @@ public class ConnectionManager {
       }
 
       this.activeHolePunchers.clear();
-      this.hostPunching = false;
-      this.lastPunchInfoId = "";
+      this.clearHostPunchContexts();
       if (this.dualRaceActive && !this.terracottaWon) {
          this.killAllConnectionAttempts("terracotta");
       }
@@ -585,8 +629,7 @@ public class ConnectionManager {
       }
 
       this.activeHolePunchers.clear();
-      this.hostPunching = false;
-      this.lastPunchInfoId = "";
+      this.clearHostPunchContexts();
    }
 
    public boolean canShowRelayButton() {
@@ -694,8 +737,7 @@ public class ConnectionManager {
    }
 
    public void stopAllConnectionWork() {
-      this.hostPunching = false;
-      this.lastPunchInfoId = "";
+      this.clearHostPunchContexts();
       this.cancelAllFallbacks();
 
       for (UdpHolePuncher puncher : this.activeHolePunchers.values()) {
@@ -754,9 +796,11 @@ public class ConnectionManager {
 
             state.roomInfo.addOrUpdatePeer(from, null, null, 0, joinerProto, joinerCaps);
             VoxLinkMod.LOGGER.info("[handleJoinRequest] joiner={} capability: v{} caps={}", new Object[]{from, joinerProto, joinerCaps});
+            // punchAuthV1：joiner 声明了能力才启用打洞/数据面 MAC 认证（host 视角）
+            this.setupPunchAuthForPeer(state, from, false);
          }
 
-         if (!this.hostPunching && !this.activeHolePunchers.containsKey("host")) {
+         if (!this.isAnyHostPunching() && !this.activeHolePunchers.containsKey("host")) {
             String hostIp = state.roomInfo.getHostIp();
             String hostIpv6 = state.roomInfo.getHostIpv6();
             boolean needIp = hostIp == null || hostIp.isEmpty();
@@ -985,15 +1029,20 @@ public class ConnectionManager {
                boolean punchSocketSymmetric = false;
                boolean symOrUnknown = fIsSymmetricOrUnknown;
                if (mapped1 != null && mapped2 != null) {
-                  if (mapped1.port() != mapped2.port()) {
+                  boolean sameFamily = sameIpFamily(mapped1.ip(), mapped2.ip());
+                  if (sameFamily && mapped1.port() != mapped2.port()) {
                      punchSocketSymmetric = true;
                      VoxLinkMod.LOGGER.info("[RoomManager] Punch socket STUN: symmetric NAT ({} vs {})", mapped1.port(), mapped2.port());
-                  } else if (symOrUnknown && !StunDetector.isNatTypeSymmetric(fNatType)) {
+                  } else if (sameFamily && symOrUnknown && !StunDetector.isNatTypeSymmetric(fNatType)) {
                      VoxLinkMod.LOGGER.info("[RoomManager] Punch socket STUN: same port {}, override isSymmetricOrUnknown (was {})", mapped1.port(), fNatType);
                      symOrUnknown = false;
+                  } else if (!sameFamily) {
+                     VoxLinkMod.LOGGER.info("[RoomManager] Punch socket STUN: mixed IP family ({} vs {}), skip symmetric compare", mapped1.ip(), mapped2.ip());
                   }
 
-                  mapped = mapped2;
+                  mapped = mapped1.ip().contains(":") != mapped2.ip().contains(":")
+                     ? (mapped1.ip().contains(":") ? mapped2 : mapped1)
+                     : mapped2;
                } else {
                   mapped = mapped1 != null ? mapped1 : mapped2;
                }
@@ -1030,7 +1079,7 @@ public class ConnectionManager {
                      fOfferData.addProperty("hostEasySym", true);
                   }
 
-                  if (mapped1 != null && mapped2 != null && mapped1.port() != mapped2.port()) {
+                  if (punchSocketSymmetric) {
                      int delta = mapped2.port() - mapped1.port();
                      int portRange = this.punchProfile().maxPortRange;
                      if (fHostPuncher != null && fHostPuncher.getSocket() != null) {
@@ -1110,7 +1159,8 @@ public class ConnectionManager {
                   });
                String waitClientId = fFrom;
                this.scheduler.schedule(() -> {
-                  if (!this.hostPunching && this.activeHolePunchers.containsKey("host")) {
+                  ConnectionManager.HostPunchContext waitCtx = this.hostPunchContexts.get(waitClientId);
+                  if ((waitCtx == null || !waitCtx.punching) && this.activeHolePunchers.containsKey("host")) {
                      UdpHolePuncher hp = this.activeHolePunchers.remove("host");
                      if (hp != null) {
                         try {
@@ -1119,8 +1169,9 @@ public class ConnectionManager {
                         }
                      }
 
-                     this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("host_"));
-                     this.lastPunchInfoId = "";
+                     String waitPrefix = this.peerPunchPrefix(waitClientId);
+                     this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith(waitPrefix));
+                     this.hostPunchContexts.remove(waitClientId);
                      VoxLinkMod.LOGGER.info("[RoomManager] Wait punch_info timeout ({}s), cleanup host socket client={}", 15, waitClientId);
                   }
                }, 15L, TimeUnit.SECONDS);
@@ -1132,6 +1183,8 @@ public class ConnectionManager {
       RoomManager.RoomState state = this.roomManager.currentRoom.get();
       VoxLinkMod.LOGGER.info("[RoomManager] Received holepunch_offer, state={}", state != null && state != RoomManager.PENDING ? "active" : "null/pending");
       if (state != null && state != RoomManager.PENDING && !state.roomInfo.isHost()) {
+         // punchAuthV1：房主声明了能力才启用打洞/数据面 MAC 认证（joiner 视角）
+         this.setupPunchAuthForPeer(state, null, true);
          if (this.voxlinkSideDisabled || this.terracottaWon) {
             VoxLinkMod.LOGGER.info("[DualP2P] VoxLink disabled or Terracotta won, ignore holepunch_offer");
          } else if (this.connectionWon.get() && P2PBridge.isRunning()) {
@@ -1319,8 +1372,8 @@ public class ConnectionManager {
       }
 
       if (this.connectionWon.get() || this.connectionCycleActive.get()) {
-         this.localNatClass = this.classifyLocalNat();
-         this.remoteNatClass = this.classifyRemoteNat(state);
+         this.applyLocalNatClass(this.classifyLocalNat(), "probe_done");
+         this.applyRemoteNatClass(this.classifyRemoteNat(state), "probe_done");
          PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
          this.switchPunchProfile(recommended, "probe_done_" + this.localNatClass + "x" + this.remoteNatClass);
          VoxLinkMod.LOGGER
@@ -1471,7 +1524,7 @@ public class ConnectionManager {
             if (hostSymmetric) {
                state.roomInfo.setHostSymmetric(true);
                NatClass newRemote = hostEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
-               this.remoteNatClass = newRemote;
+               this.applyRemoteNatClass(newRemote, "host_symmetric");
                VoxLinkMod.LOGGER.info("[handleHolepunchMapped] Update remoteNat {} -> {} (sym=true)", NatClass.CONE, newRemote);
                ScenarioTier.Tier prevTier = this.scenarioTier;
                int rReach = this.stunProbeResult != null ? this.stunProbeResult.reachableStunUrls.size() : 0;
@@ -1568,7 +1621,9 @@ public class ConnectionManager {
                   }
                }
 
-               int maxExtra = Math.min(hostMappedPorts.size(), 6);
+               // 同CGNAT回环命中率低, 加密生日端口覆盖
+               int maxExtraCap = state.roomInfo.isSameCgnat() ? 12 : 6;
+               int maxExtra = Math.min(hostMappedPorts.size(), maxExtraCap);
 
                for (int i = 1; i < maxExtra; i++) {
                   int fIdx = i;
@@ -1680,7 +1735,6 @@ public class ConnectionManager {
    }
 
    public void handleHostPunchInfo(RoomManager.RoomState state, String from, JsonObject data) {
-      this.activePunchParams = null;
       String joinerMappedIp = data.has("joinerMappedIp") ? data.get("joinerMappedIp").getAsString() : null;
       int joinerMappedPort = data.has("joinerMappedPort") ? data.get("joinerMappedPort").getAsInt() : 0;
       int joinerMappedPortDelta = data.has("joinerMappedPortDelta") && !data.get("joinerMappedPortDelta").isJsonNull()
@@ -1710,6 +1764,8 @@ public class ConnectionManager {
             );
       }
 
+      ConnectionManager.HostPunchContext ctx = this.hostPunchContext(from);
+      String peerPrefix = this.peerPunchPrefix(from);
       boolean isActive = false;
 
       for (UdpHolePuncher existing : this.activeHolePunchers.values()) {
@@ -1720,22 +1776,22 @@ public class ConnectionManager {
       }
 
       if (!isActive) {
-         long punchAgeMs = System.currentTimeMillis() - this.lastPunchStartMs;
+         long punchAgeMs = System.currentTimeMillis() - ctx.punchStartMs;
          boolean hostGroupAlive = false;
 
          for (String key : this.activeHolePunchers.keySet()) {
-            if (key.startsWith("host_")) {
+            if (key.startsWith(peerPrefix)) {
                hostGroupAlive = true;
                break;
             }
          }
 
-         if (punchAgeMs >= 0L && punchAgeMs < 120000L && hostGroupAlive && this.lastPunchInfoId != null && !this.lastPunchInfoId.isEmpty()) {
+         if (punchAgeMs >= 0L && punchAgeMs < 120000L && hostGroupAlive && ctx.punchInfoId != null && !ctx.punchInfoId.isEmpty()) {
             isActive = true;
          }
       }
 
-      this.hostPunching = isActive;
+      ctx.punching = isActive;
       VoxLinkMod.LOGGER
          .info(
             "[HostPunchInfo] called: joinerMapped={}:{}, delta={}, hostPunching={}, bridgeRunning={}, hostSym={}",
@@ -1743,7 +1799,7 @@ public class ConnectionManager {
                joinerMappedIp,
                joinerMappedPort,
                joinerMappedPortDelta,
-               this.hostPunching,
+               ctx.punching,
                P2PBridge.isRunning(),
                state.roomInfo.isHostSymmetric()
             }
@@ -1754,17 +1810,17 @@ public class ConnectionManager {
          VoxLinkMod.LOGGER.debug("[HostPunchInfo] already connected, ignoring punch_info");
       } else {
          String punchInfoId = joinerMappedIp + ":" + joinerMappedPort;
-         if (this.hostPunching) {
-            if (punchInfoId.equals(this.lastPunchInfoId)) {
+         if (ctx.punching) {
+            if (punchInfoId.equals(ctx.punchInfoId)) {
                VoxLinkMod.LOGGER.debug("[RoomManager] Already punching same target, ignore duplicate punch_info");
                return;
             }
 
-            if (System.currentTimeMillis() - this.lastPunchStartMs < 3000L) {
+            if (System.currentTimeMillis() - ctx.punchStartMs < 3000L) {
                VoxLinkMod.LOGGER
                   .info(
                      "[RoomManager] Already punching, target changed ({} -> {}) within {}ms, ignore to avoid CGNAT IP switch false restart",
-                     new Object[]{this.lastPunchInfoId, punchInfoId, 3000}
+                     new Object[]{ctx.punchInfoId, punchInfoId, 3000}
                   );
                return;
             }
@@ -1772,12 +1828,12 @@ public class ConnectionManager {
             VoxLinkMod.LOGGER
                .info(
                   "[RoomManager] Punching {}ms no success, target changed ({} -> {}), restart with new target",
-                  new Object[]{System.currentTimeMillis() - this.lastPunchStartMs, this.lastPunchInfoId, punchInfoId}
+                  new Object[]{System.currentTimeMillis() - ctx.punchStartMs, ctx.punchInfoId, punchInfoId}
                );
 
-            String[] lastParts = this.lastPunchInfoId.split(":");
+            String[] lastParts = ctx.punchInfoId.split(":");
             if (lastParts.length == 2 && lastParts[0].equals(joinerMappedIp)) {
-               this.lastPunchInfoId = punchInfoId;
+               ctx.punchInfoId = punchInfoId;
 
                for (UdpHolePuncher hp : this.activeHolePunchers.values()) {
                   if (hp != null && hp.getSocket() != null && !hp.getSocket().isClosed()) {
@@ -1793,9 +1849,10 @@ public class ConnectionManager {
                return;
             }
 
-            this.hostPunching = false;
+            ctx.punching = false;
+            String fCtxPrefix = peerPrefix;
             this.activeHolePunchers.entrySet().removeIf(e -> {
-               if (e.getKey().startsWith("host_")) {
+               if (e.getKey().startsWith(fCtxPrefix)) {
                   UdpHolePuncher p = e.getValue();
                   if (p != null) {
                      try {
@@ -1816,7 +1873,7 @@ public class ConnectionManager {
             });
          }
 
-         this.lastPunchInfoId = punchInfoId;
+         ctx.punchInfoId = punchInfoId;
          LogUploadManager.schedulePunchUpload();
          VoxLinkMod.LOGGER.info("[RoomManager] Received punch_info from {}: {}:{}", new Object[]{from, joinerMappedIp, joinerMappedPort});
          boolean isHostSym = StunDetector.isNatTypeSymmetric(state.roomInfo.getNatType());
@@ -1925,7 +1982,7 @@ public class ConnectionManager {
                   }
 
                   hostPunchers.add(p);
-                  this.activeHolePunchers.put("host_" + i, p);
+                  this.activeHolePunchers.put("hp_" + fFrom + "_" + i, p);
                   createdCount++;
                   UdpHolePuncher fp = p;
                   int idx = i;
@@ -2036,8 +2093,9 @@ public class ConnectionManager {
                       NatClass newLocal = hostPunchEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
                       if (this.localNatClass != newLocal) {
                          VoxLinkMod.LOGGER.info("[HostPunchInfo] Update localNat {} -> {} (multi-socket symmetric detected, delta={})", new Object[]{this.localNatClass, newLocal, hostPunchSocketDelta});
-                         this.localNatClass = newLocal;
-                         this.remoteNatClass = this.classifyRemoteNat(fState);
+                         if (this.applyLocalNatClass(newLocal, "multi_socket_sym")) {
+                            this.applyRemoteNatClass(this.classifyRemoteNat(fState), "multi_socket_sym");
+                         }
                          // 用新 NAT 类重算硬场景档位，确保硬档仍走 V100 而非被降级为 AGGRESSIVE/DEFAULT
                          ScenarioTier.Tier prevTier = this.scenarioTier;
                          this.scenarioTier = ScenarioTier.classify(
@@ -2073,7 +2131,7 @@ public class ConnectionManager {
                            ep.setPunchParams(eparams);
                            ep.createSocket();
                            hostPunchers.add(ep);
-                           this.activeHolePunchers.put("host_" + (hostPunchers.size() - 1), ep);
+                           this.activeHolePunchers.put("hp_" + fFrom + "_" + (hostPunchers.size() - 1), ep);
                         } catch (Exception e) {
                            VoxLinkMod.LOGGER.debug("[HostPunchInfo] extra socket create failed: {}", e.getMessage());
                         }
@@ -2121,8 +2179,8 @@ public class ConnectionManager {
                         VoxLinkMod.LOGGER.debug("holepunch_mapped send failed: {}", e.getMessage());
                         return null;
                      });
-                  this.hostPunching = true;
-                  this.lastPunchStartMs = System.currentTimeMillis();
+                  this.hostPunchContext(fFrom).punching = true;
+                  this.hostPunchContext(fFrom).punchStartMs = System.currentTimeMillis();
                   String clientId = fFrom;
                   ConnectionState.transitionTo(ConnectionState.UDP_PUNCH, "Host开始打洞 client=" + clientId);
                   AtomicBoolean hostPunchWon = new AtomicBoolean(false);
@@ -2142,12 +2200,14 @@ public class ConnectionManager {
                   }
 
                   ScheduledFuture<?> punchTimeout = this.scheduler.schedule(() -> {
-                     if (this.hostPunching) {
+                     ConnectionManager.HostPunchContext timeoutCtx = this.hostPunchContexts.get(clientId);
+                     if (timeoutCtx != null && timeoutCtx.punching) {
                         VoxLinkMod.LOGGER.info("[HostPunchInfo] 120s fallback cleanup host socket client={}", clientId);
-                        this.hostPunching = false;
-                        this.lastPunchInfoId = "";
+                        timeoutCtx.punching = false;
                         this.activeHolePunchers.remove("host");
-                        this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("host_"));
+                        String timeoutPrefix = this.peerPunchPrefix(clientId);
+                        this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith(timeoutPrefix));
+                        this.hostPunchContexts.remove(clientId);
 
                         for (UdpHolePuncher px : hostPunchers) {
                            try {
@@ -2198,7 +2258,7 @@ public class ConnectionManager {
                      long punchGroupDeadline = System.currentTimeMillis() + 120000L;
 
                      while (!this.connectionWon.get() && this.roomManager.currentRoom.get() == fState && System.currentTimeMillis() < punchGroupDeadline) {
-                        if (hostDriftSync && this.hostPunching && !mappedAddrs.isEmpty()) {
+                        if (hostDriftSync && this.hostPunchContext(fFrom).punching && !mappedAddrs.isEmpty()) {
                            long nowMs = System.currentTimeMillis();
                            long driftElapsed = nowMs - driftStartMs;
                            if (nowMs - driftLastSentMs >= 3000L && driftElapsed < driftMaxDurMs) {
@@ -2506,8 +2566,9 @@ public class ConnectionManager {
                               if (this.localNatClass != newLocal) {
                                  VoxLinkMod.LOGGER
                                     .info("[ReversePunch] Update localNat {} -> {} (reverse socket symmetric detected)", this.localNatClass, newLocal);
-                                 this.localNatClass = newLocal;
-                                 this.remoteNatClass = this.classifyRemoteNat(fState);
+                                 if (this.applyLocalNatClass(newLocal, "reverse_socket_sym")) {
+                                    this.applyRemoteNatClass(this.classifyRemoteNat(fState), "reverse_socket_sym");
+                                 }
                                  // 用新 NAT 类重算硬场景档位，确保硬档仍走 V100 而非被降级为 AGGRESSIVE/DEFAULT
                                  ScenarioTier.Tier prevTier = this.scenarioTier;
                                  this.scenarioTier = ScenarioTier.classify(
@@ -2577,7 +2638,12 @@ public class ConnectionManager {
                                hostPortRange = this.punchProfile().widePortRange;
                             } else if (hostSymmetric) {
                                hostPortRange = this.punchProfile().defaultPortRange;
-                           } else if (!"moderate".equals(hostNat) && !"port_restricted_cone".equals(hostNat)) {
+                               // 对称NAT反向socket端口随目标漂移, 按实测delta扩预测带宽
+                               if (Math.abs(hostRevDelta) > hostPortRange) {
+                                  hostPortRange = Math.min(Math.abs(hostRevDelta) * 2, this.punchProfile().maxPortRange);
+                                  VoxLinkMod.LOGGER.info("[ReversePunch] host sym delta {} exceeds range, expand to ±{}", hostRevDelta, hostPortRange);
+                               }
+                            } else if (!"moderate".equals(hostNat) && !"port_restricted_cone".equals(hostNat)) {
                                hostPortRange = this.punchProfile().defaultPortRange;
                             } else {
                                hostPortRange = this.punchProfile().portPredictionMaxRange;
@@ -2832,6 +2898,11 @@ public class ConnectionManager {
                            VoxLinkMod.LOGGER.info("[ReversePunch] Joiner is symmetric NAT — use small range (±30) to open NAT mapping");
                         } else if (hostSymmetric) {
                            portRange = this.punchProfile().portPredictionMaxRange;
+                           int hostDelta = state.roomInfo.getHostMappedPortDelta();
+                           if (hostDelta > portRange) {
+                              portRange = Math.min(hostDelta * 2, this.punchProfile().maxPortRange);
+                              VoxLinkMod.LOGGER.info("[ReversePunch] host sym delta {} exceeds range, expand to ±{}", hostDelta, portRange);
+                           }
                         } else {
                            portRange = this.punchProfile().defaultPortRange;
                         }
@@ -2990,6 +3061,72 @@ public class ConnectionManager {
       }
    }
 
+   private static final class HostPunchContext {
+      volatile String punchInfoId = "";
+      volatile long punchStartMs = 0L;
+      volatile boolean punching = false;
+   }
+
+   private String peerPunchPrefix(String peerId) {
+      return "hp_" + peerId + "_";
+   }
+
+   private ConnectionManager.HostPunchContext hostPunchContext(String peerId) {
+      return this.hostPunchContexts.computeIfAbsent(peerId != null ? peerId : "", k -> new ConnectionManager.HostPunchContext());
+   }
+
+   private boolean isAnyHostPunching() {
+      for (ConnectionManager.HostPunchContext c : this.hostPunchContexts.values()) {
+         if (c.punching) {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   private void clearHostPunchContexts() {
+      this.hostPunchContexts.clear();
+   }
+
+   private static int natRank(NatClass c) {
+      switch (c) {
+         case CONE:
+            return 1;
+         case EASY_SYM:
+            return 2;
+         case HARD_SYM:
+            return 3;
+         default:
+            return 0;
+      }
+   }
+
+   private boolean applyLocalNatClass(NatClass next, String reason) {
+      if (next == null || natRank(next) <= natRank(this.localNatClass)) {
+         return false;
+      } else {
+         VoxLinkMod.LOGGER.info("[Connection] Update localNat {} -> {} ({})", this.localNatClass, next, reason);
+         this.localNatClass = next;
+         // NAT认知升级后旧调参作废, 重学避免错误基线贯穿
+         this.activePunchParams = null;
+         this.lastPunchResult = null;
+         return true;
+      }
+   }
+
+   private boolean applyRemoteNatClass(NatClass next, String reason) {
+      if (next == null || natRank(next) <= natRank(this.remoteNatClass)) {
+         return false;
+      } else {
+         VoxLinkMod.LOGGER.info("[Connection] Update remoteNat {} -> {} ({})", this.remoteNatClass, next, reason);
+         this.remoteNatClass = next;
+         this.activePunchParams = null;
+         this.lastPunchResult = null;
+         return true;
+      }
+   }
+
    private NatClass classifyLocalNat() {
       return this.stunProbeResult != null && this.stunProbeResult.natType != null
          ? NatClass.fromStunProbeResult(this.stunProbeResult.natType)
@@ -3010,8 +3147,10 @@ public class ConnectionManager {
       }
    }
 
-   private boolean shouldPrefetchRelay(NatClass local, NatClass remote) {
-      return local.isSymmetric() || remote.isSymmetric();
+   private boolean shouldPrefetchRelay(NatClass local, NatClass remote, RoomManager.RoomState state) {
+      // 同CGNAT回环打洞命中率两极分化, 中继拓扑提前预热备胎
+      boolean sameCgnat = state != null && state.roomInfo != null && state.roomInfo.isSameCgnat();
+      return local.isSymmetric() || remote.isSymmetric() || sameCgnat;
    }
 
    private CompletableFuture<Void> prefetchRelayCandidates(RoomManager.RoomState state) {
@@ -3079,9 +3218,12 @@ public class ConnectionManager {
             this.connectionWon.set(false);
             ConnectionState.transitionTo(ConnectionState.STUN_PROBE, "周期" + (cycle + 1) + "/" + maxCycles);
             if (cycle == 0) {
-               this.activePunchParams = null;
-               this.localNatClass = this.classifyLocalNat();
-               this.remoteNatClass = this.classifyRemoteNat(state);
+               if (this.continuousRetryRound.get() == 0) {
+                  this.activePunchParams = null;
+               }
+
+               this.applyLocalNatClass(this.classifyLocalNat(), "cycle_start");
+               this.applyRemoteNatClass(this.classifyRemoteNat(state), "cycle_start");
                PunchProfile recommended;
                int tierReach = this.stunProbeResult != null ? this.stunProbeResult.reachableStunUrls.size() : 0;
                boolean tierLowReach = tierReach > 0 && tierReach <= 3;
@@ -3095,7 +3237,7 @@ public class ConnectionManager {
                      "[Connection] Layer1 NAT classification: local={} remote={} tier={} -> profile={}",
                      new Object[]{this.localNatClass, this.remoteNatClass, ScenarioTier.key(this.scenarioTier), this.punchProfile().describeInstance()}
                   );
-               if (this.shouldPrefetchRelay(this.localNatClass, this.remoteNatClass) && this.relayPrefetchFuture == null) {
+               if (this.shouldPrefetchRelay(this.localNatClass, this.remoteNatClass, state) && this.relayPrefetchFuture == null) {
                   this.relayPrefetchFuture = this.prefetchRelayCandidates(state).exceptionally(e -> {
                      VoxLinkMod.LOGGER.warn("[Connection] Layer2 relay pre-check failed: {}", e.getMessage());
                      return null;
@@ -3551,8 +3693,9 @@ public class ConnectionManager {
          if (joinerPunchSocketSymmetric && this.localNatClass != NatClass.HARD_SYM && this.localNatClass != NatClass.EASY_SYM) {
             NatClass newLocal = this.stunProbeResult != null && this.stunProbeResult.natType.isEasySymmetric() ? NatClass.EASY_SYM : NatClass.HARD_SYM;
             VoxLinkMod.LOGGER.info("[Connection] Update localNat {} -> {} (punch socket symmetric detected)", this.localNatClass, newLocal);
-            this.localNatClass = newLocal;
-            this.remoteNatClass = this.classifyRemoteNat(state);
+            if (this.applyLocalNatClass(newLocal, "punch_socket_sym")) {
+               this.applyRemoteNatClass(this.classifyRemoteNat(state), "punch_socket_sym");
+            }
             PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
             this.switchPunchProfile(recommended, "punch_socket_sym_" + this.localNatClass + "x" + this.remoteNatClass);
             VoxLinkMod.LOGGER
@@ -5192,8 +5335,14 @@ public class ConnectionManager {
             VoxLinkMod.LOGGER.info("[Relay] Requester {} is legacy, no relay_request response", requestingClientId);
          } else {
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player != null) {
-               mc.player.displayClientMessage(Component.translatable("voxlink.relay.host_notice"), false);
+            // 信令线程不可直调 GUI：包一层主线程调度
+            if (mc != null) {
+               mc.execute(() -> {
+                  Minecraft m = Minecraft.getInstance();
+                  if (m.player != null) {
+                     m.player.displayClientMessage(Component.translatable("voxlink.relay.host_notice"), false);
+                  }
+               });
             }
 
             RoomInfo.PeerInfo requestingPeer = state.roomInfo.getPeer(requestingClientId);
@@ -5407,9 +5556,14 @@ public class ConnectionManager {
                                        return null;
                                     });
                                  this.scheduler.schedule(() -> {
+                                    // 网络线程不可直调 GUI：包一层主线程调度
                                     Minecraft mc = Minecraft.getInstance();
-                                    if (mc.player != null) {
-                                       mc.player.displayClientMessage(Component.translatable("voxlink.relay.connected_via"), false);
+                                    if (mc != null) {
+                                       mc.execute(() -> {
+                                          if (mc.player != null) {
+                                             mc.player.displayClientMessage(Component.translatable("voxlink.relay.connected_via"), false);
+                                          }
+                                       });
                                     }
                                  }, 2L, TimeUnit.SECONDS);
                               } else {
@@ -5493,7 +5647,7 @@ public class ConnectionManager {
          VoxLinkMod.LOGGER.info("[Relay] Received relay_ready from joiner {}, mark relay connected", from);
          this.clearRelayTracking();
          this.stopAllPunchingAfterHostBridge();
-         this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("host_"));
+         this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("hp_"));
          if (this.connectionWon.compareAndSet(false, true)) {
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.connected_via").withStyle(ChatFormatting.YELLOW));
             state.roomInfo.setUsingRelay(true);
@@ -5795,8 +5949,7 @@ public class ConnectionManager {
 
       this.oldUdpTransports.clear();
       this.cancelAllFallbacks();
-      this.hostPunching = false;
-      this.lastPunchInfoId = "";
+      this.clearHostPunchContexts();
       this.closeVoiceForwardBridges();
    }
 
@@ -5871,6 +6024,7 @@ public class ConnectionManager {
       this.activePunchParams = null;
       this.lastPunchResult = null;
       this.lastHostMappedPorts = null;
+      this.hostPunchContexts.clear();
       for (UdpHolePuncher p : this.activeHolePunchers.values()) {
          try { p.cancel(); } catch (Exception ignored) {}
          try { p.close(); } catch (Exception ignored) {}
@@ -5888,9 +6042,11 @@ public class ConnectionManager {
       } else if (state == null || state == RoomManager.PENDING || state.roomInfo == null) {
          return false;
       } else if (state.roomInfo.isHost()) {
-         return state.roomInfo.getPeers().isEmpty() ? false : state.roomInfo.getPeers().stream().allMatch(ProtocolNegotiator::supportsContinuousRetry);
+         return !state.roomInfo.getPeers().isEmpty()
+            && state.roomInfo.getPeers().stream().allMatch(p -> p.capabilities.isEmpty() || p.capabilities.contains("continuous_retry"));
       } else {
-         return state.roomInfo.isHostLegacy() ? false : state.roomInfo.getHostCapabilities().contains("continuous_retry");
+         Set<String> caps = state.roomInfo.getHostCapabilities();
+         return caps.isEmpty() || caps.contains("continuous_retry");
       }
    }
 
@@ -6040,7 +6196,25 @@ public class ConnectionManager {
                );
             }
 
-            RoomManager.RoomState savedState = this.savedConnectionState;
+            RoomManager.RoomState savedStateRef = this.savedConnectionState;
+            if ((savedStateRef == null || savedStateRef != state || this.savedConnectionHostIp == null)
+               && state.roomInfo != null && !state.roomInfo.isHost()
+               && state.roomInfo.getHostIp() != null && !state.roomInfo.getHostIp().isEmpty()) {
+               this.savedConnectionState = state;
+               if (this.savedConnectionFrom == null || this.savedConnectionFrom.isEmpty()) {
+                  this.savedConnectionFrom = "host";
+               }
+
+               this.savedConnectionHostIpv6 = state.roomInfo.getHostIpv6();
+               this.savedConnectionHostIp = state.roomInfo.getHostIp();
+               this.savedConnectionHostPort = state.roomInfo.getHostPort();
+               this.savedConnectionHostMappedIp = state.roomInfo.getHostMappedIp();
+               this.savedConnectionHostMappedPort = state.roomInfo.getHostMappedPort();
+               savedStateRef = state;
+               VoxLinkMod.LOGGER.info("[Connection] ICE Restart rebuild saved params from room info");
+            }
+
+            final RoomManager.RoomState savedState = savedStateRef;
             if (savedState != null && savedState == state && this.savedConnectionHostIp != null) {
                this.connectionStartTimeMs = System.currentTimeMillis();
                int timeoutSec = this.punchProfile().connectionTimeoutSec;
@@ -6066,6 +6240,8 @@ public class ConnectionManager {
                      500L,
                      TimeUnit.MILLISECONDS
                   );
+            } else if (state.roomInfo != null && state.roomInfo.isHost()) {
+               VoxLinkMod.LOGGER.info("[Connection] ICE Restart (host): state cleaned, wait for joiner punch_info re-trigger");
             } else {
                VoxLinkMod.LOGGER.warn("[Connection] ICE Restart no saved params, cannot re-trigger");
             }
@@ -6368,8 +6544,7 @@ public class ConnectionManager {
             LogUploadManager.onDisconnected();
             this.connectionWon.set(false);
             this.connectionCycleActive.set(false);
-            this.hostPunching = false;
-            this.lastPunchInfoId = "";
+            this.hostPunchContexts.remove(clientId);
             ConnectionState.transitionTo(ConnectionState.IDLE, "Host桥断开 client=" + clientId);
             state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.punching"));
          }
@@ -6423,6 +6598,13 @@ public class ConnectionManager {
       this.sendConfirmPackets(socket, remoteAddr);
       ReliableUdpTransport transport = new ReliableUdpTransport(socket, remoteAddr);
       transport.setOnIceRestartRequested(this::triggerIceRestart);
+      // punchAuthV1：直连数据面与打洞控制面使用同一派生密钥（双方声明能力时启用）
+      byte[] punchAuthKey = this.derivePunchAuthKey(state, isHost ? clientId : null, !isHost);
+      if (punchAuthKey != null) {
+         transport.setAuthKey(punchAuthKey);
+         VoxLinkMod.LOGGER.info("[PunchAuth] Transport auth enabled ({})", isHost ? "host side" : "joiner side");
+      }
+
       this.putTransportWithIcePool(transportKey, transport);
       // 连接成功事件: 稳定(2分钟)后不上传; 窗口内掉线仍会上传(失败诊断)
       LogUploadManager.onConnected();

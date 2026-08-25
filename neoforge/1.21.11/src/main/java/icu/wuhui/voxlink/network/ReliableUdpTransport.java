@@ -21,6 +21,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import javax.crypto.Mac;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,6 +82,9 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final int STATE_UNRELIABLE = 1;
    private volatile int consecutiveFailures = 0;
    private final AtomicBoolean iceRestartTriggered = new AtomicBoolean(false);
+   // punchAuthV1：数据面认证上下文（null = 非认证模式，帧格式与旧版本逐字节一致）
+   private volatile byte[] authKeyBytes;
+   private volatile Mac authMac;
    private volatile Runnable onIceRestartRequested;
    private volatile java.util.function.Consumer<byte[]> onVoiceData;
    private volatile int nextSendSeq = 0;
@@ -123,6 +127,26 @@ public class ReliableUdpTransport implements AutoCloseable {
       }
    }
 
+   /**
+    * punchAuthV1：启用数据面认证。启用后所有帧（DATA/ACK/KEEPALIVE/DISCONNECT/
+    * RESTART/FEC_XOR/VOICE）尾部附加 4 字节截断 HMAC-SHA256；接收侧校验失败一律丢弃，
+    * maybeRebindRemote 因此只接受 MAC 有效源。须在 start() 之前调用。
+    */
+   public void setAuthKey(byte[] key) {
+      this.authKeyBytes = key == null ? null : key.clone();
+      this.authMac = PunchAuth.createMac(this.authKeyBytes);
+   }
+
+   public boolean isAuthEnabled() {
+      return this.authMac != null;
+   }
+
+   /** 出帧统一出口：认证模式追加 MAC，否则原样返回（旧线上格式）。 */
+   private byte[] finalizeFrame(byte[] frame) {
+      Mac mac = this.authMac;
+      return mac != null ? PunchAuth.appendTrailer4(mac, frame) : frame;
+   }
+
    public InputStream getInputStream() {
       return this.inputStream;
    }
@@ -139,7 +163,8 @@ public class ReliableUdpTransport implements AutoCloseable {
             data[2] = 8;
             writeInt32(data, 3, 0);
             writeInt32(data, 7, 0);
-            this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+            byte[] framed = this.finalizeFrame(data);
+            this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
          } catch (IOException var2) {
          }
 
@@ -174,8 +199,9 @@ public class ReliableUdpTransport implements AutoCloseable {
       System.arraycopy(MAGIC, 0, data, 0, 2);
       data[2] = TYPE_VOICE;
       System.arraycopy(payload, 0, data, 11, payload.length);
+      byte[] framed = this.finalizeFrame(data);
       try {
-         this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+         this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
       } catch (IOException e) {
          LOGGER.debug("[ReliableUdp] Voice send failed: {}", e.getMessage());
       }
@@ -220,7 +246,8 @@ public class ReliableUdpTransport implements AutoCloseable {
          data[2] = 10;
          writeInt32(data, 3, 0);
          writeInt32(data, 7, 0);
-         this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+         byte[] framed = this.finalizeFrame(data);
+         this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
       } catch (IOException var2) {
       }
    }
@@ -228,7 +255,8 @@ public class ReliableUdpTransport implements AutoCloseable {
    private void sendPunchAck(SocketAddress from) {
       try {
          byte[] data = new byte[]{MAGIC[0], MAGIC[1], 2, 0, 0};
-         this.socket.send(new DatagramPacket(data, data.length, from));
+         byte[] framed = this.finalizeFrame(data);
+         this.socket.send(new DatagramPacket(framed, framed.length, from));
       } catch (IOException var3) {
       }
    }
@@ -273,6 +301,17 @@ public class ReliableUdpTransport implements AutoCloseable {
             this.socket.receive(packet);
             LogUploadManager.onTransportActivity();
             if (packet.getLength() >= 3 && buf[0] == MAGIC[0] && buf[1] == MAGIC[1]) {
+               // punchAuthV1：认证模式下所有帧必须携带有效截断 MAC，失败一律丢弃；
+               // 因此 maybeRebindRemote / 状态机只可能被认证源驱动
+               Mac rxMac = this.authMac;
+               if (rxMac != null) {
+                  boolean macOk = packet.getLength() >= 9 && PunchAuth.verifyTrailer4(rxMac, buf, packet.getLength());
+                  if (!macOk) {
+                     PunchAuth.logDrop("rudp-data");
+                     continue;
+                  }
+               }
+
                byte type = buf[2];
                if (type != 1 && type != 2) {
                   if (packet.getLength() >= 11) {
@@ -361,7 +400,9 @@ public class ReliableUdpTransport implements AutoCloseable {
          this.sendAck();
       } else {
          int expected = this.nextExpectedSeq.get();
-         if (seqAfter(expected, seq) && seqDiff(expected, seq) > 128) {
+         // punchAuthV1：seq 重置（对端重启识别）仅对认证流生效——
+         // 非认证流上伪造的"落后 seq"可被用来重置接收状态（重放窗口攻击面）
+         if (this.authMac != null && seqAfter(expected, seq) && seqDiff(expected, seq) > 128) {
             LOGGER.warn("[ReliableUdp] Peer restarted (seq {} far behind expected {}), reset receive state", seq, expected);
             this.nextExpectedSeq.set(seq);
             this.recvBuffer.clear();
@@ -653,7 +694,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          data[2] = 4;
          writeInt32(data, 3, 0);
          writeInt32(data, 7, this.nextExpectedSeq.get());
-         this.enqueueSend(data);
+         this.enqueueSend(this.finalizeFrame(data));
       } catch (Exception e) {
          LOGGER.debug("[ReliableUdp] ACK build failed: {}", e.getMessage());
       }
@@ -690,9 +731,10 @@ public class ReliableUdpTransport implements AutoCloseable {
          writeInt32(data, 7, this.nextExpectedSeq.get());
          writeUint16(data, 11, payload.length);
          System.arraycopy(payload, 0, data, 13, payload.length);
-         this.enqueueSend(data);
+         byte[] framed = this.finalizeFrame(data);
+         this.enqueueSend(framed);
          if (interleave && payload.length < 512 && this.running && !this.closed.get()) {
-            byte[] dup = (byte[])data.clone();
+            byte[] dup = (byte[])framed.clone();
             this.scheduler.schedule(() -> this.enqueueSend(dup), 50L, TimeUnit.MILLISECONDS);
          }
       } catch (Exception e) {
@@ -717,7 +759,8 @@ public class ReliableUdpTransport implements AutoCloseable {
          }
 
          System.arraycopy(xorPayload, 0, data, bodyOffset, xorPayload.length);
-         this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+         byte[] framed = this.finalizeFrame(data);
+         this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
       } catch (IOException e) {
          LOGGER.debug("[ReliableUdp] FEC send failed: {}", e.getMessage());
       }
@@ -731,7 +774,8 @@ public class ReliableUdpTransport implements AutoCloseable {
             data[2] = 8;
             writeInt32(data, 3, 0);
             writeInt32(data, 7, this.nextExpectedSeq.get());
-            this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+            byte[] framed = this.finalizeFrame(data);
+            this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
          } catch (IOException var2) {
          }
       }
@@ -876,7 +920,8 @@ public class ReliableUdpTransport implements AutoCloseable {
             data[2] = 7;
             writeInt32(data, 3, 0);
             writeInt32(data, 7, 0);
-            this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+            byte[] framed = this.finalizeFrame(data);
+            this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
          } catch (IOException var7) {
          }
 

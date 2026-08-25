@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import javax.crypto.Mac;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,9 +39,16 @@ public class UdpHolePuncher {
    private static final byte[] MAGIC = new byte[]{86, 76};
    private static final byte TYPE_PUNCH = 1;
    private static final byte TYPE_PUNCH_ACK = 2;
+   // punchAuthV1: 认证模式控制报文 = 魔数(2)+type(1)+nonce(2)+截断MAC(4)
+   private static final int CONTROL_PLAIN_LEN = 5;
+   private static final int CONTROL_AUTH_LEN = 9;
    private static volatile ScheduledExecutorService PUNCH_TIMEOUT_SCHEDULER = createScheduler();
    private DatagramSocket socket;
    private final int sessionNonce = ThreadLocalRandom.current().nextInt(65536);
+   // punchAuthV1：本 puncher（约每 socket 一个 Mac 实例）的认证上下文；
+   // null = 非认证模式，线上字节格式与旧版本完全一致
+   private volatile byte[] authKeyBytes;
+   private volatile Mac authMac;
    private final AtomicBoolean punching = new AtomicBoolean(false);
    private final AtomicBoolean holeOpen = new AtomicBoolean(false);
    private final AtomicBoolean remoteReceived = new AtomicBoolean(false);
@@ -62,6 +70,64 @@ public class UdpHolePuncher {
    public void setProfile(PunchProfile p) {
       this.profile = p;
    }
+
+   /**
+    * punchAuthV1：启用认证模式（双方均声明能力时由 ConnectionManager 注入派生密钥）。
+    * 启用后所有 PUNCH/ACK 控制报文附加 4 字节截断 HMAC-SHA256，接收侧校验失败一律丢弃。
+    */
+   public void setAuthKey(byte[] key) {
+      this.authKeyBytes = key == null ? null : key.clone();
+      this.authMac = PunchAuth.createMac(this.authKeyBytes);
+   }
+
+   /** EasySym 等内部派生 socket 继承父 puncher 的认证上下文（每个实例独立 Mac）。 */
+   public void inheritAuthFrom(UdpHolePuncher other) {
+      if (other != null) {
+         byte[] key = other.authKeyBytes;
+         if (key != null) {
+            this.setAuthKey(key);
+         }
+      }
+   }
+
+   public boolean isAuthEnabled() {
+      return this.authMac != null;
+   }
+
+   /** 构造控制报文：认证模式追加 4 字节截断 MAC（覆盖 type||nonce），否则保持旧 5 字节格式。 */
+   private byte[] buildControl(byte type) {
+      byte[] base = new byte[]{MAGIC[0], MAGIC[1], type, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
+      Mac mac = this.authMac;
+      return mac != null ? PunchAuth.appendTrailer4(mac, base) : base;
+   }
+
+   /**
+    * punchAuthV1：启用认证模式（双方均声明能力时由 ConnectionManager 注入派生密钥）。
+    * 启用后所有 PUNCH/ACK 控制报文附加 4 字节截断 HMAC-SHA256，接收侧校验失败一律丢弃。
+    */
+
+
+   /** EasySym 等内部派生 socket 继承父 puncher 的认证上下文（每个实例独立 Mac）。 */
+
+
+
+
+   /** 构造控制报文：认证模式追加 4 字节截断 MAC（覆盖 type||nonce），否则保持旧 5 字节格式。 */
+
+
+   /**
+    * punchAuthV1：启用认证模式（双方均声明能力时由 ConnectionManager 注入派生密钥）。
+    * 启用后所有 PUNCH/ACK 控制报文附加 4 字节截断 HMAC-SHA256，接收侧校验失败一律丢弃。
+    */
+
+
+   /** EasySym 等内部派生 socket 继承父 puncher 的认证上下文（每个实例独立 Mac）。 */
+
+
+
+
+   /** 构造控制报文：认证模式追加 4 字节截断 MAC（覆盖 type||nonce），否则保持旧 5 字节格式。 */
+
 
    public PunchProfile profile() {
       PunchProfile p = this.profile;
@@ -113,6 +179,73 @@ public class UdpHolePuncher {
          s.shutdownNow();
       }
    }
+
+   /**
+    * 构造失败结果并按分类接入 AddressBlacklist（原死代码）：
+    * 仅对"对端完全无响应/防火墙拦截/端口预测完全落空"类失败记录，可达但握手未完成的失败不记，
+    * 避免误伤抖动链路。阈值与窗口由 AddressBlacklist 决定（10 分钟内 3 次 → 拉黑 1 小时）。
+    */
+   private PunchResult failAndRecord(int tried, int recvPunch, int recvAck, long elapsed, boolean firewall) {
+      PunchResult fr = PunchResult.failure(tried, recvPunch, recvAck, 0, elapsed, firewall);
+
+      try {
+         PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(fr);
+         if (reason == PunchFailureClassifier.FailureReason.NO_RESPONSE
+            || reason == PunchFailureClassifier.FailureReason.FIREWALL_DETECTED
+            || reason == PunchFailureClassifier.FailureReason.PREDICTION_OFF) {
+            InetAddress addr = this.remoteAddress;
+            int port = this.remotePort;
+            if (addr != null && port > 0) {
+               AddressBlacklist.get().recordUdpFailure(new InetSocketAddress(addr, port));
+            }
+         }
+      } catch (Exception ignored) {
+      }
+
+      return fr;
+   }
+
+   /** 发起打洞前的黑名单检查：被拉黑目标直接快速失败（触发上层 relay/direct 兜底）。 */
+   private static boolean isTargetBlacklisted(InetAddress addr, int port) {
+      if (addr == null || port <= 0) {
+         return false;
+      }
+
+      boolean blocked = AddressBlacklist.get().isBlacklisted(new InetSocketAddress(addr, port));
+      if (blocked) {
+         LOGGER.warn("[UdpHolePuncher] Target {}:{} blacklisted by repeated failures, skip punch", addr.getHostAddress(), port);
+      }
+
+      return blocked;
+   }
+
+   private static CompletableFuture<PunchResult> blacklistedFuture() {
+      return CompletableFuture.completedFuture(PunchResult.failure(0, 0, 0, 0, 0L, false));
+   }
+
+   /**
+    * 构造失败结果并按分类接入 AddressBlacklist（原死代码）：
+    * 仅对"对端完全无响应/防火墙拦截/端口预测完全落空"类失败记录，可达但握手未完成的失败不记，
+    * 避免误伤抖动链路。阈值与窗口由 AddressBlacklist 决定（10 分钟内 3 次 → 拉黑 1 小时）。
+    */
+
+
+   /** 发起打洞前的黑名单检查：被拉黑目标直接快速失败（触发上层 relay/direct 兜底）。 */
+
+
+
+
+   /**
+    * 构造失败结果并按分类接入 AddressBlacklist（原死代码）：
+    * 仅对"对端完全无响应/防火墙拦截/端口预测完全落空"类失败记录，可达但握手未完成的失败不记，
+    * 避免误伤抖动链路。阈值与窗口由 AddressBlacklist 决定（10 分钟内 3 次 → 拉黑 1 小时）。
+    */
+
+
+   /** 发起打洞前的黑名单检查：被拉黑目标直接快速失败（触发上层 relay/direct 兜底）。 */
+
+
+
 
    private static ScheduledExecutorService createScheduler() {
       return Executors.newSingleThreadScheduledExecutor(r -> {
@@ -229,6 +362,11 @@ public class UdpHolePuncher {
          return CompletableFuture.failedFuture(e);
       }
 
+      if (isTargetBlacklisted(this.remoteAddress, targetPort)) {
+         this.punching.set(false);
+         return blacklistedFuture();
+      }
+
       CompletableFuture<PunchResult> result = new CompletableFuture<>();
       this.activeResult = result;
       this.socketGroup = socketGroup;
@@ -238,7 +376,7 @@ public class UdpHolePuncher {
       int[] recvAckCounter = new int[]{0};
       long startTime = System.currentTimeMillis();
       int socketsTried = socketGroup.size();
-      byte[] data = new byte[]{MAGIC[0], MAGIC[1], 1, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
+      byte[] data = this.buildControl(TYPE_PUNCH);
       int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
       LOGGER.info(
          "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
@@ -315,10 +453,36 @@ public class UdpHolePuncher {
 
                         if (from != null && buf.position() >= 3) {
                            buf.flip();
+                           int pktLen = buf.limit();
                            byte b0 = buf.get(0);
                            byte b1 = buf.get(1);
                            byte b2 = buf.get(2);
-                           if (b0 == MAGIC[0] && b1 == MAGIC[1] && this.acceptAddress(from.getAddress(), b2)) {
+                           boolean nioAccepted = false;
+                           if (b0 == MAGIC[0] && b1 == MAGIC[1]) {
+                              Mac nioMac = this.authMac;
+                              boolean authenticated = false;
+                              boolean macOk = true;
+                              if (nioMac != null) {
+                                 if (pktLen >= CONTROL_AUTH_LEN) {
+                                    byte[] tmp = new byte[pktLen];
+                                    buf.position(0);
+                                    buf.get(tmp);
+                                    macOk = PunchAuth.verifyTrailer4(nioMac, tmp, pktLen);
+                                 } else {
+                                    macOk = false;
+                                 }
+
+                                 if (!macOk) {
+                                    PunchAuth.logDrop("punch-control-nio");
+                                 } else {
+                                    authenticated = true;
+                                 }
+                              }
+
+                              nioAccepted = macOk && this.acceptAddress(from.getAddress(), b2, authenticated);
+                           }
+
+                           if (nioAccepted) {
                               UdpHolePuncher sp = finalChannelToPuncher.get(ch);
                               int sIdx = finalChannelToIndex.get(ch);
                               if (b2 == 1) {
@@ -394,7 +558,7 @@ public class UdpHolePuncher {
                synchronized (completionLock) {
                   if (this.completed.compareAndSet(false, true)) {
                      this.punching.set(false);
-                     result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, true));
+                     result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, true));
                   }
 
                   return;
@@ -435,7 +599,7 @@ public class UdpHolePuncher {
                if (this.completed.compareAndSet(false, true)) {
                   this.punching.set(false);
                   long elapsed = System.currentTimeMillis() - startTime;
-                  result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false));
+                  result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, false));
                }
             }
          }
@@ -449,7 +613,7 @@ public class UdpHolePuncher {
                if (this.completed.compareAndSet(false, true)) {
                   this.punching.set(false);
                   long elapsed = System.currentTimeMillis() - startTime;
-                  result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false));
+                  result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, false));
                }
             }
          }
@@ -460,7 +624,7 @@ public class UdpHolePuncher {
    }
 
    private void sendControlTo(byte type, InetAddress addr, int port) {
-      byte[] d = new byte[]{MAGIC[0], MAGIC[1], type, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
+      byte[] d = this.buildControl(type);
       DatagramPacket packet = new DatagramPacket(d, d.length, addr, port);
       sendPkt(this.socket, packet);
    }
@@ -484,7 +648,13 @@ public class UdpHolePuncher {
       }
    }
 
-   private boolean acceptAddress(InetAddress addr, byte type) {
+   /**
+    * 来源地址判定。
+    * punchAuthV1：认证模式下报文已通过 MAC 校验（证明来自持有房间密钥的对端），
+    * 允许跟随对端实际端口漂移，但<b>不再启用</b>非认证模式的 /16 CGNAT 多 IP 启发式
+    * （防伪造源地址改写远端）；非认证模式行为与旧版本完全一致。
+    */
+   private boolean acceptAddress(InetAddress addr, byte type, boolean authenticated) {
       InetAddress exp = this.remoteAddress;
       if (exp == null) {
          return false;
@@ -492,7 +662,7 @@ public class UdpHolePuncher {
       if (exp.equals(addr)) {
          return true;
       }
-      if ((type == 1 || type == 2) && this.punching.get()) {
+      if (!authenticated && (type == 1 || type == 2) && this.punching.get()) {
          byte[] a = exp.getAddress();
          byte[] b = addr.getAddress();
          boolean sameSegment = a != null && b != null && a.length == 4 && b.length == 4 && a[0] == b[0] && a[1] == b[1];
@@ -508,9 +678,33 @@ public class UdpHolePuncher {
       return false;
    }
 
+   /** 非认证模式兼容入口（保留旧签名语义）。 */
+   private boolean acceptAddress(InetAddress addr, byte type) {
+      return this.acceptAddress(addr, type, false);
+   }
+
+   /** 校验魔数 + （认证模式）截断 MAC + 地址接受性。 */
+   private boolean acceptPacket(byte[] buf, int len, DatagramPacket packet) {
+      if (len < 3 || buf[0] != MAGIC[0] || buf[1] != MAGIC[1]) {
+         return false;
+      }
+
+      Mac mac = this.authMac;
+      boolean authenticated = false;
+      if (mac != null) {
+         if (len < CONTROL_AUTH_LEN || !PunchAuth.verifyTrailer4(mac, buf, len)) {
+            PunchAuth.logDrop("punch-control");
+            return false;
+         }
+
+         authenticated = true;
+      }
+
+      return this.acceptAddress(packet.getAddress(), buf[2], authenticated);
+   }
+
    private boolean acceptPacket(byte[] buf, DatagramPacket packet) {
-      byte type = buf.length > 2 ? buf[2] : -1;
-      return this.acceptAddress(packet.getAddress(), type);
+      return this.acceptPacket(buf, packet.getLength(), packet);
    }
 
    public CompletableFuture<PunchResult> punchMultiPort(String remoteIp, List<Integer> targetPorts) {
@@ -531,6 +725,21 @@ public class UdpHolePuncher {
          } catch (Exception e) {
             this.punching.set(false);
             return CompletableFuture.failedFuture(e);
+         }
+
+         if (isTargetBlacklisted(this.remoteAddress, targetPorts.get(0))) {
+            this.punching.set(false);
+            return blacklistedFuture();
+         }
+
+         if (isTargetBlacklisted(this.remoteAddress, targetPorts.get(0))) {
+            this.punching.set(false);
+            return blacklistedFuture();
+         }
+
+         if (isTargetBlacklisted(this.remoteAddress, targetPorts.get(0))) {
+            this.punching.set(false);
+            return blacklistedFuture();
          }
 
          CompletableFuture<PunchResult> result = new CompletableFuture<>();
@@ -656,7 +865,7 @@ public class UdpHolePuncher {
                int cyclesPerformed = 0;
                int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
                long sendStartMs = System.currentTimeMillis();
-               byte[] data = new byte[]{MAGIC[0], MAGIC[1], 1, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
+               byte[] data = this.buildControl(TYPE_PUNCH);
                LOGGER.info(
                   "[UdpHolePuncher] Multi-port send thread start: target={}, port={}, local port={}",
                   new Object[]{this.remoteAddress.getHostAddress(), targetPorts, this.socket.getLocalPort()}
@@ -692,7 +901,7 @@ public class UdpHolePuncher {
                      if (this.completed.compareAndSet(false, true)) {
                         this.punching.set(false);
                         long elapsed = System.currentTimeMillis() - startTime;
-                        result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false));
+                        result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, false));
                      }
                   }
                }
@@ -707,7 +916,7 @@ public class UdpHolePuncher {
                if (this.completed.compareAndSet(false, true)) {
                   this.punching.set(false);
                   long elapsed = System.currentTimeMillis() - startTime;
-                  result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false));
+                  result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, false));
                }
             }
          }, this.effectiveTimeoutMs() + this.profile().send.extraWaitLongMs, TimeUnit.MILLISECONDS);
@@ -735,6 +944,11 @@ public class UdpHolePuncher {
          this.remotePort = basePort;
       } catch (Exception e) {
          return CompletableFuture.failedFuture(e);
+      }
+
+      if (isTargetBlacklisted(this.remoteAddress, basePort)) {
+         this.punching.set(false);
+         return blacklistedFuture();
       }
 
       CompletableFuture<PunchResult> result = new CompletableFuture<>();
@@ -914,7 +1128,7 @@ public class UdpHolePuncher {
                   if (this.completed.compareAndSet(false, true)) {
                      this.punching.set(false);
                      long elapsed = System.currentTimeMillis() - startTime;
-                     PunchResult fr = PunchResult.failure(1, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false);
+                     PunchResult fr = this.failAndRecord(1, recvPunchCounter[0], recvAckCounter[0], elapsed, false);
                      result.complete(portPrediction ? fr.withPortPrediction() : fr);
                   }
                }
@@ -931,7 +1145,7 @@ public class UdpHolePuncher {
                if (this.completed.compareAndSet(false, true)) {
                   this.punching.set(false);
                   long elapsed = System.currentTimeMillis() - startTime;
-                  PunchResult fr = PunchResult.failure(1, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false);
+                  PunchResult fr = this.failAndRecord(1, recvPunchCounter[0], recvAckCounter[0], elapsed, false);
                   result.complete(portPrediction ? fr.withPortPrediction() : fr);
                }
             }
@@ -960,6 +1174,7 @@ public class UdpHolePuncher {
 
       for (int i = 0; i < effectiveSocketCount; i++) {
          UdpHolePuncher p = new UdpHolePuncher();
+         p.inheritAuthFrom(this);
 
          try {
             p.createSocket();
@@ -1036,13 +1251,13 @@ public class UdpHolePuncher {
    }
 
    private void sendControl(byte type) {
-      byte[] data = new byte[]{MAGIC[0], MAGIC[1], type, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
+      byte[] data = this.buildControl(type);
       DatagramPacket packet = new DatagramPacket(data, data.length, this.remoteAddress, this.remotePort);
       sendPkt(this.socket, packet);
    }
 
    private void sendControlMultiPort(byte type, int basePort, int portRange, int round) {
-      byte[] data = new byte[]{MAGIC[0], MAGIC[1], type, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
+      byte[] data = this.buildControl(type);
       InetAddress addr = this.remoteAddress;
       if (addr != null) {
          int centerPort = this.remotePort;
@@ -1356,7 +1571,7 @@ public class UdpHolePuncher {
       int[] recvAckCounter = new int[]{0};
       long startTime = System.currentTimeMillis();
       int socketsTried = socketGroup.size();
-      byte[] data = new byte[]{MAGIC[0], MAGIC[1], 1, (byte)(this.sessionNonce >> 8), (byte)this.sessionNonce};
+      byte[] data = this.buildControl(TYPE_PUNCH);
       int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
       LOGGER.info(
          "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
@@ -1455,7 +1670,7 @@ public class UdpHolePuncher {
                synchronized (completionLock) {
                   if (this.completed.compareAndSet(false, true)) {
                      this.punching.set(false);
-                     result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, true));
+                     result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, true));
                   }
 
                   return;
@@ -1487,7 +1702,7 @@ public class UdpHolePuncher {
                if (this.completed.compareAndSet(false, true)) {
                   this.punching.set(false);
                   long elapsed = System.currentTimeMillis() - startTime;
-                  result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false));
+                  result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, false));
                }
             }
          }
@@ -1501,7 +1716,7 @@ public class UdpHolePuncher {
                if (this.completed.compareAndSet(false, true)) {
                   this.punching.set(false);
                   long elapsed = System.currentTimeMillis() - startTime;
-                  result.complete(PunchResult.failure(socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed, false));
+                  result.complete(this.failAndRecord(socketsTried, recvPunchCounter[0], recvAckCounter[0], elapsed, false));
                }
             }
          }

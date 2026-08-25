@@ -109,7 +109,13 @@ public class SignalingClient {
       this.config = config;
       String url = config.getServerUrl();
       if (url != null && url.startsWith("http://")) {
-         VoxLinkMod.LOGGER.warn("[SignalingClient] Using HTTP not HTTPS: {}, recommend switching to HTTPS", url);
+         // 与 VoxLinkConfig.validate 行为一致：http 默认已在 validate 中被拒并重置为默认 https；
+         // 走到这里说明用户显式 allowInsecureServerUrl=true，降级为提示性日志
+         if (config.isAllowInsecureServerUrl()) {
+            VoxLinkMod.LOGGER.info("[SignalingClient] Insecure HTTP serverUrl explicitly allowed by config: {}", url);
+         } else {
+            VoxLinkMod.LOGGER.error("[SignalingClient] Plaintext HTTP serverUrl {} should have been rejected by config validation", url);
+         }
       }
 
       this.executor = Executors.newFixedThreadPool(2, r -> {

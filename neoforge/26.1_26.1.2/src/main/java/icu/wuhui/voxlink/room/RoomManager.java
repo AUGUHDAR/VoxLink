@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import icu.wuhui.voxlink.VoxLinkConstants;
 import icu.wuhui.voxlink.VoxLinkMod;
+import icu.wuhui.voxlink.command.LanHostRegistry;
 import icu.wuhui.voxlink.compat.GeyserCompat;
 import icu.wuhui.voxlink.compat.ViaCompat;
 import icu.wuhui.voxlink.network.ConnectionFallback;
@@ -23,6 +24,9 @@ import icu.wuhui.voxlink.ui.ChatCompat;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
+import java.util.UUID;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -142,16 +146,11 @@ public class RoomManager {
                   UPnPManager.UPnPResult upnpResult = UPnPManager.openPort(hostPort, name);
                   UPnPManager.UPnPResult upnpUdpResult = UPnPManager.openUdpPort(hostPort, name + "-UDP");
                   if (upnpResult.success()) {
-                     natType = "open";
                      effectivePort = upnpResult.externalPort();
+                     VoxLinkMod.LOGGER.info("[createRoom] UPnP TCP mapped, externalPort={}", effectivePort);
                   } else if (upnpUdpResult.success()) {
-                     natType = "open";
                      effectivePort = upnpUdpResult.externalPort();
-                  } else if (!upnpResult.available() && !upnpUdpResult.available()) {
-                     StunProbe.NatType stunNat = StunProbe.probeNatType(StunDetector.getStunServerGroups());
-                     natType = stunNat != null && stunNat.isSymmetric() ? stunNat.key : "strict";
-                  } else {
-                     natType = "moderate";
+                     VoxLinkMod.LOGGER.info("[createRoom] UPnP UDP mapped, externalPort={}", effectivePort);
                   }
 
                   if (GeyserCompat.isGeyserLoaded()) {
@@ -163,17 +162,15 @@ public class RoomManager {
                   }
                }
 
-               if ("unknown".equals(natType) || "strict".equals(natType)) {
-                  try {
-                     StunProbe.ProbeResult probeResult = StunProbe.probeAsync(StunDetector.getStunServerGroups()).join();
-                     if (probeResult != null && probeResult.natType != null) {
-                        natType = probeResult.natType.key;
-                        this.connectionManager.setStunProbeResult(probeResult);
-                        VoxLinkMod.LOGGER.info("[createRoom] STUN probe result saved: NAT={}, reachable={}", natType, probeResult.reachableStunUrls.size());
-                     }
-                  } catch (Exception ex2) {
-                     VoxLinkMod.LOGGER.warn("[createRoom] probeAsync failed: {}", ex2.getMessage());
+               try {
+                  StunProbe.ProbeResult probeResult = StunProbe.probeAsync(StunDetector.getStunServerGroups()).join();
+                  if (probeResult != null && probeResult.natType != null) {
+                     natType = probeResult.natType.key;
+                     this.connectionManager.setStunProbeResult(probeResult);
+                     VoxLinkMod.LOGGER.info("[createRoom] STUN probe result saved: NAT={}, reachable={}", natType, probeResult.reachableStunUrls.size());
                   }
+               } catch (Exception ex2) {
+                  VoxLinkMod.LOGGER.warn("[createRoom] probeAsync failed: {}", ex2.getMessage());
                }
 
                VoxLinkMod.LOGGER.info("[createRoom] Background NAT probe done: natType={}, port={}", natType, effectivePort);
@@ -1766,12 +1763,22 @@ public class RoomManager {
    }
 
    public void applyOpPolicy(MinecraftServer server, boolean hostOp, boolean guestOp) {
+      // P0 安全修复：host 判定优先用 LanHostRegistry 启动快照 UUID（离线模式下同名/同
+      // 离线UUID 的攻击者不再被误判为房主）；快照为空时回退旧的 name 匹配以保底不回归。
+      Set<UUID> bootstrapSnapshot = LanHostRegistry.snapshot();
       String hostName = Minecraft.getInstance().getUser().getName();
       server.execute(() -> {
          try {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                String name = player.getName().getString();
-               boolean isHost = name.equals(hostName);
+               boolean isHost;
+               if (!bootstrapSnapshot.isEmpty()) {
+                  isHost = bootstrapSnapshot.contains(player.getUUID());
+               } else {
+                  // 回退：快照尚未捕获（极早期）时维持旧行为，保证功能不回归
+                  isHost = name.equals(hostName);
+               }
+
                boolean want = isHost ? hostOp : guestOp;
                String cmd = want ? "op " + name : "deop " + name;
                server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), cmd);

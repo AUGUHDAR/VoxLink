@@ -5,10 +5,10 @@ import com.mojang.brigadier.tree.CommandNode;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.mixin.CommandNodeAccessor;
 import java.util.function.Predicate;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.commands.BanIpCommands;
 import net.minecraft.server.commands.BanListCommands;
 import net.minecraft.server.commands.BanPlayerCommands;
@@ -64,14 +64,28 @@ public final class LanCommandRegistry {
       }
    }
 
+   /**
+    * LAN 房主判定（安全修复，P0）：
+    * 旧实现比较 {@code src.getTextName() == 本地用户名}，离线模式下同名攻击者可直接
+    * 获得 op/ban/kick 等特权；离线 UUID 按名字派生，因此单纯改比 UUID 也不够。
+    * 现改为：集成服务器 + singleplayerProfile 存在 + 命令来源玩家的 profile UUID
+    * 属于 {@link LanHostRegistry} 的"启动快照"。
+    * 时序保证：Open to LAN 时房主必然先于任何远程玩家在场（快照捕获于服务器启动后、
+    * 远程玩家加入前），后来者无论同名还是同离线 UUID 都不在快照中。
+    */
    private static boolean isLanHost(CommandSourceStack src) {
       MinecraftServer server = src.getServer();
-      if (server == null) {
+      if (!(server instanceof IntegratedServer)) {
          return false;
-      } else if (!(server instanceof IntegratedServer)) {
+      } else if (server.getSingleplayerProfile() == null) {
          return false;
       } else {
-         return server.getSingleplayerProfile() == null ? false : src.getTextName().equals(Minecraft.getInstance().getUser().getName());
+         // 仅当命令来源是本服在线玩家时才取其 profile UUID；控制台/Rcon 等非玩家来源一律不放行
+         if (src.getEntity() instanceof ServerPlayer sender) {
+            return LanHostRegistry.isBootstrapProfile(server, sender.getUUID());
+         }
+
+         return false;
       }
    }
 }

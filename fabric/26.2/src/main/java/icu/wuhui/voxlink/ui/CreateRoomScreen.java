@@ -123,8 +123,14 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          );
       } else {
          int centerX = this.width / 2;
-         int formHeight = 240;
-         int y = Math.max(4, (this.height - formHeight) / 2);
+         // UI 优化(1.1.1)：低分辨率/GUI 大缩放下自动收紧纵向节奏，防止表单底部按钮被切出屏幕
+         boolean compactForm = this.height < 300;
+         int formHeight = compactForm ? 196 : 240;
+         int y = Math.max(2, (this.height - formHeight) / 2);
+         int fieldStep = compactForm ? 20 : 24;
+         int catStep = compactForm ? 56 : 74;
+         int advStep = compactForm ? 32 : 42;
+         int advRowStep = compactForm ? 21 : 24;
          this.nameField = new EditBox(this.font, centerX - 100, y, 200, 20, Component.translatable("voxlink.room_name"));
          this.nameField.setMaxLength(20);
          this.nameField.setHint(Component.translatable("voxlink.create_room.name_hint"));
@@ -133,7 +139,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          }
 
          this.addRenderableWidget(this.nameField);
-         this.passwordField = new EditBox(this.font, centerX - 100, y + 24, 200, 20, Component.translatable("voxlink.room_password"));
+         this.passwordField = new EditBox(this.font, centerX - 100, y + fieldStep, 200, 20, Component.translatable("voxlink.room_password"));
          this.passwordField.setMaxLength(32);
          this.passwordField.setHint(Component.translatable("voxlink.create_room.password_hint"));
          this.passwordField.setResponder(text -> this.updateVisibleForPassword());
@@ -142,12 +148,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          }
 
          this.addRenderableWidget(this.passwordField);
-         this.maxPlayersField = new EditBox(this.font, centerX - 100, y + 48, 200, 20, Component.translatable("voxlink.max_players"));
+         this.maxPlayersField = new EditBox(this.font, centerX - 100, y + 2 * fieldStep, 200, 20, Component.translatable("voxlink.max_players"));
          this.maxPlayersField.setMaxLength(3);
          this.maxPlayersField.setValue(this.savedMaxPlayers);
          this.setInputFilter(this.maxPlayersField, s -> s.matches("\\d*"));
          this.addRenderableWidget(this.maxPlayersField);
-         int catY = y + 74;
+         int catY = y + catStep;
          this.buildCategoryButtons(centerX, catY);
          this.customCategoryField = new EditBox(this.font, centerX - 100, catY + 22, 200, 18, Component.translatable("voxlink.create_room.custom_category"));
          this.customCategoryField.setMaxLength(32);
@@ -155,7 +161,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.customCategoryField.setVisible(this.showCustomInput);
          this.customCategoryField.setEditable(this.showCustomInput);
          this.addRenderableWidget(this.customCategoryField);
-         int advY = catY + 42;
+         int advY = catY + advStep;
          this.visibleButton = Button.builder(this.buildVisibleLabel(), button -> {
             this.visible = !this.visible;
             this.visibleButton.setMessage(this.buildVisibleLabel());
@@ -175,7 +181,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                default -> "survival";
             };
             this.gameTypeButton.setMessage(this.buildGameTypeLabel());
-         }).bounds(centerX - 100, advY + 24, 98, 20).build();
+         }).bounds(centerX - 100, advY + advRowStep, 98, 20).build();
          this.addRenderableWidget(this.gameTypeButton);
          this.hostOpButton = Button.builder(this.buildHostOpLabel(), button -> {
             this.hostOp = !this.hostOp;
@@ -186,12 +192,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             }
 
             this.guestOpButton.active = this.hostOp;
-         }).bounds(centerX + 2, advY + 24, 98, 20).build();
+         }).bounds(centerX + 2, advY + advRowStep, 98, 20).build();
          this.addRenderableWidget(this.hostOpButton);
          this.guestOpButton = Button.builder(this.buildGuestOpLabel(), button -> {
             this.guestOp = !this.guestOp;
             this.guestOpButton.setMessage(this.buildGuestOpLabel());
-         }).bounds(centerX - 100, advY + 48, 98, 20).build();
+         }).bounds(centerX - 100, advY + 2 * advRowStep, 98, 20).build();
          this.guestOpButton.active = this.hostOp;
          this.addRenderableWidget(this.guestOpButton);
          if (TerracottaManager.isBinaryReady()) {
@@ -212,17 +218,17 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                         );
                      }
                   )
-                  .bounds(centerX + 2, advY + 48, 98, 20)
+                  .bounds(centerX + 2, advY + 2 * advRowStep, 98, 20)
                   .build()
             );
          }
 
          this.createButton = Button.builder(Component.translatable("voxlink.create_room"), button -> this.createRoom())
-            .bounds(centerX - 100, advY + 72, 98, 20)
+            .bounds(centerX - 100, advY + 3 * advRowStep, 98, 20)
             .build();
          this.addRenderableWidget(this.createButton);
          this.backButton = Button.builder(Component.translatable("voxlink.back"), button -> Minecraft.getInstance().gui.setScreen(this.parent))
-            .bounds(centerX + 2, advY + 72, 98, 20)
+            .bounds(centerX + 2, advY + 3 * advRowStep, 98, 20)
             .build();
          this.addRenderableWidget(this.backButton);
          if (!this.categoriesFetched) {

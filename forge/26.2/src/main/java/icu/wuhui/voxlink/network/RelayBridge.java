@@ -52,9 +52,15 @@ public class RelayBridge {
          } else {
             session.startForwarding();
             LOGGER.info("[Relay] Relay started: {} (A={}, B={})", new Object[]{relayKey, peerAId, peerBId});
+            // 网络线程不可直调 GUI：包一层主线程调度
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player != null) {
-               mc.player.sendSystemMessage(Component.translatable("voxlink.relay.started"));
+            if (mc != null) {
+               mc.execute(() -> {
+                  Minecraft m = Minecraft.getInstance();
+                  if (m.player != null) {
+                     m.player.sendSystemMessage(Component.translatable("voxlink.relay.started"));
+                  }
+               });
             }
 
             if (this.running.compareAndSet(false, true)) {

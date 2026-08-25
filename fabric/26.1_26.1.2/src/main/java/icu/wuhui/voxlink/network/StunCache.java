@@ -20,8 +20,9 @@ public class StunCache {
    private static Path getCachePath() {
       File gameDir = Minecraft.getInstance().gameDirectory;
       File voxlinkDir = new File(gameDir, "voxlink");
-      if (!voxlinkDir.exists()) {
-         voxlinkDir.mkdirs();
+      if (!voxlinkDir.exists() && !voxlinkDir.mkdirs()) {
+         // 安全/健壮性修复：mkdirs 返回值必须检查，失败时给出可诊断日志
+         VoxLinkMod.LOGGER.warn("[StunCache] Failed to create cache directory: {}", voxlinkDir.getAbsolutePath());
       }
 
       return new File(voxlinkDir, "stun_cache.json").toPath();

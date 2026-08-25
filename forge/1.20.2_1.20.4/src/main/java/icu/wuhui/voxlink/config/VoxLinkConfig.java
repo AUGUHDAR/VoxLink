@@ -45,6 +45,10 @@ public class VoxLinkConfig {
     private volatile boolean parallelP2P = true;
     private volatile boolean updateCheckEnabled = true;
     private volatile boolean useWebSocket = true;
+    /** 日志上传默认关闭（安全修复：隐私数据默认不出网），GUI 开关写入并持久化到此字段 */
+    private volatile boolean logUploadEnabled = false;
+    /** 显式允许 http:// 信令服务器（默认拒绝，validate 中强制回退默认 https 地址） */
+    private volatile boolean allowInsecureServerUrl = false;
 
     public VoxLinkConfig() {
         this.serverUrl = DEFAULT_SERVER_URL;
@@ -58,6 +62,8 @@ public class VoxLinkConfig {
         this.parallelP2P = true;
         this.updateCheckEnabled = true;
         this.useWebSocket = true;
+        this.logUploadEnabled = false;
+        this.allowInsecureServerUrl = false;
     }
 
     //debounce Gson默认绕过构造器+字段初始化器 旧配置缺字段会读成false
@@ -84,6 +90,8 @@ public class VoxLinkConfig {
                 config.parallelP2P = root.has("parallelP2P") ? root.get("parallelP2P").getAsBoolean() : true;
                 config.updateCheckEnabled = root.has("updateCheckEnabled") ? root.get("updateCheckEnabled").getAsBoolean() : true;
                 config.useWebSocket = root.has("useWebSocket") ? root.get("useWebSocket").getAsBoolean() : true;
+                config.logUploadEnabled = root.has("logUploadEnabled") && root.get("logUploadEnabled").getAsBoolean();
+                config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
                 if (config.serverUrl == null || config.serverUrl.isEmpty()) {
                     config.serverUrl = DEFAULT_SERVER_URL;
                 }
@@ -133,6 +141,11 @@ public class VoxLinkConfig {
             serverUrl = serverUrl.replaceAll("/+$", "");
         }
 
+        // 安全修复：明文 http:// 信令默认拒绝（凭据/房间令牌会明文出网）；
+        // 显式设置 allowInsecureServerUrl=true 可放行自建 http 服务器。
+        if ((this.serverUrl != null && this.serverUrl.toLowerCase().startsWith("http://")) && !this.allowInsecureServerUrl) {
+           this.serverUrl = "https://p2p.wuhui.icu";
+        }
         if (heartbeatInterval < MIN_HEARTBEAT_INTERVAL) heartbeatInterval = MIN_HEARTBEAT_INTERVAL;
         if (signalPollInterval < MIN_SIGNAL_POLL_INTERVAL) signalPollInterval = MIN_SIGNAL_POLL_INTERVAL;
         if (connectionTimeout < MIN_CONNECTION_TIMEOUT) connectionTimeout = MIN_CONNECTION_TIMEOUT;
@@ -163,5 +176,21 @@ public class VoxLinkConfig {
     public void setUpdateCheckEnabled(boolean v) { this.updateCheckEnabled = v; }
     public boolean isUseWebSocket() { return useWebSocket; }
     public void setUseWebSocket(boolean v) { this.useWebSocket = v; }
+    public boolean isLogUploadEnabled() {
+       return this.logUploadEnabled;
+    }
+
+    public void setLogUploadEnabled(boolean v) {
+       this.logUploadEnabled = v;
+    }
+
+    public boolean isAllowInsecureServerUrl() {
+       return this.allowInsecureServerUrl;
+    }
+
+    public void setAllowInsecureServerUrl(boolean v) {
+       this.allowInsecureServerUrl = v;
+    }
+
     public int getConfigVersion() { return configVersion; }
 }

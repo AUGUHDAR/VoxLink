@@ -205,11 +205,15 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             .bounds(centerX - 100, configY, 200, 20)
             .build()
       );
-      boolean uploadLogOn = LogUploadState.isLogUploadEnabled();
+      boolean uploadLogOn = VoxLinkMod.getConfig().isLogUploadEnabled();
       Button uploadLogBtn = Button.builder(
             Component.translatable("voxlink.log_upload.toggle", new Object[]{Component.translatable(uploadLogOn ? "voxlink.log_upload.on" : "voxlink.log_upload.off")}),
             button -> {
-               LogUploadState.setLogUploadEnabled(!LogUploadState.isLogUploadEnabled());
+               // 开关持久化到配置文件（默认关闭），不再用内存静态变量
+               boolean newVal = !VoxLinkMod.getConfig().isLogUploadEnabled();
+               VoxLinkMod.getConfig().setLogUploadEnabled(newVal);
+               LogUploadState.setLogUploadEnabled(newVal);
+               VoxLinkMod.getConfig().save();
                this.needsRebuild = true;
             }
          )
@@ -383,10 +387,10 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
          }
       } else {
          this.drawCenteredClipped(
-            graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, uploadLogY - RELAY_HINT_Y_OFFSET, VoxLinkColors.GRAY, maxWidth
+            graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, uploadLogY - RELAY_HINT_Y_OFFSET - 2, VoxLinkColors.GRAY, maxWidth
          );
          this.drawCenteredClipped(
-            graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, uploadLogY - RELAY_SLOGAN_Y_OFFSET, VoxLinkColors.MUTED, maxWidth
+            graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, uploadLogY - RELAY_SLOGAN_Y_OFFSET - 2, VoxLinkColors.MUTED, maxWidth
          );
       }
 
@@ -397,7 +401,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       }
 
       if (!TerracottaBinary.isPlatformSupported()) {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.unsupported_platform").getString(), centerX, 36, COLOR_ORANGE, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.unsupported_platform").getString(), centerX, currentRoom != null ? configY - 12 : 36, COLOR_ORANGE, maxWidth);
       }
    }
 

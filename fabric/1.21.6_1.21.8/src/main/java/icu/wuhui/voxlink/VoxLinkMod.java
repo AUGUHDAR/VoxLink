@@ -2,6 +2,8 @@ package icu.wuhui.voxlink;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import icu.wuhui.voxlink.command.LanCommandRegistry;
+import icu.wuhui.voxlink.command.LanHostRegistry;
+import icu.wuhui.voxlink.config.LogUploadState;
 import icu.wuhui.voxlink.config.VoxLinkConfig;
 import icu.wuhui.voxlink.network.ConnectionFallback;
 import icu.wuhui.voxlink.network.P2PBridge;
@@ -125,6 +127,8 @@ public class VoxLinkMod implements ModInitializer {
 
    public void onInitialize() {
       config = VoxLinkConfig.load();
+      // 日志上传默认关闭：内存开关以持久化配置初始化（用户在 GUI 主动开启后行为如旧）
+      LogUploadState.setLogUploadEnabled(config.isLogUploadEnabled());
 
       try {
          signalingClient = new SignalingClient(config);
@@ -177,6 +181,7 @@ public class VoxLinkMod implements ModInitializer {
       ServerLifecycleEvents.SERVER_STOPPING.register((ServerStopping)server -> {
          if (server instanceof IntegratedServer) {
             LOGGER.info("Built-in server stopped, leaving room (network kept)");
+            LanHostRegistry.clear();
             if (roomManager != null && roomManager.isInRoom()) {
                roomManager.leaveRoom("连接断开");
             }

@@ -30,6 +30,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
    private boolean needsRebuild = true;
    private long lastRebuildTime = 0L;
    private boolean lastPausedState = false;
+   private boolean lastDownloading = false;
    private Button terracottaDownloadBtn;
    private Button pauseResumeBtn;
    private Button cancelDownloadBtn;
@@ -77,60 +78,84 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       boolean stateChanged = !Objects.equals(currentRoom, this.lastRenderedRoom)
          || currentIsHost != this.lastRenderedIsHost
          || currentUsingRelay != this.lastRenderedUsingRelay;
-      boolean downloadStateChanged = this.needsRebuild;
-      if (!this.needsRebuild && TerracottaManager.isDownloading()) {
-         boolean pausedNow = TerracottaManager.isDownloadPaused();
-         if (pausedNow != this.lastPausedState) {
-            downloadStateChanged = true;
-            this.lastPausedState = pausedNow;
-         }
-      }
-
-      if (this.needsRebuild || stateChanged || downloadStateChanged || now - this.lastRebuildTime >= 250L) {
+      boolean downloading = TerracottaManager.isDownloading();
+      boolean downloadChanged = downloading != this.lastDownloading;
+      boolean pausedChanged = downloading && TerracottaManager.isDownloadPaused() != this.lastPausedState;
+      if (this.needsRebuild || stateChanged || downloadChanged || pausedChanged) {
          this.lastRenderedRoom = currentRoom;
          this.lastRenderedIsHost = currentIsHost;
          this.lastRenderedUsingRelay = currentUsingRelay;
-         this.lastRebuildTime = now;
+         this.lastDownloading = downloading;
+         this.lastPausedState = TerracottaManager.isDownloadPaused();
+         this.needsRebuild = false;
          this.rebuildWidgetsForState();
-         if (!TerracottaManager.isDownloading() && !this.needsRebuild) {
-            if (TerracottaManager.isBinaryReady()) {
-               this.needsRebuild = true;
-            }
-
-            if (this.pauseResumeBtn != null) {
-               this.needsRebuild = true;
-            }
-         }
       }
    }
 
+   /**
+    * UI 优化(1.1.1)：底部按钮区布局单源计算（rebuild 与 render 共用，杜绝两处公式漂移）。
+    * 返回 {backY, toggleRowY, uploadLogY(-1=紧凑并入右半列), configY, downloadY, topStartY}。
+    * 屏幕过矮时自动把 中继/日志上传 并排为两列半宽按钮，避免与顶部区域重叠。
+    */
+   private int[] bottomLayout(RoomInfo currentRoom, boolean showDownload, boolean isDownloading) {
+      int backY = this.height - 28;
+      boolean tight = this.height < 252;
+      int step = tight ? 22 : 24;
+      int toggleRowY = backY - step;
+      int uploadY;
+      int configY = toggleRowY - step;
+      if (tight) {
+         uploadY = -1;
+      } else {
+         uploadY = configY;
+         configY = uploadY - step;
+      }
+
+      int hintSpace = currentRoom == null && !tight ? 28 : 0;
+      configY -= hintSpace;
+      int downloadY = configY - step;
+      int progressSpace = showDownload && isDownloading ? 25 : 4;
+      int bottomSectionTop = showDownload ? downloadY : configY;
+      int topRows = currentRoom != null ? (currentRoom.isHost() ? 1 : 0) : 2;
+      int topSectionHeight = Math.max(1, topRows + 1) * step;
+      boolean hasTc = currentRoom != null && currentRoom.getTerracottaCode() != null && !currentRoom.getTerracottaCode().isEmpty();
+      int headerBottom = currentRoom != null ? (hasTc ? 78 : 64) : 58;
+      int topStart = Math.min(this.height / 2 - 30, bottomSectionTop - progressSpace - topSectionHeight);
+      topStart = Math.max(topStart, headerBottom);
+      return new int[]{backY, toggleRowY, uploadY, configY, downloadY, topStart};
+   }
+
+   /** UI 优化(1.1.1)：官网按钮紧随顶部首行之后（旧实现固定 +48，单行布局时留 24px 空洞、三行布局时与浏览房间贴死）。 */
+   private int websiteY() {
+      RoomInfo currentRoom = VoxLinkMod.getRoomManager().getCurrentRoom();
+      int[] L = this.bottomLayout(currentRoom, TerracottaBinary.isPlatformSupported() && !TerracottaManager.isBinaryReady(), TerracottaManager.isDownloading());
+      int rowsBefore;
+      if (currentRoom != null) {
+         rowsBefore = currentRoom.isHost() ? 1 : 0;
+      } else if (isInSingleplayerWorld()) {
+         rowsBefore = 1;
+      } else {
+         rowsBefore = 2;
+      }
+
+      return L[5] + rowsBefore * (L[2] < 0 ? 22 : 24);
+   }
    private void rebuildWidgetsForState() {
       this.clearOurWidgets();
       int centerX = this.width / 2;
       RoomInfo currentRoom = VoxLinkMod.getRoomManager().getCurrentRoom();
-      int bottomY = this.height - 28;
-      int relayY = bottomY - 20 - 4;
-      int hintSpace = currentRoom == null ? 28 : 0;
-      int uploadLogY = relayY - 20 - 4;
-      int configY = uploadLogY - 20 - 4 - hintSpace;
       boolean platformSupported = TerracottaBinary.isPlatformSupported();
       boolean showDownload = platformSupported && !TerracottaManager.isBinaryReady();
       boolean isDownloading = TerracottaManager.isDownloading();
-      int downloadY = configY - 20 - 4;
-      int topBtnCount;
-      if (currentRoom != null) {
-         topBtnCount = 1;
-      } else if (isInSingleplayerWorld()) {
-         topBtnCount = 1;
-      } else {
-         topBtnCount = 3;
-      }
-
-      int topSectionHeight = topBtnCount * 20 + (topBtnCount - 1) * 4;
-      int progressSpace = showDownload && isDownloading ? 25 : 4;
-      int bottomSectionTop = showDownload ? downloadY : configY;
-      int topStartY = Math.min(this.height / 2 - 30, bottomSectionTop - topSectionHeight - progressSpace);
-      topStartY = Math.max(topStartY, 60);
+      int[] L = this.bottomLayout(currentRoom, showDownload, isDownloading);
+      int bottomY = L[0];
+      int relayY = L[1];
+      int uploadLogY = L[2];
+      boolean tightToggles = uploadLogY < 0;
+      int configY = L[3];
+      int downloadY = L[4];
+      int step = tightToggles ? 22 : 24;
+      int topStartY = L[5];
       if (currentRoom != null) {
          if (currentRoom.isHost()) {
             this.addRenderableWidget(
@@ -155,13 +180,13 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
          );
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.browse_rooms"), button -> Minecraft.getInstance().gui.setScreen(new RoomBrowserScreenBase(this)))
-               .bounds(centerX - 100, topStartY + 20 + 4, 200, 20)
+               .bounds(centerX - 100, topStartY + step, 200, 20)
                .build()
          );
       }
 
       this.addRenderableWidget(
-         Button.builder(Component.translatable("voxlink.website"), button -> this.openWebsite()).bounds(centerX - 100, topStartY + 48, 200, 20).build()
+         Button.builder(Component.translatable("voxlink.website"), button -> this.openWebsite()).bounds(centerX - 100, websiteY(), 200, 20).build()
       );
       if (showDownload) {
          if (isDownloading) {
@@ -206,15 +231,19 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             .bounds(centerX - 100, configY, 200, 20)
             .build()
       );
-      boolean uploadLogOn = LogUploadState.isLogUploadEnabled();
+      boolean uploadLogOn = VoxLinkMod.getConfig().isLogUploadEnabled();
       Button uploadLogBtn = Button.builder(
             Component.translatable("voxlink.log_upload.toggle", new Object[]{Component.translatable(uploadLogOn ? "voxlink.log_upload.on" : "voxlink.log_upload.off")}),
             button -> {
-               LogUploadState.setLogUploadEnabled(!LogUploadState.isLogUploadEnabled());
+               // 开关持久化到配置文件（默认关闭），不再用内存静态变量
+               boolean newVal = !VoxLinkMod.getConfig().isLogUploadEnabled();
+               VoxLinkMod.getConfig().setLogUploadEnabled(newVal);
+               LogUploadState.setLogUploadEnabled(newVal);
+               VoxLinkMod.getConfig().save();
                this.needsRebuild = true;
             }
          )
-         .bounds(centerX - 100, uploadLogY, 200, 20)
+         .bounds(tightToggles ? centerX + 2 : centerX - 100, tightToggles ? relayY : uploadLogY, tightToggles ? 98 : 200, 20)
          .build();
       this.addRenderableWidget(uploadLogBtn);
       boolean relayOn = VoxLinkMod.getConfig().isRelayEnabled();
@@ -232,7 +261,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                this.needsRebuild = true;
             }
          )
-         .bounds(centerX - 100, relayY, 200, 20)
+         .bounds(centerX - 100, relayY, tightToggles ? 98 : 200, 20)
          .build();
       if (usingRelay) {
          relayBtn.active = false;
@@ -320,11 +349,14 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       this.drawCenteredString(graphics, this.title.getString(), centerX, 20, -1);
       RoomInfo currentRoom = VoxLinkMod.getRoomManager().getCurrentRoom();
       int maxWidth = this.width - 20;
-      int bottomY = this.height - 28;
-      int relayY = bottomY - 20 - 4;
-      int uploadLogY = relayY - 20 - 4;
-      int configY = uploadLogY - 20 - 4 - (currentRoom == null ? 28 : 0);
-      int downloadY = configY - 20 - 4;
+      boolean showDownloadNow = TerracottaBinary.isPlatformSupported() && !TerracottaManager.isBinaryReady();
+      boolean downloadingNow = TerracottaManager.isDownloading();
+      int[] L = this.bottomLayout(currentRoom, showDownloadNow, downloadingNow);
+      int bottomY = L[0];
+      int relayY = L[1];
+      int uploadLogY = L[2] < 0 ? relayY : L[2];
+      int configY = L[3];
+      int downloadY = L[4];
       this.codeClickAreas.clear();
       this.codeClickTexts.clear();
       if (currentRoom != null) {
@@ -383,8 +415,8 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             }
          }
       } else {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, uploadLogY - 24, -7829368, maxWidth);
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, uploadLogY - 12, -5592406, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, uploadLogY - 26, -7829368, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, uploadLogY - 14, -5592406, maxWidth);
       }
 
       if (TerracottaManager.isDownloading() && this.pauseResumeBtn != null) {
@@ -394,7 +426,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       }
 
       if (!TerracottaBinary.isPlatformSupported()) {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.unsupported_platform").getString(), centerX, 36, -22016, maxWidth);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.unsupported_platform").getString(), centerX, currentRoom != null ? configY - 12 : 36, -22016, maxWidth);
       }
    }
 

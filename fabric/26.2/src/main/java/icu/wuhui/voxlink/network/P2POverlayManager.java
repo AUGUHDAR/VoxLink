@@ -12,6 +12,7 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -28,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
+import javax.crypto.Mac;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +41,10 @@ public class P2POverlayManager {
    private static final int PING_INTERVAL_SEC = 2;
    private static final int MAX_PING_FAILURES = 5;
    private static final int MAX_SEEN_SEQ_SIZE = 1000;
+   /** 安全修复：单个源在 seenSeq 去重窗口内的最大条目数，防伪造 seq 刷爆窗口挤掉合法去重记录 */
+   private static final int PER_SOURCE_SEEN_CAP = 400;
+   /** 安全修复：解压输出上限 256KB，超限丢弃（防 zip-bomb 式解压放大） */
+   private static final int MAX_DECOMPRESSED_BYTES = 256 * 1024;
    private DatagramSocket socket;
    private final AtomicBoolean running = new AtomicBoolean(false);
    private final AtomicReference<P2POverlayManager.Role> role = new AtomicReference<>(P2POverlayManager.Role.NONE);
@@ -50,6 +56,14 @@ public class P2POverlayManager {
    private final int localPort;
    private final AtomicInteger packetSeq = new AtomicInteger(0);
    private final ConcurrentHashMap<String, Long> seenSeq = new ConcurrentHashMap<>();
+   /**
+    * overlayAuthV1 链路密钥表（nodeId → Mac）。由上层在确认对端声明
+    * ProtocolNegotiator.CAP_OVERLAY_AUTH_V1 后注入；对已配置密钥的来源强制校验报文
+    * "mac" 字段（截断 HMAC-SHA256），未配置的来源保持旧行为（老对端互操作不变）。
+    */
+   private final ConcurrentHashMap<String, Mac> linkKeysByNode = new ConcurrentHashMap<>();
+   private final AtomicInteger authDropCount = new AtomicInteger(0);
+   private static final AtomicInteger DECOMPRESS_DROP_COUNT = new AtomicInteger(0);
    private ExecutorService ioExecutor;
    private ScheduledExecutorService pingScheduler;
    private volatile P2POverlayManager.PacketHandler handler;
@@ -201,6 +215,75 @@ public class P2POverlayManager {
       this.nodeId = id;
    }
 
+   /**
+    * overlayAuthV1：为指定邻居节点注入链路密钥（截断 HMAC-SHA256 用）。
+    * 注入后：来自该 nodeId 的所有报文必须携带有效 "mac" 字段，否则丢弃并计数。
+    * 不注入则该来源保持旧行为（与老版本互操作）。
+    */
+   public void setLinkKeyForPeer(String peerNodeId, byte[] key) {
+      if (peerNodeId != null && !peerNodeId.isEmpty()) {
+         if (key == null) {
+            this.linkKeysByNode.remove(peerNodeId);
+         } else {
+            Mac mac = PunchAuth.createMac(key);
+            if (mac != null) {
+               this.linkKeysByNode.put(peerNodeId, mac);
+            }
+         }
+      }
+   }
+
+   /** 为报文附加 overlayAuthV1 截断 MAC（对去除了 mac 字段后的规范 JSON 签名，取前 8 字节 hex）。 */
+   static void signPacket(JsonObject packet, Mac mac) {
+      if (mac == null || packet.has("mac")) {
+         return;
+      }
+
+      try {
+         byte[] full;
+         synchronized (mac) {
+            full = mac.doFinal(GSON.toJson(packet).getBytes(StandardCharsets.UTF_8));
+         }
+
+         StringBuilder hex = new StringBuilder();
+         for (int i = 0; i < 8 && i < full.length; i++) {
+            hex.append(String.format("%02x", full[i]));
+         }
+
+         packet.addProperty("mac", hex.toString());
+      } catch (Exception ignored) {
+      }
+   }
+
+   /** 校验并剥离 "mac" 字段；返回 false 表示 MAC 缺失/无效（应丢弃）。 */
+   static boolean verifyAndStripPacket(JsonObject packet, Mac mac) {
+      if (mac == null) {
+         return true;
+      }
+
+      String claimed = packet.has("mac") && packet.get("mac").isJsonPrimitive() ? packet.get("mac").getAsString() : null;
+      if (claimed == null) {
+         return false;
+      }
+
+      packet.remove("mac");
+      try {
+         byte[] full;
+         synchronized (mac) {
+            full = mac.doFinal(GSON.toJson(packet).getBytes(StandardCharsets.UTF_8));
+         }
+
+         StringBuilder hex = new StringBuilder();
+         for (int i = 0; i < 8 && i < full.length; i++) {
+            hex.append(String.format("%02x", full[i]));
+         }
+
+         return MessageDigest.isEqual(hex.toString().getBytes(StandardCharsets.US_ASCII), claimed.getBytes(StandardCharsets.US_ASCII));
+      } catch (Exception e) {
+         return false;
+      }
+   }
+
    public void stop() {
       this.running.set(false);
       this.upstreamAddr.set(null);
@@ -224,6 +307,7 @@ public class P2POverlayManager {
 
       this.role.set(P2POverlayManager.Role.NONE);
       this.seenSeq.clear();
+      this.linkKeysByNode.clear();
       LOGGER.info("P2P overlay stopped");
    }
 
@@ -277,6 +361,17 @@ public class P2POverlayManager {
          JsonObject packet = (JsonObject)GSON.fromJson(json, JsonObject.class);
          String type = packet.has("type") ? packet.get("type").getAsString() : "";
          String from = packet.has("from") ? packet.get("from").getAsString() : "";
+         // overlayAuthV1：对已注入链路密钥的来源强制 MAC 校验（失败丢弃并计数）；未配置来源保持旧行为
+         Mac linkMac = from != null ? this.linkKeysByNode.get(from) : null;
+         if (linkMac != null && !verifyAndStripPacket(packet, linkMac)) {
+            int drops = this.authDropCount.incrementAndGet();
+            if (drops == 1 || drops % 50 == 0) {
+               LOGGER.warn("Overlay packet from configured peer {} failed MAC verification (drop #{})", from, drops);
+            }
+
+            return;
+         }
+
          switch (type) {
             case "handshake":
                this.handleHandshake(packet, inetAddr);
@@ -300,6 +395,16 @@ public class P2POverlayManager {
    }
 
    private void handleHandshake(JsonObject packet, InetSocketAddress fromAddr) {
+      // 安全修复：握手来源约束——拓扑指令已把对端 ip:port 下发给链路两端，
+      // 因此合法握手只可能来自已配置的 upstream/downstream 地址（NAT 重写端口允许漂移，IP 必须一致）；
+      // 链路尚未配置任何对端时保持旧行为（引导期兼容）。其余来源一律拒绝，
+      // 防止任意互联网主机伪造 handshake 抢占 upstream/downstream 槽位。
+      if (!this.isKnownLinkAddress(fromAddr)) {
+         int drops = this.authDropCount.incrementAndGet();
+         LOGGER.warn("Rejected overlay handshake from unknown source {} (drop #{})", fromAddr, drops);
+         return;
+      }
+
       String peerId = packet.has("from") ? packet.get("from").getAsString() : "";
       LOGGER.info("Received downstream handshake: {}", peerId);
       if (this.role.get() == P2POverlayManager.Role.CHAIN_HEAD || this.role.get() == P2POverlayManager.Role.CHAIN_MIDDLE) {
@@ -310,6 +415,24 @@ public class P2POverlayManager {
       if (this.handler != null) {
          this.handler.onLinkReady();
       }
+   }
+
+   /**
+    * 判定握手来源是否可信：协议上握手只会由下游发往上游（用于登记 downstream 槽位），
+    * 因此只需对 downstream 槽位做来源校验。downstream 地址未配置时（引导期或拓扑指令
+    * 未携带地址）保持旧行为，避免破坏首连。
+    */
+   private boolean isKnownLinkAddress(InetSocketAddress fromAddr) {
+      if (fromAddr == null) {
+         return false;
+      }
+
+      InetSocketAddress down = this.downstreamAddr.get();
+      return down == null || isSameHost(down, fromAddr);
+   }
+
+   private static boolean isSameHost(InetSocketAddress a, InetSocketAddress b) {
+      return a != null && a.getAddress() != null && a.getAddress().equals(b.getAddress());
    }
 
    private void handlePing(JsonObject packet, String from, InetSocketAddress senderAddr) {
@@ -350,6 +473,12 @@ public class P2POverlayManager {
    private void handleDataRelay(JsonObject packet, String fromDirection, InetSocketAddress fromAddr) {
       String from = packet.has("from") ? packet.get("from").getAsString() : "";
       int seq = packet.has("seq") ? packet.get("seq").getAsInt() : 0;
+      // 安全修复：单源占比限制——伪造高频唯一 seq 可把合法去重记录挤出窗口（重放攻击面），
+      // 限制单个 from 最多占窗口的 40%，超限直接丢弃该源的新包
+      if (this.countSeenForSource(from) >= PER_SOURCE_SEEN_CAP) {
+         return;
+      }
+
       String dedupKey = from + ":" + seq;
       if (this.seenSeq.putIfAbsent(dedupKey, System.currentTimeMillis()) == null) {
          if (this.seenSeq.size() > 1000) {
@@ -396,6 +525,24 @@ public class P2POverlayManager {
             }
          }
       }
+   }
+
+   /** 统计 seenSeq 窗口中属于指定源的条目数（窗口上限 1000，线性扫描代价可忽略）。 */
+   private int countSeenForSource(String from) {
+      if (from == null || from.isEmpty()) {
+         return 0;
+      }
+
+      String prefix = from + ":";
+      int count = 0;
+
+      for (String key : this.seenSeq.keySet()) {
+         if (key.startsWith(prefix) && ++count >= PER_SOURCE_SEEN_CAP) {
+            break;
+         }
+      }
+
+      return count;
    }
 
    private void forwardToDownstream(JsonObject packet) {
@@ -561,7 +708,14 @@ public class P2POverlayManager {
             ByteArrayInputStream bis = new ByteArrayInputStream(data, 4, payloadLen);
 
             try (GZIPInputStream gis = new GZIPInputStream(bis)) {
-               byte[] decompressed = gis.readAllBytes();
+               // 安全修复：解压输出上限（防解压放大攻击），超限丢弃并计数
+               byte[] decompressed = readBounded(gis, MAX_DECOMPRESSED_BYTES);
+               if (decompressed == null) {
+                  int drops = DECOMPRESS_DROP_COUNT.incrementAndGet();
+                  LOGGER.warn("Overlay packet decompressed size exceeded {} bytes, dropped (drop #{})", MAX_DECOMPRESSED_BYTES, drops);
+                  return null;
+               }
+
                return new String(decompressed, StandardCharsets.UTF_8);
             }
          } else {
@@ -570,6 +724,25 @@ public class P2POverlayManager {
       } catch (IOException e) {
          return null;
       }
+   }
+
+   /** 有界读取：超过 limit 返回 null；正常流一次读完全部内容。 */
+   private static byte[] readBounded(GZIPInputStream gis, int limit) throws IOException {
+      ByteArrayOutputStream bos = new ByteArrayOutputStream();
+      byte[] chunk = new byte[8192];
+      int total = 0;
+
+      int n;
+      while ((n = gis.read(chunk)) != -1) {
+         total += n;
+         if (total > limit) {
+            return null;
+         }
+
+         bos.write(chunk, 0, n);
+      }
+
+      return bos.toByteArray();
    }
 
    static byte[] framePacket(byte[] compressed) {

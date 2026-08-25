@@ -43,13 +43,13 @@ public final class TerracottaBinary {
    private static final String LATEST_VERSION = "0.4.2";
    private static final String META_URL = "https://terracotta.glavo.site/meta";
    private static final int META_TIMEOUT_SEC = 8;
-   private static final String GITHUB_URL = "https://github.com/burningtnt/Terracotta/releases/download/v0.4.2";
-   private static final String GITEE_URL = "https://gitee.com/burningtnt/Terracotta/releases/download/v0.4.2";
+   private static final String GITHUB_URL = "https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION;
+   private static final String GITEE_URL = "https://gitee.com/burningtnt/Terracotta/releases/download/v" + VERSION;
    private static final String[] MIRROR_BASES = new String[]{
-      "https://cnb.cool/HMCL-Terracotta/Terracotta/-/releases/download/v0.4.2",
-      "https://alist.8mi.tech/d/mirror/HMCL-Terracotta/Auto/v0.4.2",
-      "https://ghproxy.net/https://github.com/burningtnt/Terracotta/releases/download/v0.4.2",
-      "https://mirror.ghproxy.com/https://github.com/burningtnt/Terracotta/releases/download/v0.4.2"
+      "https://cnb.cool/HMCL-Terracotta/Terracotta/-/releases/download/v" + VERSION,
+      "https://alist.8mi.tech/d/mirror/HMCL-Terracotta/Auto/v" + VERSION,
+      "https://ghproxy.net/https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION,
+      "https://mirror.ghproxy.com/https://github.com/burningtnt/Terracotta/releases/download/v" + VERSION
    };
    private static final int MAX_RETRIES = 3;
    private static final int RETRY_DELAY_MS = 2000;
@@ -68,81 +68,81 @@ public final class TerracottaBinary {
       new TerracottaBinary.PlatformInfo(
          "windows",
          "x86_64",
-         "terracotta-0.4.2-windows-x86_64-pkg.tar.gz",
+         "terracotta-" + VERSION + "-windows-x86_64-pkg.tar.gz",
          "74c10568a7fea9c1d38cf8d2d4ca90baf1517f8e5a26c63d3349db70bc449796",
-         "terracotta-0.4.2-windows-x86_64.exe",
+         "terracotta-" + VERSION + "-windows-x86_64.exe",
          false
       ),
       new TerracottaBinary.PlatformInfo(
          "windows",
          "aarch64",
-         "terracotta-0.4.2-windows-arm64-pkg.tar.gz",
+         "terracotta-" + VERSION + "-windows-arm64-pkg.tar.gz",
          "782c2fa911488d487447694acca6b17fa68304c87023fb6814b83a167fc2845f",
-         "terracotta-0.4.2-windows-arm64.exe",
+         "terracotta-" + VERSION + "-windows-arm64.exe",
          false
       ),
       new TerracottaBinary.PlatformInfo(
          "linux",
          "x86_64",
-         "terracotta-0.4.2-linux-x86_64-pkg.tar.gz",
+         "terracotta-" + VERSION + "-linux-x86_64-pkg.tar.gz",
          "dc8eed0338a1888743ab38468d88b9dd8a60d60c29df072adba7c8d2edaf7937",
-         "terracotta-0.4.2-linux-x86_64",
+         "terracotta-" + VERSION + "-linux-x86_64",
          false
       ),
       new TerracottaBinary.PlatformInfo(
          "linux",
          "aarch64",
-         "terracotta-0.4.2-linux-arm64-pkg.tar.gz",
+         "terracotta-" + VERSION + "-linux-arm64-pkg.tar.gz",
          "1cc03ed2ccaab8a7b64e8eb375ccfb8c1d4cd28f4c1a242fe3b492522f9f4aad",
-         "terracotta-0.4.2-linux-arm64",
+         "terracotta-" + VERSION + "-linux-arm64",
          false
       ),
       new TerracottaBinary.PlatformInfo(
          "macos",
          "x86_64",
-         "terracotta-0.4.2-macos-x86_64-pkg.tar.gz",
+         "terracotta-" + VERSION + "-macos-x86_64-pkg.tar.gz",
          "07899429515f7646fd6c271acb39a2d3a34d330547b1d2682c2e3311db07aa0a",
-         "terracotta-0.4.2-macos-x86_64",
+         "terracotta-" + VERSION + "-macos-x86_64",
          false
       ),
       new TerracottaBinary.PlatformInfo(
          "macos",
          "aarch64",
-         "terracotta-0.4.2-macos-arm64-pkg.tar.gz",
+         "terracotta-" + VERSION + "-macos-arm64-pkg.tar.gz",
          "14a6cfa98e841c33b552f2291b0637461f37813c0bb3d29c6b56a59cb5e6714a",
-         "terracotta-0.4.2-macos-arm64",
+         "terracotta-" + VERSION + "-macos-arm64",
          false
       ),
       new TerracottaBinary.PlatformInfo(
          "android",
          "aarch64",
-         "terracotta-0.4.2-android-arm64v8a.so",
+         "terracotta-" + VERSION + "-android-arm64v8a.so",
          "fc426710de5f53ae5b6350fdffe1012082992dac5b9d93ea5e86c0e56af5567a",
-         "terracotta-0.4.2-android-arm64v8a.so",
+         "terracotta-" + VERSION + "-android-arm64v8a.so",
          true
       ),
       new TerracottaBinary.PlatformInfo(
          "android",
          "armv7",
-         "terracotta-0.4.2-android-armv7.so",
+         "terracotta-" + VERSION + "-android-armv7.so",
          "a777504e66bff55df4774d953598e33211a05b782fff4a5fd2a5dba254474239",
-         "terracotta-0.4.2-android-armv7.so",
+         "terracotta-" + VERSION + "-android-armv7.so",
          true
       ),
       new TerracottaBinary.PlatformInfo(
          "android",
          "x86",
-         "terracotta-0.4.2-android-x86.so",
+         "terracotta-" + VERSION + "-android-x86.so",
          "45df60fe08e9d37ac1eab720eb494405162ff911b1b8d54ec3342c041e691722",
-         "terracotta-0.4.2-android-x86.so",
+         "terracotta-" + VERSION + "-android-x86.so",
          true
       ),
       new TerracottaBinary.PlatformInfo(
          "android",
          "x86_64",
-         "terracotta-0.4.2-android-x86_64.so",
+         "terracotta-" + VERSION + "-android-x86_64.so",
          "93f248637a966c8d3bb84d06ed027ad9ba7347615b3bab92e7d38b8764d023e4",
-         "terracotta-0.4.2-android-x86_64.so",
+         "terracotta-" + VERSION + "-android-x86_64.so",
          true
       )
    };
@@ -513,8 +513,8 @@ public final class TerracottaBinary {
 
    private static List<String> raceMirrors(String filename) {
       String[] bases = new String[MIRROR_BASES.length + 2];
-      bases[0] = "https://github.com/burningtnt/Terracotta/releases/download/v0.4.2";
-      bases[1] = "https://gitee.com/burningtnt/Terracotta/releases/download/v0.4.2";
+      bases[0] = GITHUB_URL;
+      bases[1] = GITEE_URL;
 
       for (int i = 0; i < MIRROR_BASES.length; i++) {
          bases[i + 2] = MIRROR_BASES[i];
@@ -926,11 +926,11 @@ public final class TerracottaBinary {
    }
 
    public static String getVersion() {
-      return "0.4.2";
+      return VERSION;
    }
 
    public static String getLatestVersion() {
-      return "0.4.2";
+      return LATEST_VERSION;
    }
 
    public static CompletableFuture<String> fetchLatestVersion() {
@@ -941,24 +941,24 @@ public final class TerracottaBinary {
             HttpResponse<String> resp = client.send(req, BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
                LOGGER.debug("Terracotta meta returned non-200: {} use fallback version", resp.statusCode());
-               return "0.4.2";
+               return LATEST_VERSION;
             } else {
                JsonObject json = JsonParser.parseString(resp.body()).getAsJsonObject();
                if (json.has("version") && !json.get("version").isJsonNull()) {
                   return json.get("version").getAsString();
                } else {
-                  return json.has("latest_version") && !json.get("latest_version").isJsonNull() ? json.get("latest_version").getAsString() : "0.4.2";
+                  return json.has("latest_version") && !json.get("latest_version").isJsonNull() ? json.get("latest_version").getAsString() : LATEST_VERSION;
                }
             }
          } catch (Exception e) {
             LOGGER.debug("Failed to fetch Terracotta latest version, use fallback: {}", e.getMessage());
-            return "0.4.2";
+            return LATEST_VERSION;
          }
       });
    }
 
    public static CompletableFuture<Boolean> isOutdated() {
-      return fetchLatestVersion().thenApply(latest -> latest != null && !latest.isEmpty() ? !"0.4.2".equals(latest) : false);
+      return fetchLatestVersion().thenApply(latest -> latest != null && !latest.isEmpty() ? !VERSION.equals(latest) : false);
    }
 
    public static boolean verifyInstallation() {

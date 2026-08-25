@@ -386,7 +386,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                      ? AttemptingJoinScreen.this.monitorTicks - AttemptingJoinScreen.this.bridgeEstablishedAtTick >= 120
                      : AttemptingJoinScreen.this.monitorTicks >= maxTicks;
                   boolean persistentRetrying = VoxLinkMod.getRoomManager().getConnectionManager().isPersistentRetrying();
-                  if (roomInfo.isConnectionFailed() || handshakeTimeout && !persistentRetrying) {
+                  if ((roomInfo.isConnectionFailed() || handshakeTimeout) && !persistentRetrying) {
                      monitorActive.set(false);
                      if (handshakeTimeout) {
                         ConnectionHelper.clearConnectInitiated();
