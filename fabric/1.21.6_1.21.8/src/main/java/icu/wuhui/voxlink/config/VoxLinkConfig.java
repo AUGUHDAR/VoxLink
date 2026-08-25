@@ -42,8 +42,8 @@ public class VoxLinkConfig {
    private volatile boolean parallelP2P = true;
    private volatile boolean updateCheckEnabled = true;
    private volatile boolean useWebSocket = true;
-   /** 日志上传默认关闭（安全修复：隐私数据默认不出网），GUI 开关写入并持久化到此字段 */
-   private volatile boolean logUploadEnabled = false;
+   /** 日志上传默认开启（产品决策：打洞体验与远程排障），GUI 开关写入并持久化到此字段 */
+   private volatile boolean logUploadEnabled = true;
    /** 显式允许 http:// 信令服务器（默认拒绝，validate 中强制回退默认 https 地址） */
    private volatile boolean allowInsecureServerUrl = false;
 
@@ -59,7 +59,7 @@ public class VoxLinkConfig {
       this.parallelP2P = true;
       this.updateCheckEnabled = true;
       this.useWebSocket = true;
-      this.logUploadEnabled = false;
+      this.logUploadEnabled = true;
       this.allowInsecureServerUrl = false;
    }
 
@@ -85,11 +85,8 @@ public class VoxLinkConfig {
             config.parallelP2P = root.has("parallelP2P") ? root.get("parallelP2P").getAsBoolean() : true;
             config.updateCheckEnabled = root.has("updateCheckEnabled") ? root.get("updateCheckEnabled").getAsBoolean() : true;
             config.useWebSocket = root.has("useWebSocket") ? root.get("useWebSocket").getAsBoolean() : true;
-            config.logUploadEnabled = root.has("logUploadEnabled") && root.get("logUploadEnabled").getAsBoolean();
+            config.logUploadEnabled = root.has("logUploadEnabled") ? root.get("logUploadEnabled").getAsBoolean() : true;
             config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
-            config.logUploadEnabled = root.has("logUploadEnabled") && root.get("logUploadEnabled").getAsBoolean();
-            config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
-            config.logUploadEnabled = root.has("logUploadEnabled") && root.get("logUploadEnabled").getAsBoolean();
             config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
             if (config.serverUrl == null || config.serverUrl.isEmpty()) {
                config.serverUrl = "https://p2p.wuhui.icu";

@@ -2,8 +2,8 @@ package icu.wuhui.voxlink.config;
 
 public final class LogUploadState
 {
-   /** 安全修复：默认关闭（隐私内容默认不出网）；启动时由 VoxLinkConfig.logUploadEnabled 初始化 */
-   private static volatile boolean enabled = false;
+   /** 默认开启（产品决策：打洞体验与远程排障）；启动时由 VoxLinkConfig.logUploadEnabled 初始化 */
+   private static volatile boolean enabled = true;
 
    private LogUploadState() {}
 

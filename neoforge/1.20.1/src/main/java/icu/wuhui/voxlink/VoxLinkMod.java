@@ -43,7 +43,7 @@ public class VoxLinkMod {
         LOGGER.info("VoxLink NeoForge initializing (dist={})", FMLEnvironment.dist);
 
         config = VoxLinkConfig.load();
-        // 日志上传默认关闭：内存开关以持久化配置初始化（用户在 GUI 主动开启后行为如旧）
+        // 日志上传默认开启：内存开关以持久化配置初始化（用户在 GUI 主动关闭后保持关闭）
         LogUploadState.setLogUploadEnabled(config.isLogUploadEnabled());
         //debounce SignalingClient构造失败不崩整个mod 客户端联机功能退化但不影响游戏
         try {

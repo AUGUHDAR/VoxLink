@@ -234,7 +234,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       Button uploadLogBtn = Button.builder(
             Component.translatable("voxlink.log_upload.toggle", new Object[]{Component.translatable(uploadLogOn ? "voxlink.log_upload.on" : "voxlink.log_upload.off")}),
             button -> {
-               // 开关持久化到配置文件（默认关闭），不再用内存静态变量
+               // 开关持久化到配置文件，不再用内存静态变量
                boolean newVal = !VoxLinkMod.getConfig().isLogUploadEnabled();
                VoxLinkMod.getConfig().setLogUploadEnabled(newVal);
                LogUploadState.setLogUploadEnabled(newVal);
