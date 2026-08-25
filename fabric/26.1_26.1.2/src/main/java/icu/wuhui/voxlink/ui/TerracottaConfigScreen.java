@@ -69,6 +69,8 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
          )
          .bounds(centerX - 100, y + 20 + 4, 200, 20)
          .build();
+      // 下载中禁止切换，避免误以为本次下载/连接会立即应用新设置
+      parallelToggle.active = !isDownloading;
       this.addRenderableWidget(parallelToggle);
       this.deleteBinaryBtn = Button.builder(Component.translatable("voxlink.terracotta.delete_binary"), button -> this.deleteBinary())
          .bounds(centerX - 100, y + 48, 200, 20)

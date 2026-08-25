@@ -52,7 +52,7 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
 
       this.codeField.setResponder(text -> {
          if (this.joinButton != null) {
-            this.joinButton.active = RoomCodeRouter.isVoxLinkCode(text) || RoomCodeRouter.isTerracottaCode(text);
+            this.joinButton.active = this.isJoinable(text);
          }
 
          if (text.length() >= 6 && this.passwordField != null && RoomCodeRouter.isVoxLinkCode(text)) {
@@ -71,7 +71,7 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
       this.addRenderableWidget(this.passwordField);
       int joinY = pwdY + 20 + 4 + 10;
       this.joinButton = Button.builder(Component.translatable("voxlink.join_room"), button -> this.attemptJoin()).bounds(centerX - 100, joinY, 200, 20).build();
-      this.joinButton.active = !this.savedCode.isEmpty() && (RoomCodeRouter.isVoxLinkCode(this.savedCode) || RoomCodeRouter.isTerracottaCode(this.savedCode));
+      this.joinButton.active = !this.savedCode.isEmpty() && this.isJoinable(this.savedCode);
       this.addRenderableWidget(this.joinButton);
       int backY = joinY + 20 + 4;
       this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), button -> this.goBack()).bounds(centerX - 100, backY, 200, 20).build());
@@ -84,6 +84,15 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
 
    public void onClose() {
       this.goBack();
+   }
+
+   /** 陶瓦房间号在陶瓦未就绪（未下载或下载中）时不可提交：按钮提前置灰并配合行内提示，避免点击后才发现不可用。 */
+   private boolean isJoinable(String text) {
+      if (RoomCodeRouter.isTerracottaCode(text)) {
+         return TerracottaManager.isBinaryReady();
+      }
+
+      return RoomCodeRouter.isVoxLinkCode(text);
    }
 
    private void goBack() {
@@ -120,6 +129,8 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
       this.drawCenteredString(graphics, Component.translatable("voxlink.join.terracotta_code_hint").getString(), centerX, backY + 20 + 18, -5592406);
       if (!this.statusMessage.isEmpty()) {
          this.drawCenteredClipped(graphics, this.statusMessage, centerX, backY + 20 + 32, this.statusColor);
+      } else if (this.codeField != null && RoomCodeRouter.isTerracottaCode(this.codeField.getValue()) && !TerracottaManager.isBinaryReady()) {
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.join.terracotta_not_ready").getString(), centerX, backY + 20 + 32, -22016);
       }
    }
 }
