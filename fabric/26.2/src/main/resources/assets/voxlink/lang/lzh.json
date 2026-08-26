@@ -268,5 +268,21 @@
     "voxlink.nat.diff_hard": "难",
     "voxlink.nat.diff_hell": "地狱",
     "voxlink.nat.doubt": "（存疑）",
-  "voxlink.terracotta.credit": "聯機核心：Terracotta（AGPL-3.0，作者 burningtnt）"
+    "voxlink.terracotta.credit": "聯機核心：Terracotta（AGPL-3.0，作者 burningtnt）",
+    "voxlink.modsync.title": "必需模組之檢",
+    "voxlink.modsync.subtitle": "入房 %s：下列者房主所需之模組也",
+    "voxlink.modsync.download_selected": "取之而行",
+    "voxlink.modsync.skip_join": "不取而徑入(恐不得入)",
+    "voxlink.modsync.back": "返",
+    "voxlink.modsync.cancel_download": "罷取",
+    "voxlink.modsync.downloading": "方取 %s/%s：%s",
+    "voxlink.modsync.download_failed": "取之不成：%s",
+    "voxlink.modsync.diff_header": "與房主異版之模組（未理，恐崩）:",
+    "voxlink.modsync.unresolvable_header": "不能自取，請手裝：",
+    "voxlink.modsync.total_size": "計 %s",
+    "voxlink.modsync.restart_title": "須再啟戲",
+    "voxlink.modsync.restart_line1": "已取必裝模組 %s 置於 mods。",
+    "voxlink.modsync.restart_line2": "再啟乃效，請退而復啟。",
+    "voxlink.modsync.exit_game": "退出其戲",
+    "voxlink.modsync.toggle.join": "入前察必需模組: %s"
 }

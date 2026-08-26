@@ -268,5 +268,21 @@
     "voxlink.nat.diff_hard": "Hard",
     "voxlink.nat.diff_hell": "Hell",
     "voxlink.nat.doubt": " (?)",
-  "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)"
+    "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)",
+    "voxlink.modsync.title": "필수 모드 확인",
+    "voxlink.modsync.subtitle": "방 %s 참여 중: 호스트가 요구하는 필수 모드",
+    "voxlink.modsync.download_selected": "다운로드 후 계속",
+    "voxlink.modsync.skip_join": "건너뛰고 참가(실패 가능)",
+    "voxlink.modsync.back": "뒤로",
+    "voxlink.modsync.cancel_download": "다운로드 취소",
+    "voxlink.modsync.downloading": "다운로드 중 %s/%s: %s",
+    "voxlink.modsync.download_failed": "다운로드 실패: %s",
+    "voxlink.modsync.diff_header": "호스트와 버전이 다른 모드(자동 처리 없음, 가끔 충돌):",
+    "voxlink.modsync.unresolvable_header": "자동 다운로드 불가, 수동 설치 필요:",
+    "voxlink.modsync.total_size": "총 %s",
+    "voxlink.modsync.restart_title": "재시작 필요",
+    "voxlink.modsync.restart_line1": "필수 모드 %s개를 mods 폴더에 저장했습니다.",
+    "voxlink.modsync.restart_line2": "재시작 후 적용됩니다. 게임을 종료 후 다시 실행하세요.",
+    "voxlink.modsync.exit_game": "게임 종료",
+    "voxlink.modsync.toggle.join": "참가 전 필수 모드 확인: %s"
 }

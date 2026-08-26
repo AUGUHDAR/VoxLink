@@ -42,7 +42,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       super.init();
       int centerX = this.width / 2;
       boolean isDownloading = TerracottaManager.isDownloading();
-      int itemCount = isDownloading ? 6 : 5;
+      int itemCount = isDownloading ? 7 : 6;
       int formHeight = itemCount * 20 + (itemCount - 1) * 4;
       int y = Math.max(44, (this.height - formHeight) / 2);
       CycleButton<Boolean> updateCheckToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isUpdateCheckEnabled())
@@ -51,6 +51,12 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
             VoxLinkMod.getConfig().save();
          });
       this.addRenderableWidget(updateCheckToggle);
+      CycleButton<Boolean> modSyncToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isJoinRequiredModsCheck())
+         .create(centerX - 100, y + 24, 200, 20, Component.translatable("voxlink.modsync.toggle.join"), (btn, val) -> {
+            VoxLinkMod.getConfig().setJoinRequiredModsCheck(val);
+            VoxLinkMod.getConfig().save();
+         });
+      this.addRenderableWidget(modSyncToggle);
       boolean currentParallel = VoxLinkMod.getConfig().isParallelP2P();
       Button parallelToggle = Button.builder(
             Component.translatable(
@@ -67,23 +73,23 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
                );
             }
          )
-         .bounds(centerX - 100, y + 20 + 4, 200, 20)
+         .bounds(centerX - 100, y + 48, 200, 20)
          .build();
       // 下载中禁止切换，避免误以为本次下载/连接会立即应用新设置
       parallelToggle.active = !isDownloading;
       this.addRenderableWidget(parallelToggle);
       this.deleteBinaryBtn = Button.builder(Component.translatable("voxlink.terracotta.delete_binary"), button -> this.deleteBinary())
-         .bounds(centerX - 100, y + 48, 200, 20)
+         .bounds(centerX - 100, y + 72, 200, 20)
          .build();
       this.deleteBinaryBtn.active = !isDownloading;
       this.addRenderableWidget(this.deleteBinaryBtn);
-      int redownloadY = y + 72;
+      int redownloadY = y + 96;
       Component redownloadLabel = this.buildRedownloadLabel();
       this.redownloadBtn = Button.builder(redownloadLabel, button -> this.startRedownload()).bounds(centerX - 100, redownloadY, 200, 20).build();
       this.redownloadBtn.active = !isDownloading;
       this.addRenderableWidget(this.redownloadBtn);
       if (isDownloading) {
-         int pauseCancelY = y + 96;
+         int pauseCancelY = y + 120;
          boolean paused = TerracottaManager.isDownloadPaused();
          this.pauseResumeBtn = Button.builder(Component.translatable(paused ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"), button -> {
             if (TerracottaManager.isDownloadPaused()) {
@@ -105,7 +111,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
          this.addRenderableWidget(this.cancelBtn);
          this.addRenderableWidget(
             Button.builder(Component.translatable("gui.done"), button -> Minecraft.getInstance().setScreen(this.parent))
-               .bounds(centerX - 100, y + 120, 200, 20)
+               .bounds(centerX - 100, y + 144, 200, 20)
                .build()
          );
       } else {
@@ -113,7 +119,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
          this.cancelBtn = null;
          this.addRenderableWidget(
             Button.builder(Component.translatable("gui.done"), button -> Minecraft.getInstance().setScreen(this.parent))
-               .bounds(centerX - 100, y + 96, 200, 20)
+               .bounds(centerX - 100, y + 120, 200, 20)
                .build()
          );
       }
@@ -280,7 +286,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       int centerX = this.width / 2;
       this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, VoxLinkColors.WHITE);
       boolean isDownloading = TerracottaManager.isDownloading();
-      int itemCount = isDownloading ? 6 : 5;
+      int itemCount = isDownloading ? 7 : 6;
       int formHeight = itemCount * 20 + (itemCount - 1) * 4;
       int y = Math.max(44, (this.height - formHeight) / 2);
       Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});

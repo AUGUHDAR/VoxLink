@@ -50,7 +50,9 @@ public class SignalingClient {
       Map.entry("report_ready", "/topology/report_ready"),
       Map.entry("poll_topology", "/topology/poll"),
       Map.entry("relay_register", "/relay/register"),
-      Map.entry("relay_candidates", "/relay/candidates")
+      Map.entry("relay_candidates", "/relay/candidates"),
+      Map.entry("publish_mod_manifest", "/room/mods/publish"),
+      Map.entry("get_room_mods", "/room/mods")
    );
    private final VoxLinkConfig config;
    private final HttpClient httpClient;
@@ -403,6 +405,24 @@ public class SignalingClient {
    public CompletableFuture<SignalingClient.ApiResponse> getCategories() {
       return this.get(this.buildGetPath("get_categories", null));
    }
+   /** ModSync：房主创建房间后发布必装 Mod 清单（需 hostToken，服务端校验）。 */
+   public CompletableFuture<SignalingClient.ApiResponse> publishModManifest(String code, String token, JsonObject manifest) {
+      JsonObject body = new JsonObject();
+      body.addProperty("code", code != null ? code : "");
+      body.addProperty("token", token != null ? token : "");
+      body.add("manifest", manifest != null ? manifest : new JsonObject());
+      body.addProperty("action", "publish_mod_manifest");
+      return this.postNoRetry(this.buildPath("publish_mod_manifest"), body);
+   }
+
+   /** ModSync：房客打洞前按房间号拉取必装清单（supported/ready/mods）。 */
+   public CompletableFuture<SignalingClient.ApiResponse> getRoomMods(String code) {
+      JsonObject body = new JsonObject();
+      body.addProperty("code", code != null ? code.toUpperCase() : "");
+      body.addProperty("action", "get_room_mods");
+      return this.postNoRetry(this.buildPath("get_room_mods"), body);
+   }
+
 
    public CompletableFuture<SignalingClient.ApiResponse> reportLinkReady(String code, String token, boolean isHost) {
       JsonObject body = new JsonObject();

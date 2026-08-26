@@ -268,5 +268,21 @@
     "voxlink.nat.diff_hard": "Hard",
     "voxlink.nat.diff_hell": "Hell",
     "voxlink.nat.doubt": " (?)",
-  "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)"
+    "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)",
+    "voxlink.modsync.title": "Pflicht-Mods Prüfung",
+    "voxlink.modsync.subtitle": "Raum %s beitreten: vom Host erforderliche Mods",
+    "voxlink.modsync.download_selected": "Herunterladen & weiter",
+    "voxlink.modsync.skip_join": "Überspringen & beitreten (evtl. Fehler)",
+    "voxlink.modsync.back": "Zurück",
+    "voxlink.modsync.cancel_download": "Download abbrechen",
+    "voxlink.modsync.downloading": "Lade %s/%s: %s",
+    "voxlink.modsync.download_failed": "Download fehlgeschlagen: %s",
+    "voxlink.modsync.diff_header": "Mods mit abweichender Host-Version (nicht automatisch, selten Crashes):",
+    "voxlink.modsync.unresolvable_header": "Auto-Download nicht möglich, bitte manuell installieren:",
+    "voxlink.modsync.total_size": "Gesamt %s",
+    "voxlink.modsync.restart_title": "Neustart erforderlich",
+    "voxlink.modsync.restart_line1": "%s Pflicht-Mod(s) in den Mods-Ordner geladen.",
+    "voxlink.modsync.restart_line2": "Wirksam nach Neustart. Beende und starte das Spiel neu.",
+    "voxlink.modsync.exit_game": "Spiel beenden",
+    "voxlink.modsync.toggle.join": "Pflicht-Mods-Check beim Beitritt: %s"
 }

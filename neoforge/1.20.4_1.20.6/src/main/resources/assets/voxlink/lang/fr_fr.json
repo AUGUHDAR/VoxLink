@@ -268,5 +268,21 @@
     "voxlink.nat.diff_hard": "Hard",
     "voxlink.nat.diff_hell": "Hell",
     "voxlink.nat.doubt": " (?)",
-  "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)"
+    "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)",
+    "voxlink.modsync.title": "Vérification des mods requis",
+    "voxlink.modsync.subtitle": "Connexion au salon %s : mods requis par lhôte",
+    "voxlink.modsync.download_selected": "Télécharger et continuer",
+    "voxlink.modsync.skip_join": "Ignorer et rejoindre (risque déchec)",
+    "voxlink.modsync.back": "Retour",
+    "voxlink.modsync.cancel_download": "Annuler le téléchargement",
+    "voxlink.modsync.downloading": "Téléchargement %s/%s : %s",
+    "voxlink.modsync.download_failed": "Échec du téléchargement : %s",
+    "voxlink.modsync.diff_header": "Mods de version différente de lhôte (non géré, risque rare de crash) :",
+    "voxlink.modsync.unresolvable_header": "Téléchargement auto impossible, installez manuellement :",
+    "voxlink.modsync.total_size": "Total %s",
+    "voxlink.modsync.restart_title": "Redémarrage requis",
+    "voxlink.modsync.restart_line1": "%s mod(s) requis téléchargé(s) dans le dossier mods.",
+    "voxlink.modsync.restart_line2": "Effectif après redémarrage. Quittez puis relancez le jeu.",
+    "voxlink.modsync.exit_game": "Quitter le jeu",
+    "voxlink.modsync.toggle.join": "Vérif. mods requis à la connexion : %s"
 }

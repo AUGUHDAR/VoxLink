@@ -20,7 +20,9 @@ public final class ProtocolNegotiator {
    public static final String CAP_PUNCH_AUTH_V1 = "punchAuthV1";
    /** P2P overlay 链路握手/中继报文来源认证能力（同样双方协商启用）。 */
    public static final String CAP_OVERLAY_AUTH_V1 = "overlayAuthV1";
-   public static final Set<String> CURRENT_CAPABILITIES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList("relay", "ice_restart", "continuous_retry", CAP_PUNCH_AUTH_V1, CAP_OVERLAY_AUTH_V1)));
+   /** ModSync v1：房主支持在创建房间后发布"必装 Mod 清单"，房客打洞前拉取。 */
+   public static final String CAP_MOD_SYNC_V1 = "modSyncV1";
+   public static final Set<String> CURRENT_CAPABILITIES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList("relay", "ice_restart", "continuous_retry", CAP_PUNCH_AUTH_V1, CAP_OVERLAY_AUTH_V1, CAP_MOD_SYNC_V1)));
 
    private ProtocolNegotiator() {
    }

@@ -178,6 +178,36 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private void startJoin() {
       this.active = true;
       LogUploadManager.arm(this.roomCode, false);
+
+
+      // ModSync 门控：开关开启且为 VoxLink 房间号时，先拉必装清单再进入连接流程；
+      // 检查过程会切换屏幕，继续时重建本屏（joinApiDone 随新实例复位）
+      if (icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
+         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)) {
+         Minecraft mc0 = Minecraft.getInstance();
+         AttemptingJoinScreen self = this;
+         icu.wuhui.voxlink.modsync.ModSyncGuestService.gate(
+            this.roomCode,
+            () -> mc0.execute(() -> {
+               if (mc0.screen == null || mc0.screen instanceof icu.wuhui.voxlink.modsync.ModSyncSelectScreen) {
+                  mc0.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password));
+               }
+            }),
+            () -> mc0.execute(() -> {
+               if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
+                  VoxLinkMod.getRoomManager().leaveRoom();
+               }
+
+               mc0.setScreen(self.parent);
+            })
+         );
+         return;
+      }
+
+      this.doStartDualP2P();
+   }
+
+   private void doStartDualP2P() {
       Minecraft mc = Minecraft.getInstance();
       String playerName = mc.getUser().getName();
       CompletableFuture<Void> joinFuture = VoxLinkMod.getRoomManager()

@@ -268,5 +268,21 @@
     "voxlink.nat.diff_hard": "Hard",
     "voxlink.nat.diff_hell": "Hell",
     "voxlink.nat.doubt": " (?)",
-  "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)"
+    "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)",
+    "voxlink.modsync.title": "Проверка обязательных модов",
+    "voxlink.modsync.subtitle": "Вход в комнату %s: моды, требуемые хостом",
+    "voxlink.modsync.download_selected": "Скачать и продолжить",
+    "voxlink.modsync.skip_join": "Пропустить и войти (может не удаться)",
+    "voxlink.modsync.back": "Назад",
+    "voxlink.modsync.cancel_download": "Отменить загрузку",
+    "voxlink.modsync.downloading": "Загрузка %s/%s: %s",
+    "voxlink.modsync.download_failed": "Ошибка загрузки: %s",
+    "voxlink.modsync.diff_header": "Моды иных версий, чем у хоста (не обрабатывается, редкий краш):",
+    "voxlink.modsync.unresolvable_header": "Невозможно скачать автоматически, установите вручную:",
+    "voxlink.modsync.total_size": "Всего %s",
+    "voxlink.modsync.restart_title": "Требуется перезапуск",
+    "voxlink.modsync.restart_line1": "%s обязат. мод(ов) загружено в папку mods.",
+    "voxlink.modsync.restart_line2": "Вступит в силу после перезапуска. Выйдите и запустите игру заново.",
+    "voxlink.modsync.exit_game": "Выйти из игры",
+    "voxlink.modsync.toggle.join": "Проверка обязательных модов при входе: %s"
 }

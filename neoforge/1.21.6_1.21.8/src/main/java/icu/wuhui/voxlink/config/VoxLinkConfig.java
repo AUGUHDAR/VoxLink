@@ -47,6 +47,8 @@ public class VoxLinkConfig {
     private volatile boolean useWebSocket = true;
     /** 日志上传默认开启（产品决策：打洞体验与远程排障），GUI 开关写入并持久化到此字段 */
     private volatile boolean logUploadEnabled = true;
+   /** 加入前请求房主必装 Mod 清单并引导下载/重启（ModSync）；关闭后跳过整套流程，能否进房由服务器决定 */
+   private volatile boolean joinRequiredModsCheck = true;
     /** 显式允许 http:// 信令服务器（默认拒绝，validate 中强制回退默认 https 地址） */
     private volatile boolean allowInsecureServerUrl = false;
 
@@ -63,6 +65,7 @@ public class VoxLinkConfig {
         this.updateCheckEnabled = true;
         this.useWebSocket = true;
         this.logUploadEnabled = true;
+      this.joinRequiredModsCheck = true;
         this.allowInsecureServerUrl = false;
     }
 
@@ -91,6 +94,7 @@ public class VoxLinkConfig {
                 config.updateCheckEnabled = root.has("updateCheckEnabled") ? root.get("updateCheckEnabled").getAsBoolean() : true;
                 config.useWebSocket = root.has("useWebSocket") ? root.get("useWebSocket").getAsBoolean() : true;
                 config.logUploadEnabled = root.has("logUploadEnabled") ? root.get("logUploadEnabled").getAsBoolean() : true;
+            config.joinRequiredModsCheck = root.has("joinRequiredModsCheck") ? root.get("joinRequiredModsCheck").getAsBoolean() : true;
                 config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
                 if (config.serverUrl == null || config.serverUrl.isEmpty()) {
                     config.serverUrl = DEFAULT_SERVER_URL;
@@ -183,6 +187,14 @@ public class VoxLinkConfig {
     public void setLogUploadEnabled(boolean v) {
        this.logUploadEnabled = v;
     }
+
+   public boolean isJoinRequiredModsCheck() {
+      return this.joinRequiredModsCheck;
+   }
+
+   public void setJoinRequiredModsCheck(boolean v) {
+      this.joinRequiredModsCheck = v;
+   }
 
     public boolean isAllowInsecureServerUrl() {
        return this.allowInsecureServerUrl;

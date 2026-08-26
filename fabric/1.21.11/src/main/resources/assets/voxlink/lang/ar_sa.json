@@ -268,5 +268,21 @@
     "voxlink.nat.diff_hard": "Hard",
     "voxlink.nat.diff_hell": "Hell",
     "voxlink.nat.doubt": " (?)",
-  "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)"
+    "voxlink.terracotta.credit": "Powered by Terracotta (AGPL-3.0, by burningtnt)",
+    "voxlink.modsync.title": "فحص المودات المطلوبة",
+    "voxlink.modsync.subtitle": "الانضمام للغرفة %s: مودات يطلبها المضيف",
+    "voxlink.modsync.download_selected": "تحميل ومتابعة",
+    "voxlink.modsync.skip_join": "تخطي والدخول (قد يفشل)",
+    "voxlink.modsync.back": "رجوع",
+    "voxlink.modsync.cancel_download": "إلغاء التحميل",
+    "voxlink.modsync.downloading": "جارٍ التحميل %s/%s: %s",
+    "voxlink.modsync.download_failed": "فشل التحميل: %s",
+    "voxlink.modsync.diff_header": "مودات بإصدار مختلف عن المضيف (لا تتم معالجتها تلقائياً):",
+    "voxlink.modsync.unresolvable_header": "لا يمكن التحميل تلقائياً، ثبّتها يدوياً:",
+    "voxlink.modsync.total_size": "المجموع %s",
+    "voxlink.modsync.restart_title": "إعادة التشغيل مطلوبة",
+    "voxlink.modsync.restart_line1": "تم تحميل %s من المودات المطلوبة إلى مجلد mods.",
+    "voxlink.modsync.restart_line2": "تعمل بعد إعادة التشغيل. اخرج وأعد تشغيل اللعبة.",
+    "voxlink.modsync.exit_game": "خروج من اللعبة",
+    "voxlink.modsync.toggle.join": "فحص المودات المطلوبة عند الدخول: %s"
 }

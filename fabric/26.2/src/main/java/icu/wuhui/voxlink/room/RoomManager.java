@@ -353,6 +353,9 @@ public class RoomManager {
                   String hostId = "host_" + code;
                   this.topologyClient.onRoomJoined(code, hostToken, true, hostId, 0);
 
+                  // ModSync：建房成功即后台构建/发布必装清单（异步，失败不影响本房间）
+                  icu.wuhui.voxlink.modsync.ModSyncManifestService.onRoomCreated(roomInfo);
+
                   try {
                      int bridgePort = P2PBridge.startHostBridge(ctx.port).get(5L, TimeUnit.SECONDS);
                      if (bridgePort > 0) {
