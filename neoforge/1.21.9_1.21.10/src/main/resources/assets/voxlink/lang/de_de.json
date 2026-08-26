@@ -284,5 +284,19 @@
     "voxlink.modsync.restart_line1": "%s Pflicht-Mod(s) in den Mods-Ordner geladen.",
     "voxlink.modsync.restart_line2": "Wirksam nach Neustart. Beende und starte das Spiel neu.",
     "voxlink.modsync.exit_game": "Spiel beenden",
-    "voxlink.modsync.toggle.join": "Pflicht-Mods-Check beim Beitritt: %s"
+    "voxlink.modsync.toggle.join": "Pflicht-Mods-Check beim Beitritt: %s",
+    "voxlink.modsync.toggle.publish": "Pflicht-Mods für Gäste veröffentlichen: %s",
+    "voxlink.modsync.download_mods": "Mods herunterladen (%s · %s)",
+    "voxlink.modsync.join_directly": "Direkt beitreten",
+    "voxlink.modsync.missing_header": "Fehlende Pflicht-Mods (%s):",
+    "voxlink.modsync.entry_line": "• %s %s (%s)",
+    "voxlink.modsync.progress_title": "Lade Pflicht-Mods",
+    "voxlink.modsync.progress_overall": "Gesamt: %s",
+    "voxlink.modsync.progress_completed": "Fertig: %s/%s",
+    "voxlink.modsync.progress_current": "Aktuell: %s",
+    "voxlink.modsync.progress_remaining": "Verbleibende Mods: %s",
+    "voxlink.modsync.progress_eta": "Geschätzte Restzeit: %s",
+    "voxlink.modsync.page_ind": "%s/%s",
+    "voxlink.modsync.prev_page": "< Zurück",
+    "voxlink.modsync.next_page": "Weiter >"
 }

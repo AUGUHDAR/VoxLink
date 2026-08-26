@@ -284,5 +284,19 @@
     "voxlink.modsync.restart_line1": "필수 모드 %s개를 mods 폴더에 저장했습니다.",
     "voxlink.modsync.restart_line2": "재시작 후 적용됩니다. 게임을 종료 후 다시 실행하세요.",
     "voxlink.modsync.exit_game": "게임 종료",
-    "voxlink.modsync.toggle.join": "참가 전 필수 모드 확인: %s"
+    "voxlink.modsync.toggle.join": "참가 전 필수 모드 확인: %s",
+    "voxlink.modsync.toggle.publish": "게스트에게 필수 모드 공개: %s",
+    "voxlink.modsync.download_mods": "모드 다운로드(%s · %s)",
+    "voxlink.modsync.join_directly": "바로 참가",
+    "voxlink.modsync.missing_header": "누락된 필수 모드(%s):",
+    "voxlink.modsync.entry_line": "• %s %s(%s)",
+    "voxlink.modsync.progress_title": "필수 모드 다운로드 중",
+    "voxlink.modsync.progress_overall": "전체 진행률: %s",
+    "voxlink.modsync.progress_completed": "완료: %s/%s",
+    "voxlink.modsync.progress_current": "현재: %s",
+    "voxlink.modsync.progress_remaining": "남은 모드: %s",
+    "voxlink.modsync.progress_eta": "예상 남은 시간: %s",
+    "voxlink.modsync.page_ind": "%s/%s",
+    "voxlink.modsync.prev_page": "< 이전",
+    "voxlink.modsync.next_page": "다음 >"
 }

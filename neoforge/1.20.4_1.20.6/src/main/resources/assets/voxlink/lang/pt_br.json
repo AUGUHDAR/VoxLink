@@ -284,5 +284,19 @@
     "voxlink.modsync.restart_line1": "%s mod(s) obrigatório(s) baixado(s) na pasta mods.",
     "voxlink.modsync.restart_line2": "Entra em vigor após reiniciar. Saia e reabra o jogo.",
     "voxlink.modsync.exit_game": "Sair do jogo",
-    "voxlink.modsync.toggle.join": "Checagem de mods obrigatórios ao entrar: %s"
+    "voxlink.modsync.toggle.join": "Checagem de mods obrigatórios ao entrar: %s",
+    "voxlink.modsync.toggle.publish": "Publicar mods obrigatórios aos convidados: %s",
+    "voxlink.modsync.download_mods": "Baixar mods (%s · %s)",
+    "voxlink.modsync.join_directly": "Entrar diretamente",
+    "voxlink.modsync.missing_header": "Mods obrigatórios ausentes (%s):",
+    "voxlink.modsync.entry_line": "• %s %s (%s)",
+    "voxlink.modsync.progress_title": "Baixando mods obrigatórios",
+    "voxlink.modsync.progress_overall": "Progresso geral: %s",
+    "voxlink.modsync.progress_completed": "Concluídos: %s/%s",
+    "voxlink.modsync.progress_current": "Atual: %s",
+    "voxlink.modsync.progress_remaining": "Mods restantes: %s",
+    "voxlink.modsync.progress_eta": "Tempo restante estimado: %s",
+    "voxlink.modsync.page_ind": "%s/%s",
+    "voxlink.modsync.prev_page": "< Anterior",
+    "voxlink.modsync.next_page": "Próximo >"
 }

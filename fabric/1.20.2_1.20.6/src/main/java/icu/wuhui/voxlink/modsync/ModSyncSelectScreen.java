@@ -1,22 +1,24 @@
 package icu.wuhui.voxlink.modsync;
 
+import icu.wuhui.voxlink.ui.VoxLinkColors;
+import icu.wuhui.voxlink.ui.VoxLinkScreenBase;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import icu.wuhui.voxlink.ui.VoxLinkColors;
-import icu.wuhui.voxlink.ui.VoxLinkScreenBase;
 
 /**
- * 必装模组选择/下载屏：勾选缺失模组 → 后台下载（按钮置灰防误操作）→
- * 全部成功进入强制重启屏；也可选择不下载直接加入（可能进不去）。
+ * 必装模组弹窗：两键式（下载模组 / 直接加入）。内容统一为虚拟条目列表分页渲染，
+ * 行数按窗口高度自适应，任何分辨率不重叠；下载态切换为结构化进度面板
+ * （总进度条/已完成/当前文件/剩余数量/预计剩余时间），全部文案取自语言文件。
  */
 public class ModSyncSelectScreen extends VoxLinkScreenBase {
-   private static final int MAX_VISIBLE_ROWS = 6;
+   private static final int ROW_H = 12;
+   private static final int MIN_ROWS = 3;
 
    private final String roomCode;
    private final List<ModSyncEntry> downloadable;
@@ -25,16 +27,33 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
    private final Runnable onProceed;
    private final Runnable onCancel;
 
-   private final boolean[] selected;
-   private final List<Button> rowButtons = new java.util.ArrayList<>();
-   private String statusText = "";
-   private int statusColor = VoxLinkColors.MUTED;
+   /** 虚拟条目：kind 0=区块头 1=普通行。 */
+   private final List<Object[]> lines = new ArrayList<>();
+   private int page = 0;
+   private int rowsPerPage = MIN_ROWS;
+
+   private Button downloadBtn;
+   private Button joinBtn;
+   private Button backBtn;
+   private Button cancelBtn;
+   private Button prevBtn;
+   private Button nextBtn;
 
    private enum State {SELECTING, DOWNLOADING}
 
    private volatile State state = State.SELECTING;
    private volatile boolean downloadAbort = false;
-   private final java.util.Set<Integer> succeeded = new java.util.HashSet<>();
+   private volatile int doneFiles = 0;
+   private volatile int totalFiles = 0;
+   private volatile long totalBytes = 0L;
+   private volatile long bytesDone = 0L;
+   private volatile long startMs = 0L;
+   private volatile int overallPct = 0;
+   private volatile long etaSec = -1L;
+   private volatile String currentName = "";
+   private String statusText = "";
+   private int statusColor = VoxLinkColors.MUTED;
+   private final java.util.Set<Integer> succeededIdx = new java.util.HashSet<>();
 
    public ModSyncSelectScreen(
       String roomCode,
@@ -51,9 +70,34 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       this.versionDiff = versionDiff;
       this.onProceed = onProceed;
       this.onCancel = onCancel;
-      this.selected = new boolean[downloadable.size()];
-      for (int i = 0; i < this.selected.length; i++) {
-         this.selected[i] = true;
+      this.buildLines();
+   }
+
+   /** 把三类信息拍平成虚拟行流，分页只面对这一种结构，杜绝重叠。 */
+   private void buildLines() {
+      this.lines.clear();
+      if (!this.downloadable.isEmpty()) {
+        this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.missing_header", this.downloadable.size()).getString()});
+         for (ModSyncEntry e : this.downloadable) {
+            this.lines.add(new Object[]{
+               1,
+               Component.translatable("voxlink.modsync.entry_line", e.title, e.versionNumber, humanSize(e.size)).getString()
+            });
+         }
+      }
+
+      if (!this.versionDiff.isEmpty()) {
+         this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.diff_header").getString()});
+         for (String d : this.versionDiff) {
+            this.lines.add(new Object[]{1, d});
+         }
+      }
+
+      if (!this.unresolvable.isEmpty()) {
+         this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.unresolvable_header").getString()});
+         for (String u : this.unresolvable) {
+            this.lines.add(new Object[]{1, u});
+         }
       }
    }
 
@@ -61,175 +105,73 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
    protected void init() {
       super.init();
       this.clearOurWidgets();
-      this.rowButtons.clear();
       int centerX = this.width / 2;
-      int y = 44;
-      int rows = Math.min(this.downloadable.size(), MAX_VISIBLE_ROWS);
-      for (int i = 0; i < rows; i++) {
-         final int idx = i;
-         ModSyncEntry e = this.downloadable.get(i);
-         Button btn = Button
-            .builder(Component.literal(this.rowLabel(i)), b -> {
-               if (ModSyncSelectScreen.this.state == State.SELECTING) {
-                  ModSyncSelectScreen.this.selected[idx] = !ModSyncSelectScreen.this.selected[idx];
-                  b.setMessage(Component.literal(ModSyncSelectScreen.this.rowLabel(idx)));
-               }
+      int listTop = 50;
+      int footerReserve = this.state == State.SELECTING ? 78 : 46;
+      this.rowsPerPage = Math.max(MIN_ROWS, (this.height - listTop - footerReserve) / ROW_H);
+      int pages = this.pageCount();
+      if (this.page >= pages) {
+         this.page = Math.max(0, pages - 1);
+      }
+
+      boolean paging = pages > 1 && this.state == State.SELECTING;
+      if (paging) {
+         int py = this.height - footerReserve + 2;
+         this.prevBtn = Button.builder(Component.translatable("voxlink.modsync.prev_page"), b -> this.flipPage(-1))
+            .bounds(centerX - 90, py, 40, 16).build();
+         this.addRenderableWidget(this.prevBtn);
+         this.nextBtn = Button.builder(Component.translatable("voxlink.modsync.next_page"), b -> this.flipPage(1))
+            .bounds(centerX + 50, py, 40, 16).build();
+         this.addRenderableWidget(this.nextBtn);
+      }
+
+      if (this.state == State.SELECTING) {
+         int by = this.height - 54;
+         long selBytes = 0L;
+         for (ModSyncEntry e : this.downloadable) {
+            selBytes += e.size;
+         }
+
+         this.downloadBtn = Button
+            .builder(
+               Component.translatable(
+                  "voxlink.modsync.download_mods",
+                  this.downloadable.size(),
+                  humanSize(selBytes)
+               ),
+               b -> this.startDownload()
+            )
+            .bounds(centerX - 130, by, 128, 20).build();
+         this.addRenderableWidget(this.downloadBtn);
+         this.joinBtn = Button
+            .builder(Component.translatable("voxlink.modsync.join_directly"), b -> this.onProceed.run())
+            .bounds(centerX + 2, by, 128, 20).build();
+         this.addRenderableWidget(this.joinBtn);
+         this.backBtn = Button
+            .builder(Component.translatable("voxlink.modsync.back"), b -> this.onCancel.run())
+            .bounds(centerX - 65, by + 24, 130, 20).build();
+         this.addRenderableWidget(this.backBtn);
+      } else {
+         this.cancelBtn = Button
+            .builder(Component.translatable("voxlink.modsync.cancel_download"), b -> {
+               this.downloadAbort = true;
             })
-            .bounds(centerX - 130, y, 260, 18)
-            .build();
-         this.rowButtons.add(btn);
-         this.addRenderableWidget(btn);
-         y += 20;
-      }
-
-      int bottomY = Math.max(y + 4, this.height - 52);
-      this.downloadBtn = Button
-         .builder(
-            Component.translatable("voxlink.modsync.download_selected", new Object[0]),
-            b -> ModSyncSelectScreen.this.startDownload()
-         )
-         .bounds(centerX - 130, bottomY, 128, 20)
-         .build();
-      this.addRenderableWidget(this.downloadBtn);
-      this.skipBtn = Button
-         .builder(
-            Component.translatable("voxlink.modsync.skip_join", new Object[0]),
-            b -> ModSyncSelectScreen.this.onProceed.run()
-         )
-         .bounds(centerX + 2, bottomY, 128, 20)
-         .build();
-      this.addRenderableWidget(this.skipBtn);
-      this.backBtn = Button
-         .builder(Component.translatable("voxlink.modsync.back", new Object[0]), b -> ModSyncSelectScreen.this.onCancel.run())
-         .bounds(centerX - 65, bottomY + 24, 130, 20)
-         .build();
-      this.addRenderableWidget(this.backBtn);
-      this.applyStateToWidgets();
-   }
-
-   private Button downloadBtn;
-   private Button skipBtn;
-   private Button backBtn;
-
-   private String rowLabel(int i) {
-      ModSyncEntry e = this.downloadable.get(i);
-      return (this.selected[i] ? "[√] " : "[ ] ")
-         + clip(e.title + " " + e.versionNumber, 30)
-         + " (" + humanSize(e.size) + ")";
-   }
-
-   private void applyStateToWidgets() {
-      boolean selecting = this.state == State.SELECTING;
-      for (Button b : this.rowButtons) {
-         b.active = selecting;
-      }
-
-      this.downloadBtn.visible = true;
-      this.downloadBtn.active = selecting;
-      this.downloadBtn.setMessage(Component.translatable(selecting ? "voxlink.modsync.download_selected" : "voxlink.modsync.cancel_download"));
-      this.skipBtn.active = selecting;
-      this.backBtn.active = selecting;
-      // 下载中：跳过/返回语义都收敛到取消下载（半途文件重启前不会加载）
-      if (!selecting) {
-         this.skipBtn.visible = false;
-      } else {
-         this.skipBtn.visible = true;
+            .bounds(centerX - 65, this.height - 30, 130, 20).build();
+         this.addRenderableWidget(this.cancelBtn);
       }
    }
 
-   private void startDownload() {
-      if (this.state == State.DOWNLOADING) {
-         // 第二次点击 = 取消
-         this.downloadAbort = true;
-         return;
-      }
-
-      this.state = State.DOWNLOADING;
-      this.statusText = Component.translatable("voxlink.modsync.downloading", new Object[]{0, this.countSelected(), ""}).getString();
-      this.statusColor = VoxLinkColors.WARNING;
-      this.applyStateToWidgets();
-      Thread worker = new Thread(() -> ModSyncSelectScreen.this.downloadLoop(), "VoxLink-ModSync-DL");
-      worker.setDaemon(true);
-      worker.start();
+   private int pageCount() {
+      return Math.max(1, (this.lines.size() + this.rowsPerPage - 1) / this.rowsPerPage);
    }
 
-   private int countSelected() {
-      int n = 0;
-      for (int i = 0; i < this.selected.length; i++) {
-         if (this.selected[i] && !this.succeeded.contains(i)) {
-            n++;
-         }
-      }
-
-      return n;
+   private void flipPage(int delta) {
+      int pages = this.pageCount();
+      this.page = Math.floorMod(this.page + delta, pages);
+      this.rebuildInPlace();
    }
 
-   private void downloadLoop() {
-      Path modsDir = ModSyncEnv.getModsDir();
-      int total = this.countSelected();
-      int done = 0;
-      String lastError = null;
-      try {
-         java.nio.file.Files.createDirectories(modsDir);
-      } catch (Exception e) {
-         this.finishFailed("mods dir unavailable: " + e.getMessage());
-         return;
-      }
-
-      for (int i = 0; i < this.downloadable.size(); i++) {
-         if (this.downloadAbort) {
-            Minecraft.getInstance().execute(this::goCancelAfterAbort);
-            return;
-         }
-
-         if (!this.selected[i] || this.succeeded.contains(i)) {
-            continue;
-         }
-
-         ModSyncEntry e = this.downloadable.get(i);
-         int idx = i;
-         this.setStatus(
-            Component.translatable("voxlink.modsync.downloading", new Object[]{done, total, clip(e.title, 24)}).getString(),
-            VoxLinkColors.WARNING
-         );
-         try {
-            ModrinthClient.downloadVerified(e.downloadUrl, e.sha512, e.fileName, modsDir);
-            this.succeeded.add(idx);
-            done++;
-         } catch (Exception ex) {
-            ModSyncLog.warn("download {} failed: {}", e.fileName, ex.toString());
-            lastError = e.title;
-         }
-      }
-
-      int okCount = this.succeeded.size();
-      if (this.downloadAbort) {
-         Minecraft.getInstance().execute(this::goCancelAfterAbort);
-         return;
-      }
-
-      if (okCount > 0 && (lastError == null || this.countSelected() == 0)) {
-         Minecraft.getInstance().execute(() -> Minecraft.getInstance().setScreen(new ModSyncRestartScreen(okCount)));
-      } else {
-         this.finishFailed(lastError);
-      }
-   }
-
-   private void finishFailed(String err) {
-      this.state = State.SELECTING;
-      this.setStatus(
-         Component.translatable("voxlink.modsync.download_failed", new Object[]{err == null ? "?" : clip(err, 40)}).getString(),
-         VoxLinkColors.ERROR
-      );
-      Minecraft.getInstance().execute(this::initMcSafe);
-   }
-
-   private void goCancelAfterAbort() {
-      this.state = State.SELECTING;
-      this.onCancel.run();
-   }
-
-   private void initMcSafe() {
+   private void rebuildInPlace() {
       Minecraft mc = Minecraft.getInstance();
       if (mc.screen == this) {
          this.clearOurWidgets();
@@ -237,80 +179,165 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       }
    }
 
-   private void setStatus(String text, int color) {
-      this.statusText = text;
-      this.statusColor = color;
+   private void startDownload() {
+      if (this.state == State.DOWNLOADING) {
+         return;
+      }
+
+      this.state = State.DOWNLOADING;
+      this.downloadAbort = false;
+      this.totalFiles = this.downloadable.size();
+      this.doneFiles = 0;
+      this.bytesDone = 0L;
+      this.startMs = System.currentTimeMillis();
+      long tb = 0L;
+      for (ModSyncEntry e : this.downloadable) {
+         tb += e.size;
+      }
+
+      this.totalBytes = tb;
+      this.currentName = "";
+      Thread worker = new Thread(() -> this.downloadLoop(), "VoxLink-ModSync-DL");
+      worker.setDaemon(true);
+      worker.start();
+      this.rebuildInPlace();
+   }
+
+   private void downloadLoop() {
+      Path modsDir = ModSyncEnv.getModsDir();
+      try {
+         java.nio.file.Files.createDirectories(modsDir);
+      } catch (Exception e) {
+         this.failThrough(Component.translatable("voxlink.modsync.download_failed", "mods dir").getString());
+         return;
+      }
+
+      String lastError = null;
+      for (int i = 0; i < this.downloadable.size(); i++) {
+         if (this.downloadAbort) {
+            this.abortThrough();
+            return;
+         }
+
+         ModSyncEntry e = this.downloadable.get(i);
+         this.currentName = e.title;
+         try {
+            ModrinthClient.downloadVerified(e.downloadUrl, e.sha512, e.fileName, modsDir);
+            synchronized (this.succeededIdx) {
+               this.succeededIdx.add(i);
+            }
+
+            this.doneFiles++;
+            this.bytesDone += e.size;
+            long elapsed = Math.max(1L, System.currentTimeMillis() - this.startMs);
+            double speed = this.bytesDone / (elapsed / 1000.0);
+            long remainB = Math.max(0L, this.totalBytes - this.bytesDone);
+            this.etaSec = speed > 0 ? (long)(remainB / speed) : -1L;
+         } catch (Exception ex) {
+            ModSyncLog.warn("download {} failed: {}", e.fileName, ex.toString());
+            lastError = e.title;
+         }
+
+         this.overallPct = this.totalBytes > 0 ? (int)Math.min(100L, this.bytesDone * 100L / this.totalBytes) : 0;
+      }
+
+      if (this.downloadAbort) {
+         this.abortThrough();
+         return;
+      }
+
+      final int okCount = this.succeededIdx.size();
+      if (okCount > 0 && lastError == null) {
+         Minecraft.getInstance().execute(() -> Minecraft.getInstance().setScreen(new ModSyncRestartScreen(okCount)));
+      } else {
+         final String err = lastError;
+         this.failThrough(Component.translatable("voxlink.modsync.download_failed", err == null ? "?" : clip(err, 40)).getString());
+      }
+   }
+
+   private void abortThrough() {
+      this.state = State.SELECTING;
+      Minecraft.getInstance().execute(() -> {
+         this.onCancel.run();
+      });
+   }
+
+   private void failThrough(String msg) {
+      this.state = State.SELECTING;
+      this.statusText = msg;
+      this.statusColor = VoxLinkColors.ERROR;
+      Minecraft.getInstance().execute(this::rebuildInPlace);
    }
 
    @Override
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredString(graphics, this.title.getString(), centerX, 12, VoxLinkColors.WHITE);
-      this.drawCenteredString(
-         graphics,
-         Component.translatable("voxlink.modsync.subtitle", new Object[]{this.roomCode}).getString(),
-         centerX,
-         26,
-         VoxLinkColors.MUTED
-      );
-      int y = 44 + Math.min(this.downloadable.size(), MAX_VISIBLE_ROWS) * 20 + 2;
-      if (!this.versionDiff.isEmpty()) {
-         this.drawCenteredString(
-            graphics,
-            Component.translatable("voxlink.modsync.diff_header", new Object[0]).getString(),
-            centerX,
-            y,
-            VoxLinkColors.WARNING
-         );
-         y += 10;
-         y = this.drawLines(graphics, this.versionDiff, centerX, y, 3, VoxLinkColors.WARNING);
-      }
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 10, VoxLinkColors.WHITE);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.subtitle", this.roomCode).getString(), centerX, 24, VoxLinkColors.MUTED);
 
-      if (!this.unresolvable.isEmpty()) {
-         this.drawCenteredString(
-            graphics,
-            Component.translatable("voxlink.modsync.unresolvable_header", new Object[0]).getString(),
-            centerX,
-            y,
-            VoxLinkColors.ERROR
-         );
-         y += 10;
-         y = this.drawLines(graphics, this.unresolvable, centerX, y, 3, VoxLinkColors.ERROR);
-      }
-
-      if (!this.statusText.isEmpty()) {
-         this.drawCenteredString(graphics, this.statusText, centerX, Math.max(y, this.height - 70), this.statusColor);
-      }
-
-      if (this.state == State.SELECTING && !this.downloadable.isEmpty()) {
-         long totalBytes = 0L;
-         for (int i = 0; i < this.downloadable.size(); i++) {
-            if (this.selected[i]) {
-               totalBytes += this.downloadable.get(i).size;
-            }
+      if (this.state == State.SELECTING) {
+         this.renderList(graphics, centerX);
+         int pages = this.pageCount();
+         if (pages > 1) {
+            this.drawCenteredClipped(
+               graphics,
+               Component.translatable("voxlink.modsync.page_ind", this.page + 1, pages).getString(),
+               centerX,
+               this.height - 74,
+               VoxLinkColors.MUTED
+            );
          }
 
-         String sizeText = Component.translatable("voxlink.modsync.total_size", new Object[]{humanSize(totalBytes)}).getString();
-         this.drawCenteredString(graphics, ChatFormatting.GRAY + sizeText, centerX, this.height - 58, VoxLinkColors.MUTED);
+         if (!this.statusText.isEmpty()) {
+            this.drawCenteredClipped(graphics, this.statusText, centerX, this.height - 86, this.statusColor);
+         }
+      } else {
+         this.renderProgress(graphics, centerX);
       }
    }
 
-   private int drawLines(GuiGraphics graphics, List<String> lines, int centerX, int y, int max, int color) {
-      int shown = 0;
-      for (String line : lines) {
-         if (shown >= max) {
-            this.drawCenteredString(graphics, "+" + (lines.size() - max) + " …", centerX, y, color);
-            y += 10;
-            break;
+   private void renderList(GuiGraphics graphics, int centerX) {
+      int listTop = 50;
+      int from = this.page * this.rowsPerPage;
+      int to = Math.min(this.lines.size(), from + this.rowsPerPage);
+      int y = listTop;
+      for (int i = from; i < to; i++) {
+         Object[] line = this.lines.get(i);
+         boolean header = ((Integer)line[0]) == 0;
+         String text = String.valueOf(line[1]);
+         if (header) {
+            this.drawCenteredClipped(graphics, text, centerX, y, VoxLinkColors.WARNING);
+         } else {
+            this.drawCenteredClipped(graphics, text, centerX, y, VoxLinkColors.WHITE);
          }
 
-         this.drawCenteredString(graphics, clip(line, 60), centerX, y, color);
-         y += 10;
-         shown++;
+         y += ROW_H;
+      }
+   }
+
+   private void renderProgress(GuiGraphics graphics, int centerX) {
+      int top = Math.max(60, this.height / 2 - 52);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_title").getString(), centerX, top, VoxLinkColors.WHITE);
+      int barW = Math.min(220, this.width - 40);
+      int barY = top + 18;
+      graphics.fill(centerX - barW / 2, barY, centerX + barW / 2, barY + 6, 0xFF2B2B31);
+      int fillW = (int)((long)barW * Math.max(0, Math.min(100, this.overallPct)) / 100L);
+      if (fillW > 0) {
+         graphics.fill(centerX - barW / 2, barY, centerX - barW / 2 + fillW, barY + 6, VoxLinkColors.SUCCESS);
       }
 
-      return y;
+      int y = barY + 14;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_overall", this.overallPct + "%").getString(), centerX, y, VoxLinkColors.MUTED);
+      y += ROW_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_completed", this.doneFiles, this.totalFiles).getString(), centerX, y, VoxLinkColors.WHITE);
+      y += ROW_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_current", clip(this.currentName, 36)).getString(), centerX, y, VoxLinkColors.WARNING);
+      y += ROW_H;
+      int remaining = Math.max(0, this.totalFiles - this.doneFiles);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_remaining", remaining).getString(), centerX, y, VoxLinkColors.MUTED);
+      y += ROW_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_eta", fmtEta(this.etaSec)).getString(), centerX, y, VoxLinkColors.MUTED);
    }
 
    @Override
@@ -320,7 +347,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
    static String clip(String s, int max) {
       if (s == null) {
-        return "";
+         return "";
       }
 
       return s.length() <= max ? s : s.substring(0, max - 1) + "…";
@@ -336,5 +363,15 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       }
 
       return String.format("%.1fMB", bytes / 1024.0 / 1024.0);
+   }
+
+   static String fmtEta(long sec) {
+      if (sec < 0L) {
+         return "--:--";
+      }
+
+      long m = sec / 60L;
+      long s = sec % 60L;
+      return m + ":" + (s < 10L ? "0" : "") + s;
    }
 }

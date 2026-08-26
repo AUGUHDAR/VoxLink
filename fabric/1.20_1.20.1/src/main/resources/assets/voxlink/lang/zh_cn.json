@@ -284,5 +284,19 @@
     "voxlink.modsync.restart_line1": "已下载 %s 个必装模组到 mods 文件夹。",
     "voxlink.modsync.restart_line2": "重启游戏后生效，请退出并重新启动游戏。",
     "voxlink.modsync.exit_game": "退出游戏",
-    "voxlink.modsync.toggle.join": "加入前必装Mod检查: %s"
+    "voxlink.modsync.toggle.join": "加入前必装Mod检查: %s",
+    "voxlink.modsync.toggle.publish": "上报必装Mod给房客: %s",
+    "voxlink.modsync.download_mods": "下载模组（%s · %s）",
+    "voxlink.modsync.join_directly": "直接加入",
+    "voxlink.modsync.missing_header": "缺失的必装模组（%s）：",
+    "voxlink.modsync.entry_line": "• %s %s（%s）",
+    "voxlink.modsync.progress_title": "正在下载必装模组",
+    "voxlink.modsync.progress_overall": "总进度：%s",
+    "voxlink.modsync.progress_completed": "已完成：%s/%s",
+    "voxlink.modsync.progress_current": "当前：%s",
+    "voxlink.modsync.progress_remaining": "剩余模组：%s",
+    "voxlink.modsync.progress_eta": "预计剩余时间：%s",
+    "voxlink.modsync.page_ind": "%s/%s",
+    "voxlink.modsync.prev_page": "< 上一页",
+    "voxlink.modsync.next_page": "下一页 >"
 }

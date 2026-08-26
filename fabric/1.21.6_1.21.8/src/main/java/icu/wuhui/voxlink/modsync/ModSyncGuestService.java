@@ -171,6 +171,15 @@ public final class ModSyncGuestService {
          }
       }
 
+      // 未知模组：房主侧在 MR 查不到的 jar，仅提示（我们没有任何渠道让房客下到它们）
+      if (manifest.has("unknownMods") && manifest.get("unknownMods").isJsonArray()) {
+         for (var el : manifest.getAsJsonArray("unknownMods")) {
+            if (el.isJsonPrimitive()) {
+               out.unresolvable.add(el.getAsString());
+            }
+         }
+      }
+
       for (var el : manifest.getAsJsonArray("mods")) {
          if (!el.isJsonObject()) {
             continue;

@@ -49,6 +49,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    private String gameType = "survival";
    private boolean hostOp = false;
    private Button guestOpButton;
+   private Button publishModsButton;
    private Button gameTypeButton;
    private Button hostOpButton;
    private String selectedCategory = "other";
@@ -123,7 +124,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          );
       } else {
          int centerX = this.width / 2;
-         int formHeight = 240;
+         int formHeight = 264;
          int y = Math.max(4, (this.height - formHeight) / 2);
          this.nameField = new EditBox(this.font, centerX - 100, y, 200, 20, Component.translatable("voxlink.room_name"));
          this.nameField.setMaxLength(20);
@@ -217,12 +218,19 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             );
          }
 
+         this.publishModsButton = Button.builder(this.buildPublishModsLabel(), button -> {
+            boolean v = !VoxLinkMod.getConfig().isHostModSyncPublish();
+            VoxLinkMod.getConfig().setHostModSyncPublish(v);
+            VoxLinkMod.getConfig().save();
+            this.publishModsButton.setMessage(this.buildPublishModsLabel());
+         }).bounds(centerX - 100, advY + 72, 98, 20).build();
+         this.addRenderableWidget(this.publishModsButton);
          this.createButton = Button.builder(Component.translatable("voxlink.create_room"), button -> this.createRoom())
-            .bounds(centerX - 100, advY + 72, 98, 20)
+            .bounds(centerX - 100, advY + 96, 98, 20)
             .build();
          this.addRenderableWidget(this.createButton);
          this.backButton = Button.builder(Component.translatable("voxlink.back"), button -> Minecraft.getInstance().gui.setScreen(this.parent))
-            .bounds(centerX + 2, advY + 72, 98, 20)
+            .bounds(centerX + 2, advY + 96, 98, 20)
             .build();
          this.addRenderableWidget(this.backButton);
          if (!this.categoriesFetched) {
@@ -364,6 +372,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                (Component)(hasPassword ? Component.translatable("voxlink.visible.password_hidden").withStyle(ChatFormatting.RED) : this.buildVisibleLabel())
             );
       }
+   }
+
+   private Component buildPublishModsLabel() {
+      return Component.translatable(
+         "voxlink.modsync.toggle.publish", new Object[]{Component.translatable(VoxLinkMod.getConfig().isHostModSyncPublish() ? "voxlink.terracotta.on" : "voxlink.terracotta.off")}
+      );
    }
 
    private Component buildVisibleLabel() {

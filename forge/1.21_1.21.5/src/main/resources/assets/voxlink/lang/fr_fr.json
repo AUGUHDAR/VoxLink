@@ -284,5 +284,19 @@
     "voxlink.modsync.restart_line1": "%s mod(s) requis téléchargé(s) dans le dossier mods.",
     "voxlink.modsync.restart_line2": "Effectif après redémarrage. Quittez puis relancez le jeu.",
     "voxlink.modsync.exit_game": "Quitter le jeu",
-    "voxlink.modsync.toggle.join": "Vérif. mods requis à la connexion : %s"
+    "voxlink.modsync.toggle.join": "Vérif. mods requis à la connexion : %s",
+    "voxlink.modsync.toggle.publish": "Publier les mods requis aux invités : %s",
+    "voxlink.modsync.download_mods": "Télécharger les mods (%s · %s)",
+    "voxlink.modsync.join_directly": "Rejoindre directement",
+    "voxlink.modsync.missing_header": "Mods requis manquants (%s) :",
+    "voxlink.modsync.entry_line": "• %s %s (%s)",
+    "voxlink.modsync.progress_title": "Téléchargement des mods requis",
+    "voxlink.modsync.progress_overall": "Progression : %s",
+    "voxlink.modsync.progress_completed": "Terminés : %s/%s",
+    "voxlink.modsync.progress_current": "En cours : %s",
+    "voxlink.modsync.progress_remaining": "Mods restants : %s",
+    "voxlink.modsync.progress_eta": "Temps restant estimé : %s",
+    "voxlink.modsync.page_ind": "%s/%s",
+    "voxlink.modsync.prev_page": "< Prec.",
+    "voxlink.modsync.next_page": "Suiv. >"
 }
