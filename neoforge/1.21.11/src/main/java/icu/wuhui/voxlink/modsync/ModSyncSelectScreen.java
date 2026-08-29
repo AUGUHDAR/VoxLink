@@ -24,6 +24,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
    private final List<ModSyncEntry> downloadable;
    private final List<String> unresolvable;
    private final List<String> versionDiff;
+   private final List<String> skipKeys;
    private final Runnable onProceed;
    private final Runnable onCancel;
 
@@ -31,6 +32,8 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
    private final List<Object[]> lines = new ArrayList<>();
    private int page = 0;
    private int rowsPerPage = MIN_ROWS;
+   /** 当前列表区底端（最后一行下缘），状态文字画在它之下。 */
+   private int listBottomY = 50;
 
    private Button downloadBtn;
    private Button joinBtn;
@@ -60,6 +63,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       List<ModSyncEntry> downloadable,
       List<String> unresolvable,
       List<String> versionDiff,
+      List<String> skipKeys,
       Runnable onProceed,
       Runnable onCancel
    ) {
@@ -68,6 +72,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       this.downloadable = downloadable;
       this.unresolvable = unresolvable;
       this.versionDiff = versionDiff;
+      this.skipKeys = skipKeys == null ? new java.util.ArrayList<>() : skipKeys;
       this.onProceed = onProceed;
       this.onCancel = onCancel;
       this.buildLines();
@@ -81,7 +86,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
          for (ModSyncEntry e : this.downloadable) {
             this.lines.add(new Object[]{
                1,
-               Component.translatable("voxlink.modsync.entry_line", e.title, e.versionNumber, humanSize(e.size)).getString()
+               cleanText(cleanText(cleanText(Component.translatable("voxlink.modsync.entry_line", e.title, e.versionNumber, humanSize(e.size)).getString())))
             });
          }
       }
@@ -89,16 +94,24 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       if (!this.versionDiff.isEmpty()) {
          this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.diff_header").getString()});
          for (String d : this.versionDiff) {
-            this.lines.add(new Object[]{1, d});
+            this.lines.add(new Object[]{1, cleanText(d)});
          }
       }
 
       if (!this.unresolvable.isEmpty()) {
          this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.unresolvable_header").getString()});
          for (String u : this.unresolvable) {
-            this.lines.add(new Object[]{1, u});
+            this.lines.add(new Object[]{1, cleanText(u)});
          }
       }
+   }
+
+   /**
+    * 清洗待绘制文本：mods 目录里的文件名可能带 § 样式代码甚至控制字符，
+    * 原样绘制会把整行染色/花屏——显示层统一剥掉（数据层的原名不动，便于日志对账）。
+    */
+   static String cleanText(String s) {
+      return s == null ? "" : s.replaceAll("\u00a7.", "").replaceAll("\\p{Cntrl}", "").trim();
    }
 
    @Override
@@ -107,8 +120,11 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       this.clearOurWidgets();
       int centerX = this.width / 2;
       int listTop = 50;
-      int footerReserve = this.state == State.SELECTING ? 78 : 46;
+      // 状态文字（下载失败原因等）占列表底部之下的专属一行，计入预算防止压住最后一行
+      int statusReserve = this.statusText.isEmpty() ? 0 : 13;
+      int footerReserve = (this.state == State.SELECTING ? 78 : 46) + statusReserve;
       this.rowsPerPage = Math.max(MIN_ROWS, (this.height - listTop - footerReserve) / ROW_H);
+      this.listBottomY = listTop + this.rowsPerPage * ROW_H;
       int pages = this.pageCount();
       if (this.page >= pages) {
          this.page = Math.max(0, pages - 1);
@@ -127,25 +143,38 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
       if (this.state == State.SELECTING) {
          int by = this.height - 54;
-         long selBytes = 0L;
-         for (ModSyncEntry e : this.downloadable) {
-            selBytes += e.size;
+         // 无可下载项（仅版本不一致/仅提示）时不给下载按钮，避免玩家对着空列表点"下载"
+         boolean hasDownloads = !this.downloadable.isEmpty();
+         if (hasDownloads) {
+            long selBytes = 0L;
+            for (ModSyncEntry e : this.downloadable) {
+               selBytes += e.size;
+            }
+
+            this.downloadBtn = Button
+               .builder(
+                  Component.translatable(
+                     "voxlink.modsync.download_mods",
+                     this.downloadable.size(),
+                     humanSize(selBytes)
+                  ),
+                  b -> this.startDownload()
+               )
+               .bounds(centerX - 130, by, 128, 20).build();
+            this.addRenderableWidget(this.downloadBtn);
          }
 
-         this.downloadBtn = Button
+         this.joinBtn = Button
             .builder(
                Component.translatable(
-                  "voxlink.modsync.download_mods",
-                  this.downloadable.size(),
-                  humanSize(selBytes)
+                  this.versionDiff.isEmpty() ? "voxlink.modsync.join_directly" : "voxlink.modsync.join_anyway"
                ),
-               b -> this.startDownload()
+               b -> {
+                  ModSyncGuestService.markSkipped(this.skipKeys);
+                  this.onProceed.run();
+               }
             )
-            .bounds(centerX - 130, by, 128, 20).build();
-         this.addRenderableWidget(this.downloadBtn);
-         this.joinBtn = Button
-            .builder(Component.translatable("voxlink.modsync.join_directly"), b -> this.onProceed.run())
-            .bounds(centerX + 2, by, 128, 20).build();
+            .bounds(hasDownloads ? centerX + 2 : centerX - 65, by, hasDownloads ? 128 : 130, 20).build();
          this.addRenderableWidget(this.joinBtn);
          this.backBtn = Button
             .builder(Component.translatable("voxlink.modsync.back"), b -> this.onCancel.run())
@@ -154,7 +183,17 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       } else {
          this.cancelBtn = Button
             .builder(Component.translatable("voxlink.modsync.cancel_download"), b -> {
+               if (this.downloadAbort) {
+                  return;
+               }
+
                this.downloadAbort = true;
+               // M21：即时反馈——按钮文案直接切到"正在取消..."，并 active=false 防重复点击；
+               // 状态文字只是附属提示，按钮可见状态才是玩家最先注意的反馈。
+               b.setMessage(Component.translatable("voxlink.modsync.cancelling"));
+               b.active = false;
+               this.statusText = Component.translatable("voxlink.modsync.cancelling").getString();
+               this.statusColor = VoxLinkColors.MUTED;
             })
             .bounds(centerX - 65, this.height - 30, 130, 20).build();
          this.addRenderableWidget(this.cancelBtn);
@@ -213,6 +252,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       }
 
       String lastError = null;
+      Path modsDirNorm = modsDir.normalize();
       for (int i = 0; i < this.downloadable.size(); i++) {
          if (this.downloadAbort) {
             this.abortThrough();
@@ -221,20 +261,46 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
          ModSyncEntry e = this.downloadable.get(i);
          this.currentName = e.title;
+
+         // H6：fileName 消毒——拒绝 ../、绝对路径、路径分隔符、冒号、控制字符，
+         // 防止恶意/错乱清单把文件写到 mods 目录之外。
+         if (!isSafeFileName(e.fileName, modsDirNorm)) {
+            ModSyncLog.warn("skip unsafe fileName entry: {} (title={})", e.fileName, e.title);
+            this.unresolvable.add(e.fileName);
+            lastError = e.title;
+            this.overallPct = this.totalBytes > 0 ? (int)Math.min(100L, this.bytesDone * 100L / this.totalBytes) : 0;
+            continue;
+         }
+
          try {
-            ModrinthClient.downloadVerified(e.downloadUrl, e.sha512, e.fileName, modsDir);
+            // M11+H5：用 ModrinthClient 新签名（已与并行代理对齐），返回实际下载并校验通过的字节数。
+            // sha1 为空时传 null，由客户端决定是否放行校验。
+            long bytes = ModrinthClient.downloadVerified(
+               e.downloadUrl,
+               e.sha512,
+               (e.sha1 == null || e.sha1.isEmpty()) ? null : e.sha1,
+               e.fileName,
+               modsDir,
+               () -> this.downloadAbort
+            );
             synchronized (this.succeededIdx) {
                this.succeededIdx.add(i);
             }
 
             this.doneFiles++;
-            this.bytesDone += e.size;
+            this.bytesDone += bytes;
             long elapsed = Math.max(1L, System.currentTimeMillis() - this.startMs);
             double speed = this.bytesDone / (elapsed / 1000.0);
             long remainB = Math.max(0L, this.totalBytes - this.bytesDone);
             this.etaSec = speed > 0 ? (long)(remainB / speed) : -1L;
+         } catch (ModrinthClient.AbortedException aborted) {
+            // 玩家取消：静默收场，不算失败
+            ModSyncLog.info("download {} cancelled by user", e.fileName);
+            this.abortThrough();
+            return;
          } catch (Exception ex) {
             ModSyncLog.warn("download {} failed: {}", e.fileName, ex.toString());
+            this.unresolvable.add(e.fileName);
             lastError = e.title;
          }
 
@@ -256,15 +322,21 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
    }
 
    private void abortThrough() {
+      // 取消下载=回到清单弹窗（SELECTING），玩家可重试下载/直接加入/返回。
+      // 不再走 onCancel：那条链会取消整个加入流程（leaveRoom+返回），且一旦
+      // 导航回调异常本屏就永久停在"正在取消"（按钮已禁用、无人重建 UI）。
       this.state = State.SELECTING;
-      Minecraft.getInstance().execute(() -> {
-         this.onCancel.run();
-      });
+      this.statusText = Component.translatable("voxlink.modsync.download_cancelled").getString();
+      this.statusColor = VoxLinkColors.MUTED;
+      this.downloadAbort = false;
+      Minecraft.getInstance().execute(this::rebuildInPlace);
    }
 
    private void failThrough(String msg) {
       this.state = State.SELECTING;
-      this.statusText = msg;
+      // M21：失败回到 SELECTING 后追加重试提示，避免玩家以为"卡死"了
+      String hint = Component.translatable("voxlink.modsync.retry_hint").getString();
+      this.statusText = hint.isEmpty() ? msg : (msg + " " + hint);
       this.statusColor = VoxLinkColors.ERROR;
       Minecraft.getInstance().execute(this::rebuildInPlace);
    }
@@ -290,7 +362,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
          }
 
          if (!this.statusText.isEmpty()) {
-            this.drawCenteredClipped(graphics, this.statusText, centerX, this.height - 86, this.statusColor);
+            this.drawCenteredClipped(graphics, this.statusText, centerX, Math.min(this.listBottomY + 2, this.height - 86), this.statusColor);
          }
       } else {
          this.renderProgress(graphics, centerX);
@@ -330,11 +402,17 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       int y = barY + 14;
       this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_overall", this.overallPct + "%").getString(), centerX, y, VoxLinkColors.MUTED);
       y += ROW_H;
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_completed", this.doneFiles, this.totalFiles).getString(), centerX, y, VoxLinkColors.WHITE);
+      // M21：用真实成功数（succeededIdx.size()）而非 doneFiles，避免失败被计为完成
+      int okNow;
+      synchronized (this.succeededIdx) {
+         okNow = this.succeededIdx.size();
+      }
+
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_completed", okNow, this.totalFiles).getString(), centerX, y, VoxLinkColors.WHITE);
       y += ROW_H;
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_current", clip(this.currentName, 36)).getString(), centerX, y, VoxLinkColors.WARNING);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_current", cleanText(clip(this.currentName, 36))).getString(), centerX, y, VoxLinkColors.WARNING);
       y += ROW_H;
-      int remaining = Math.max(0, this.totalFiles - this.doneFiles);
+      int remaining = Math.max(0, this.totalFiles - okNow);
       this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_remaining", remaining).getString(), centerX, y, VoxLinkColors.MUTED);
       y += ROW_H;
       this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.progress_eta", fmtEta(this.etaSec)).getString(), centerX, y, VoxLinkColors.MUTED);
@@ -342,6 +420,14 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
    @Override
    public boolean shouldCloseOnEsc() {
+      // 吞掉关闭的同时给出反馈——按 ESC 不会退出但玩家常以为"按了没反应"。
+      // 下载中提示先取消；选择中提示用按钮返回。
+      String key = this.state == State.DOWNLOADING
+         ? "voxlink.modsync.esc_block_downloading"
+         : "voxlink.modsync.esc_block_selecting";
+      this.statusText = Component.translatable(key).getString();
+      this.statusColor = VoxLinkColors.WARNING;
+      this.rebuildInPlace();
       return false;
    }
 
@@ -371,7 +457,49 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       }
 
       long m = sec / 60L;
+      // M21：分钟数 > 99 时切换为占位符，避免显示爆炸式"199:59"误导玩家
+      if (m > 99L) {
+         return "--:--";
+      }
+
       long s = sec % 60L;
       return m + ":" + (s < 10L ? "0" : "") + s;
+   }
+
+   /**
+    * H6：校验 fileName 是否会落在 modsDir 之内。
+    * 拒绝规则：null/空、含 ".."、含任何路径分隔符/冒号/控制字符、或解析后逃出 modsDir。
+    */
+   static boolean isSafeFileName(String fileName, Path modsDirNorm) {
+      if (fileName == null || fileName.isEmpty()) {
+         return false;
+      }
+
+      if (fileName.contains("..")) {
+         return false;
+      }
+
+      if (fileName.indexOf('/') >= 0 || fileName.indexOf('\\') >= 0) {
+         return false;
+      }
+
+      // Windows 盘符冒号、以及任何显式冒号都拒绝
+      if (fileName.indexOf(':') >= 0) {
+         return false;
+      }
+
+      // 控制字符（含 \0、\n、\r、\t 等）会扰乱文件系统/渲染
+      for (int i = 0; i < fileName.length(); i++) {
+         if (Character.isISOControl(fileName.charAt(i))) {
+            return false;
+         }
+      }
+
+      try {
+         Path resolved = modsDirNorm.resolve(fileName).normalize();
+         return resolved.startsWith(modsDirNorm);
+      } catch (Exception ex) {
+         return false;
+      }
    }
 }

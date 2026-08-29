@@ -40,7 +40,6 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    private Button visibleButton;
    private Button authButton;
    private Button backButton;
-   private volatile long createStartTime = 0L;
    private volatile boolean removed = false;
    private boolean visible = true;
    private boolean visibleBeforePassword = true;
@@ -51,13 +50,21 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    private Button guestOpButton;
    private Button publishModsButton;
    private Button gameTypeButton;
+
+   /** 表单顶部 Y（init 计算一次，render/分类重建共用，避免多处算式漂移）。 */
+
+   private int formTopY = 4;
+   /** 分类按钮行起始 Y（init 捕获，fetchCategories 回调重建时复用，防止与 customCategoryField 错位）。 */
+   private int formCatY = 74;
+
+   private Button parallelP2PButton;
+
    private Button hostOpButton;
    private String selectedCategory = "other";
    private Map<String, String> categoryMap = new LinkedHashMap<>();
    private List<Button> categoryButtons = new ArrayList<>();
    private boolean showCustomInput = false;
    private volatile MinecraftServer publishedServer;
-   private volatile boolean creating = false;
    private volatile boolean cancelled = false;
    private boolean categoriesFetched = false;
    private String savedName = "";
@@ -128,6 +135,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          boolean compactForm = this.height < 300;
          int formHeight = compactForm ? 217 : 264;
          int y = Math.max(2, (this.height - formHeight) / 2);
+         this.formTopY = y;
          int fieldStep = compactForm ? 20 : 24;
          int catStep = compactForm ? 56 : 74;
          int advStep = compactForm ? 32 : 42;
@@ -155,6 +163,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.setInputFilter(this.maxPlayersField, s -> s.matches("\\d*"));
          this.addRenderableWidget(this.maxPlayersField);
          int catY = y + catStep;
+         this.formCatY = catY;
          this.buildCategoryButtons(centerX, catY);
          this.customCategoryField = new EditBox(this.font, centerX - 100, catY + 22, 200, 18, Component.translatable("voxlink.create_room.custom_category"));
          this.customCategoryField.setMaxLength(32);
@@ -202,8 +211,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.guestOpButton.active = this.hostOp;
          this.addRenderableWidget(this.guestOpButton);
          if (TerracottaManager.isBinaryReady()) {
-            this.addRenderableWidget(
-               Button.builder(
+            this.parallelP2PButton = Button.builder(
                      Component.translatable(
                         "voxlink.terracotta.toggle",
                         new Object[]{Component.translatable(VoxLinkMod.getConfig().isParallelP2P() ? "voxlink.terracotta.on" : "voxlink.terracotta.off")}
@@ -219,9 +227,11 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                         );
                      }
                   )
-                  .bounds(centerX + 2, advY + 2 * advRowStep, 98, 20)
-                  .build()
-            );
+                  .bounds(centerX + 2, advY + 48, 98, 20)
+            .build();
+            this.addRenderableWidget(this.parallelP2PButton);
+         } else {
+            this.parallelP2PButton = null;
          }
 
          this.publishModsButton = Button.builder(this.buildPublishModsLabel(), button -> {
@@ -229,7 +239,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             VoxLinkMod.getConfig().setHostModSyncPublish(v);
             VoxLinkMod.getConfig().save();
             this.publishModsButton.setMessage(this.buildPublishModsLabel());
-         }).bounds(centerX - 100, advY + 3 * advRowStep, 98, 20).build();
+         }).bounds(centerX - 100, advY + 3 * advRowStep, 200, 20).build();
          this.addRenderableWidget(this.publishModsButton);
          this.createButton = Button.builder(Component.translatable("voxlink.create_room"), button -> this.createRoom())
             .bounds(centerX - 100, advY + 4 * advRowStep, 98, 20)
@@ -243,7 +253,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             this.fetchCategories();
          }
 
-         if (this.creating) {
+         if (CreateFlowState.isActive()) {
             this.createButton.active = false;
             this.backButton.active = false;
             this.nameField.setEditable(false);
@@ -252,6 +262,14 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             this.visibleButton.active = false;
             this.authButton.active = false;
             this.guestOpButton.active = false;
+
+            this.publishModsButton.active = false;
+
+            if (this.parallelP2PButton != null) {
+
+               this.parallelP2PButton.active = false;
+
+            }
             this.gameTypeButton.active = false;
             this.hostOpButton.active = false;
             this.customCategoryField.setEditable(false);
@@ -350,7 +368,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                      }
 
                      this.categoriesFetched = true;
-                     this.buildCategoryButtons(this.width / 2, Math.max(4, (this.height - 240) / 2) + 74);
+                     this.buildCategoryButtons(this.width / 2, this.formCatY);
                   }
                } catch (Exception var5) {
                }
@@ -416,11 +434,11 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    }
 
    public boolean shouldCloseOnEsc() {
-      return !this.creating;
+      return !CreateFlowState.isActive();
    }
 
    public void onClose() {
-      if (!this.creating) {
+      if (!CreateFlowState.isActive()) {
          this.goBack();
       }
    }
@@ -429,20 +447,65 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
       Minecraft.getInstance().gui.setScreen(this.parent);
    }
 
-   void onCreateTimeout() {
-      this.cancelled = true;
-      this.creating = false;
-      this.createStartTime = 0L;
-      this.closeLan();
-      VoxLinkMod.getRoomManager().leaveRoom();
+   /** 弹窗里的【取消】：终止后台任务并作废流程，回世界。teardown 统一交给终态监听。 */
+   void cancelFlowFromUi() {
+      if (!CreateFlowState.requestCancel()) {
+         return;
+      }
+
+      Minecraft mc = Minecraft.getInstance();
+      if (mc.player != null) {
+         mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.cancelled").withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)));
+      }
+
+      mc.gui.setScreen(null);
    }
 
-   void onCancelCreate() {
-      this.cancelled = true;
-      this.creating = false;
-      this.createStartTime = 0L;
-      this.closeLan();
-      VoxLinkMod.getRoomManager().leaveRoom();
+   /**
+    * 全局终态监听（保证主线程）：成功只在弹窗在场时导航回表单；
+    * 失败永远发动作栏提示（收起后也可见），且弹窗在场才把表单带回来。
+    */
+   private void handleCreateTerminal(CreateFlowState.Terminal t) {
+      Minecraft mc = Minecraft.getInstance();
+      boolean viewingPopup = mc.gui.screen() instanceof CreatingRoomScreen;
+      switch (t.phase()) {
+         case SUCCESS -> {
+            if (viewingPopup) {
+               mc.gui.setScreen(this);
+            }
+         }
+         case CANCELLED -> {
+            this.closeLan();
+            try {
+               VoxLinkMod.getRoomManager().leaveRoom();
+            } catch (Exception e) {
+               VoxLinkMod.LOGGER.debug("cancelled flow cleanup: {}", e.getMessage());
+            }
+         }
+         case FAILED -> {
+            String d = t.detail();
+            if ("WORLD_EXITED".equals(d)) {
+               VoxLinkMod.LOGGER.info("[CreateFlow] aborted because world exited");
+               break;
+            }
+
+            this.closeLan();
+            Component msg = switch (d) {
+               case "TIMEOUT" -> Component.translatable("voxlink.create_room.timeout");
+               case "LAN_FAILED" -> Component.translatable("voxlink.create_room.lan_failed");
+               default -> Component.literal(this.simplifyError(d));
+            };
+            if (mc.player != null) {
+               mc.player.sendSystemMessage(msg.copy().withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)));
+            }
+
+            if (viewingPopup) {
+               mc.gui.setScreen(this);
+            }
+         }
+         default -> {
+         }
+      }
    }
 
    private void createRoom() {
@@ -481,13 +544,21 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.createButton.active = false;
          this.backButton.active = false;
          this.cancelled = false;
-         this.creating = true;
-         this.createStartTime = System.currentTimeMillis();
-         Minecraft.getInstance().gui.setScreen(new CreatingRoomScreen(this));
+         CreateFlowState.begin(
+            () -> this.closeLan(),
+            tt -> this.handleCreateTerminal(tt)
+         );
          if (mc.player != null) {
             mc.player.sendSystemMessage(Component.translatable("voxlink.chat.creating_room"));
          }
-
+   
+         // 自动收起（默认关）：开启则点了创建直接回世界，后台跑信令+打洞
+         if (VoxLinkMod.getConfig().isAutoCollapseCreateUi()) {
+            Minecraft.getInstance().gui.setScreen(null);
+            CreatingRoomScreen.showMinimizeHints(Minecraft.getInstance());
+         } else {
+            Minecraft.getInstance().gui.setScreen(new CreatingRoomScreen(this));
+         }
          IntegratedServer server = mc.getSingleplayerServer();
          int mcPort = server.getPort();
          if (mcPort <= 0) {
@@ -505,12 +576,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             boolean allowCommands = this.guestOp;
             boolean published = server.publishServer(MultiplayerScope.LAN, selectedGameType, allowCommands, mcPort);
             if (!published) {
-               this.creating = false;
-               if (mc.player != null) {
-                  mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.lan_failed").withStyle(style -> style.withColor(16733525)));
-               }
-
-               this.createButton.active = true;
+               CreateFlowState.finishFailure("LAN_FAILED");
                return;
             }
 
@@ -522,6 +588,8 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             VoxLinkMod.getRoomManager().applyOpPolicy(server, this.hostOp, this.guestOp);
          }
 
+         CreateFlowState.markRegistering();
+
          int effectivePort = server.getPort() > 0 ? server.getPort() : mcPort;
          String categoryText = this.resolveCategory();
          VoxLinkMod.getRoomManager()
@@ -529,28 +597,29 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             .thenAccept(
                roomInfo -> mc.execute(
                   () -> {
-                     if (!this.cancelled) {
-                        this.createStartTime = 0L;
-                        if (roomInfo == null) {
-                           this.creating = false;
-                           this.closeLan();
-                           if (mc.player != null) {
-                              mc.player
-                                 .sendSystemMessage(
-                                    Component.translatable("voxlink.chat.error_prefix").append(Component.translatable("voxlink.create_room.timeout"))
-                                 );
+                     if (this.cancelled || !CreateFlowState.isActive()) {
+                        if (roomInfo != null) {
+                           try {
+                              VoxLinkMod.getRoomManager().leaveRoomSync();
+                           } catch (Exception ex) {
+                              VoxLinkMod.LOGGER.debug("late room cleanup: {}", ex.getMessage());
                            }
 
-                           mc.gui.setScreen(this);
-                        } else {
-                           this.creating = false;
-                           this.createdRoom = roomInfo;
-                           roomInfo.setGuestOp(this.guestOp);
-                           roomInfo.setGameType(this.gameType);
-                           roomInfo.setHostOp(this.hostOp);
-                           this.sendChatMessages(mc, roomInfo);
-                           mc.gui.setScreen(this);
+                           this.closeLan();
                         }
+
+                        return;
+                     }
+
+                     if (roomInfo == null) {
+                        CreateFlowState.finishFailure("TIMEOUT");
+                     } else {
+                        this.createdRoom = roomInfo;
+                        roomInfo.setGuestOp(this.guestOp);
+                        roomInfo.setGameType(this.gameType);
+                        roomInfo.setHostOp(this.hostOp);
+                        this.sendChatMessages(mc, roomInfo);
+                        CreateFlowState.finishSuccess();
                      }
                   }
                )
@@ -566,14 +635,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                String displayMsg = this.simplifyError(msg);
                mc.execute(() -> {
                   if (!this.cancelled) {
-                     this.createStartTime = 0L;
-                     this.creating = false;
-                     this.closeLan();
-                     if (mc.player != null) {
-                        mc.player.sendSystemMessage(Component.translatable("voxlink.chat.error", new Object[]{displayMsg}));
-                     }
-
-                     mc.gui.setScreen(this);
+                     CreateFlowState.finishFailure(displayMsg);
                   }
                });
                return null;
@@ -658,7 +720,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    public void removed() {
       super.removed();
       this.removed = true;
-      if (!this.creating && this.createdRoom == null) {
+      if (!CreateFlowState.isActive() && this.createdRoom == null) {
          this.closeLan();
       }
    }
@@ -800,7 +862,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             y += 14;
          }
       } else {
-         this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
+         // 标题仅在表单顶上方留有足够空隙（16px）时绘制，避免压住房间名输入框
+         if (this.formTopY >= 20) {
+            this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
+         }
       }
    }
 

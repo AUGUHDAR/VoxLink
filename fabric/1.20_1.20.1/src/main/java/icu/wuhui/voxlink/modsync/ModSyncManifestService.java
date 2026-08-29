@@ -11,6 +11,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,6 +35,8 @@ public final class ModSyncManifestService {
       return t;
    });
    private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
+   /** 构建期间又来了新的建房请求时暂存于此，本轮完成后补一次（快速重开房间不再丢清单）。 */
+   private static volatile RoomInfo PENDING;
    /** 依赖闭包最大深度（防脏元数据成环/超深；visited 已防环，此为双保险）。 */
    private static final int MAX_DEP_DEPTH = 8;
 
@@ -46,14 +49,29 @@ public final class ModSyncManifestService {
          return;
       }
 
+      if (!VoxLinkMod.getConfig().isHostModSyncPublish()) {
+         ModSyncLog.info("host mod-sync publish disabled, skip manifest build");
+         return;
+      }
+
       if (!RUNNING.compareAndSet(false, true)) {
-         ModSyncLog.warn("previous manifest build still running, skip this round");
+         PENDING = room;
+         ModSyncLog.warn("previous manifest build still running, queued this round");
          return;
       }
 
       EXECUTOR.execute(() -> {
          try {
             buildAndPublish(room);
+            RoomInfo next = PENDING;
+            PENDING = null;
+            if (next != null && next.getCode() != null && !next.getCode().equals(room.getCode())) {
+               try {
+                  buildAndPublish(next);
+               } catch (Throwable t) {
+                  ModSyncLog.warn("queued manifest build failed: {}", t.toString());
+               }
+            }
          } catch (Throwable t) {
             ModSyncLog.warn("manifest build/publish failed (room continues without modsync): {}", t.toString());
          } finally {
@@ -116,10 +134,17 @@ public final class ModSyncManifestService {
       // 3) 项目元数据一次批量查全（自身 + 被引用的前置），避免逐层请求
       Map<String, JsonObject> projects = ModrinthClient.projectsByIds(depRefs);
 
-      // 4) 根集：客户端必装（required/unknown/缺失字段都算，纯 optional 不打扰玩家）
+      // 4) 根集（依赖感知）：client_required 但"同时是其他房主 mod 的 required 依赖"的库类
+      //    （Architectury API / Cloth Config 等）不作根——它们是否必装由 BFS 按需决定：
+      //    只要有必装根真的依赖它们就会经闭包拉入；依赖它们的都是选装 mod 时不打扰房客。
+      Set<String> depIdsOfHostMods = new HashSet<>();
+      for (JsonObject v : versionsBySha1.values()) {
+         depIdsOfHostMods.addAll(requiredDepIds(v));
+      }
+
       Deque<String> queue = new ArrayDeque<>();
       for (Map.Entry<String, JsonObject> e : versionByProject.entrySet()) {
-         if (isClientRequiredRoot(projects.get(e.getKey()))) {
+         if (!depIdsOfHostMods.contains(e.getKey()) && isClientRequiredRoot(projects.get(e.getKey()), e.getKey())) {
             queue.add(e.getKey());
          }
       }
@@ -202,13 +227,16 @@ public final class ModSyncManifestService {
    }
 
    /**
-    * 根集判定：required/unknown/缺失字段 → 是；optional（如 Fabric API 单独存在时）/unsupported → 否。
-    * 注意不能只认 required——MR 元数据里大量内容 mod 标 optional，但作为根时
-    * 它们的前置链仍可能被其他必装 mod 拉进来。
+    * 根集判定：optional/unsupported → 否；缺失字段按"fail-open"判否——
+    * 把 Modrinth 元数据查不到的 mod 一律当必装根集会污染房客（房主端仅看 mods 目录里有就纳入）。
+    * 真正必装的 mod 通常会被其他必装 mod 的 required 前置依赖闭包重新捞回 BFS；
+    * 元数据缺失本身是异常情况，保持最小破坏面。
+    * 注意：BFS 闭包内对 projectId 的依赖仍然全量保留，这里只改"根集"。
     */
-   private static boolean isClientRequiredRoot(JsonObject project) {
+   private static boolean isClientRequiredRoot(JsonObject project, String projectId) {
       if (project == null) {
-         return true;
+         ModSyncLog.warn("isClientRequiredRoot: project meta missing for {} (fail-open, not a root)", projectId);
+         return false;
       }
 
       String cs = str(project, "client_side");

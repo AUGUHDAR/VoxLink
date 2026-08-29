@@ -544,12 +544,13 @@ public class StunProbe {
 
    public static boolean isNetworkChanged() {
       String last = lastProbeLocalIp;
-      if (last != null && !"unknown".equals(last)) {
-         String current = detectLocalIp();
-         return !last.equals(current);
-      } else {
-         return false;
+      String current = detectLocalIp();
+      // M7: detectLocalIp 失败返回 "unknown"; last 为 unknown 时短路会让该函数永远 false,
+      // 错失"未知 -> 已知"的网络变化信号。修正: unknown -> 已知 IP 视为变化, 一直是 unknown 不算变化
+      if (last == null || "unknown".equals(last)) {
+         return !"unknown".equals(current);
       }
+      return !last.equals(current);
    }
 
    private static String detectLocalIp() {
@@ -1113,7 +1114,8 @@ public class StunProbe {
             msgLen = maxMsgLen;
          }
 
-         VoxLinkMod.LOGGER.info("[StunProbe] Binding response: dataLen={}, msgLen={}", data.length, msgLen);
+         // 逐包解析日志降 DEBUG: 每次会话数百条 Binding response 会刷爆诊断日志配额
+         VoxLinkMod.LOGGER.debug("[StunProbe] Binding response: dataLen={}, msgLen={}", data.length, msgLen);
          int offset = 20;
 
          while (offset + 4 <= data.length && offset - 20 < msgLen) {

@@ -10,7 +10,7 @@ public final class VoxLinkConstants {
    public static final String LOADER = "fabric";
    public static final int PROTOCOL_VERSION = getProtocolVersion(GAME_VERSION);
 
-   private static int getProtocolVersion(String v) {
+   public static int getProtocolVersion(String v) {
       return switch (v) {
          case "1.20", "1.20.1" -> 763;
          case "1.20.2" -> 764;

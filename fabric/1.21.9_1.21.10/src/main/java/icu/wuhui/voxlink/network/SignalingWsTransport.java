@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -89,7 +90,8 @@ public final class SignalingWsTransport {
          t.setDaemon(true);
          return t;
       });
-      // 心跳看门狗：每 30s 检查一次，正常情况下服务端 30s 一次 ping，不会触发
+      // 心跳看门狗：每 30s 检查一次。onText/onPing/onPong 都会刷新 lastFrameAt,
+      // 因此即便服务端 30s 一次 ping (无业务文本帧) 也不会误判, 长空闲场景下 90s 阈值才生效
       this.scheduler.scheduleAtFixedRate(this::heartbeatWatchdog, 30L, 30L, TimeUnit.SECONDS);
    }
 
@@ -419,6 +421,19 @@ public final class SignalingWsTransport {
          }
          webSocket.request(1);
          return CompletableFuture.completedFuture(null);
+      }
+
+      // H10: 协议层 ping/pong 也要计入心跳, 否则 90s 看门狗会误杀仅有 keepalive 的健康连接
+      @Override
+      public CompletionStage<?> onPing(WebSocket webSocket, ByteBuffer message) {
+         SignalingWsTransport.this.lastFrameAt.set(System.currentTimeMillis());
+         return WebSocket.Listener.super.onPing(webSocket, message);
+      }
+
+      @Override
+      public CompletionStage<?> onPong(WebSocket webSocket, ByteBuffer message) {
+         SignalingWsTransport.this.lastFrameAt.set(System.currentTimeMillis());
+         return WebSocket.Listener.super.onPong(webSocket, message);
       }
 
       @Override

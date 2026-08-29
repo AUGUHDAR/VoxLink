@@ -11,6 +11,8 @@ public final class ModSyncEntry {
    public String versionNumber = "";
    public String fileName = "";
    public String downloadUrl = "";
+   /** 房主侧实际安装文件/主文件的 sha1（房客离线 diff 用，客户端零 Modrinth API 调用的关键）。 */
+   public String sha1 = "";
    public String sha512 = "";
    public long size = 0L;
    /** 该版本支持的加载器与 MC 版本（供房客侧判断能否直接用该文件）。 */
@@ -32,21 +34,47 @@ public final class ModSyncEntry {
          e.title = str(project, "title");
       }
 
-      if (e.title == null || e.title.isBlank()) {
-         e.title = e.slug.isEmpty() ? e.projectId : e.slug;
-      }
-
       JsonObject file = ModrinthClient.primaryFile(version);
       if (file != null) {
          e.fileName = str(file, "filename");
          e.downloadUrl = str(file, "url");
          e.size = file.has("size") && file.get("size").isJsonPrimitive() ? file.get("size").getAsLong() : 0L;
-         if (file.has("hashes") && file.getAsJsonObject("hashes").has("sha512")) {
-            e.sha512 = file.getAsJsonObject("hashes").get("sha512").getAsString();
+         if (file.has("hashes") && file.getAsJsonObject("hashes").isJsonObject()) {
+            JsonObject hashes = file.getAsJsonObject("hashes");
+            if (hashes.has("sha1") && !hashes.get("sha1").isJsonNull()) {
+               e.sha1 = hashes.get("sha1").getAsString();
+            }
+
+            if (hashes.has("sha512") && !hashes.get("sha512").isJsonNull()) {
+               e.sha512 = hashes.get("sha512").getAsString();
+            }
          }
       }
 
+      if (e.title == null || e.title.isBlank()) {
+         String guess = guessTitleFromFileName(e.fileName);
+         e.title = !guess.isEmpty() ? guess : (!e.slug.isEmpty() ? e.slug : e.projectId);
+      }
+
       return e;
+   }
+
+   /** 从文件名推断可读标题：去 .jar、掐掉版本号段与加载器后缀、连字符转空格。 */
+   static String guessTitleFromFileName(String fileName) {
+      if (fileName == null || fileName.isEmpty()) {
+         return "";
+      }
+
+      String s = fileName;
+      int i = s.toLowerCase(java.util.Locale.ROOT).lastIndexOf(".jar");
+      if (i > 0) {
+         s = s.substring(0, i);
+      }
+
+      s = s.replaceAll("(?i)[-_. ](mc)?[0-9]+([._-][0-9]+)+.*$", "");
+      s = s.replaceAll("(?i)[-_. ]?(fabric|forge|neoforge|fml|quilt)([-_. ].*)?$", "");
+      s = s.replace('-', ' ').replace('_', ' ').trim();
+      return s;
    }
 
    public JsonObject toJson() {
@@ -57,6 +85,7 @@ public final class ModSyncEntry {
       o.addProperty("versionNumber", versionNumber);
       o.addProperty("fileName", fileName);
       o.addProperty("url", downloadUrl);
+      o.addProperty("sha1", sha1);
       o.addProperty("sha512", sha512);
       o.addProperty("size", size);
       JsonArray ld = new JsonArray();
@@ -80,6 +109,7 @@ public final class ModSyncEntry {
       e.versionNumber = str(o, "versionNumber");
       e.fileName = str(o, "fileName");
       e.downloadUrl = str(o, "url");
+      e.sha1 = str(o, "sha1");
       e.sha512 = str(o, "sha512");
       e.size = o.has("size") && o.get("size").isJsonPrimitive() ? o.get("size").getAsLong() : 0L;
       e.loaders = strList(o, "loaders");

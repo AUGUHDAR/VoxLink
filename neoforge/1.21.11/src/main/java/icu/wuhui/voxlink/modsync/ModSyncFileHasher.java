@@ -11,35 +11,91 @@ import java.util.stream.Stream;
 
 /** mods 目录扫描与文件哈希（纯 JDK，无加载器 API）。 */
 public final class ModSyncFileHasher {
-   private static final int MAX_JARS = 256;
+   /**
+    * 扫描 mods 目录的硬上限。绝大多数整合包在此范围内；超过则截断并 LOGGER.warn 提示，
+    * 避免极少数巨型整合包静默丢校验。仅防御 .jar / .jar.disabled 数量；.part 等不入扫描。
+    */
+   private static final int MAX_JARS = 1024;
    private static final int HASH_BUF = 64 * 1024;
 
    private ModSyncFileHasher() {
    }
 
-   /** 列出 mods 目录下的 .jar（按文件名排序、数量封顶），跳过 .part/.disabled 与子目录。 */
-   public static List<Path> listModJars() {
-      List<Path> out = new ArrayList<>();
+   /**
+    * 列出 mods 目录下的 .jar（含玩家主动禁用的 .jar.disabled），按文件名排序、数量封顶，
+    * 跳过 .part 与子目录。返回 disabled 文件名集合供调用方判定"安装了但被禁用"。
+    */
+   public static ListModJarsResult listModJarsWithDisabled() {
+      List<Path> jars = new ArrayList<>();
+      java.util.Set<String> disabled = new java.util.HashSet<>();
       Path dir = ModSyncEnv.getModsDir();
-      if (!Files.isDirectory(dir)) {
-         return out;
+      if (Files.isDirectory(dir)) {
+         try (Stream<Path> stream = Files.list(dir)) {
+            List<Path> all = stream
+               .filter(Files::isRegularFile)
+               .filter(p -> {
+                  String name = p.getFileName().toString();
+                  String low = name.toLowerCase(java.util.Locale.ROOT);
+                  if (low.endsWith(".part")) {
+                     return false;
+                  }
+
+                  if (low.endsWith(".jar.disabled")) {
+                     return true;
+                  }
+
+                  if (low.endsWith(".disabled")) {
+                     // 其他扩展名的 .disabled 跳过（不是 jar 衍生）
+                     return false;
+                  }
+
+                  return low.endsWith(".jar");
+               })
+               .sorted(Comparator.comparing(pp -> pp.getFileName().toString()))
+               .collect(java.util.stream.Collectors.toList());
+            for (Path p : all) {
+               String name = p.getFileName().toString();
+               if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".jar.disabled")) {
+                  // 记下原始 .jar 文件名（去掉 .disabled 末尾）便于与清单比对
+                  String jarName = name.substring(0, name.length() - ".disabled".length());
+                  disabled.add(jarName);
+               } else {
+                  jars.add(p);
+               }
+            }
+         } catch (IOException e) {
+            ModSyncLog.warn("listModJars failed: {}", e.getMessage());
+         }
       }
 
-      try (Stream<Path> stream = Files.list(dir)) {
-         stream
-            .filter(Files::isRegularFile)
-            .filter(p -> {
-               String name = p.getFileName().toString().toLowerCase();
-               return name.endsWith(".jar") && !name.endsWith(".disabled") && !name.endsWith(".part");
-            })
-            .sorted(Comparator.comparing(p -> p.getFileName().toString()))
-            .limit(MAX_JARS)
-            .forEach(out::add);
-      } catch (IOException e) {
-         ModSyncLog.warn("listModJars failed: {}", e.getMessage());
+      if (jars.size() + disabled.size() > MAX_JARS) {
+         ModSyncLog.warn(
+            "mods 数量超过 {}，超出部分未参与校验 (jars={}, disabled={})",
+            new Object[]{MAX_JARS, jars.size(), disabled.size()}
+         );
+         // 仅截断活跃 jar（disabled 不参与哈希），保留 disabled 信息
+         if (jars.size() > MAX_JARS) {
+            jars = new ArrayList<>(jars.subList(0, MAX_JARS));
+         }
       }
 
-      return out;
+      return new ListModJarsResult(jars, disabled);
+   }
+
+   /** 旧接口：仅返回 .jar 列表（不包含 .jar.disabled），保留向后兼容。 */
+   public static List<Path> listModJars() {
+      return listModJarsWithDisabled().jars;
+   }
+
+   /** 扫描结果：活跃 .jar 列表 + 玩家主动禁用的 jar 文件名集合（原始 .jar 命名）。 */
+   public static final class ListModJarsResult {
+      public final List<Path> jars;
+      public final java.util.Set<String> disabled;
+
+      public ListModJarsResult(List<Path> jars, java.util.Set<String> disabled) {
+         this.jars = jars;
+         this.disabled = disabled;
+      }
    }
 
    public static String sha1(Path file) throws IOException {

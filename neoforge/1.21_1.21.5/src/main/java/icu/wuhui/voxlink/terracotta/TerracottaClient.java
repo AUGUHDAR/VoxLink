@@ -30,7 +30,7 @@ public final class TerracottaClient {
       return t;
    });
    private static final int HTTP_MAX_RETRIES = 3;
-   private static final long[] HTTP_BACKOFF_MS = new long[]{10L, 50L, 200L};
+   private static final long[] HTTP_BACKOFF_MS = new long[]{200L, 500L, 2000L};
 
    private TerracottaClient() {
    }

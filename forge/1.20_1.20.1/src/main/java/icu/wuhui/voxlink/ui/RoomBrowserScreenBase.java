@@ -84,6 +84,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    protected int selectedIdx = -1;
    protected String statusMsg = "";
    protected int statusColor = VoxLinkColors.MUTED;
+   /** 被"有密码"过滤掉的房间数：仅在 >0 时在状态栏显示提示玩家走"输入房间号"加入。 */
+   protected int hiddenPasswordCount = 0;
    protected boolean initialFetchDone = false;
    protected int currentPage = 1;
    protected int totalRooms = 0;
@@ -333,7 +335,10 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                this.shuffleCustomBtn = Button.builder(Component.translatable("voxlink.shuffle"), b -> {
                   int total = this.customCatKeys.size();
                   int step = Math.min(10, total);
-                  this.customTagStartIndex = (this.customTagStartIndex + step) % total;
+                  if (total > step) {
+                     this.customTagStartIndex = new java.util.Random().nextInt(total - step + 1);
+                  }
+
                   this.customTagShowCount = step;
                   this.rebuildCategoryButtons();
                }).bounds(itemStartX + btnIdx * (itemW + 2), customRowY, itemW, 18).build();
@@ -487,6 +492,9 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          .filter(r -> this.sortMode != RoomBrowserScreenBase.SortMode.VERSION_SAME || GAME_VERSION.equals(r.gameVersion))
          .sorted(this.getComparator(myProtocol))
          .toList();
+      // 统计被按"有密码"过滤掉的房间：仅当确实过滤掉了且当前可见列表为空/几乎为空时，给玩家一条状态行提示走"输入房间号"加入
+      long hiddenByPassword = this.allRooms.stream().filter(r -> r.hasPassword).count();
+      this.hiddenPasswordCount = hiddenByPassword > 0L ? (int)hiddenByPassword : 0;
       this.scrollOffset = 0;
       this.selectedIdx = -1;
       if (this.joinBtn != null) {
@@ -546,7 +554,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          int row = i / cols;
          int x = gridX + col * (cardW + gap);
          int y = gridY + row * (cardH + gap) - this.scrollOffset;
-         if (y >= gridY - cardH && y < this.height - 36 && mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH) {
+         if (y >= gridY - cardH && y + cardH <= this.height - 52 && mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH) {
             this.selectedIdx = i;
             this.joinBtn.active = true;
             return true;
@@ -600,7 +608,9 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          int row = i / cols;
          int x = gridX + col * (cardW + gap);
          int y = gridY + row * (cardH + gap) - this.scrollOffset;
-         if (y >= gridY - cardH && y < bottom) {
+         // 卡片必须整体落在网格与分页条/按钮区（height-52）之间，任何滚动位置都不越界压控件
+
+         if (y >= gridY - cardH && y + cardH <= bottom) {
             RoomBrowserScreenBase.RoomEntry r = this.displayedRooms.get(i);
             boolean sel = i == this.selectedIdx;
             boolean hover = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH;
@@ -647,6 +657,22 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          }
 
          this.drawCenteredString(graphics, clippedStatus, this.width / 2, this.height - 64, this.statusColor);
+      }
+
+      // 当过滤后排除了密码房（且显示列表为空或只显示非密码房时），给玩家一条提示：可通过"输入房间号"加入
+      if (this.hiddenPasswordCount > 0 && this.displayedRooms.isEmpty()) {
+         String hiddenHint = Component.translatable("voxlink.browser.password_rooms_hidden", new Object[]{this.hiddenPasswordCount}).getString();
+         int maxHintWidth = this.width - 20;
+         if (this.fontWidth(hiddenHint) > maxHintWidth) {
+            String clipped = hiddenHint;
+            while (this.fontWidth(clipped + "...") > maxHintWidth && clipped.length() > 0) {
+               clipped = clipped.substring(0, clipped.length() - 1);
+            }
+
+            hiddenHint = clipped + "...";
+         }
+
+         this.drawCenteredString(graphics, hiddenHint, this.width / 2, this.height - 52, VoxLinkColors.INFO);
       }
 
       this.renderPagination(graphics, mouseX, mouseY);

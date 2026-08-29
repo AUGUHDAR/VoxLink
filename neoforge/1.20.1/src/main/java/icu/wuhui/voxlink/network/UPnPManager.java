@@ -19,7 +19,11 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
@@ -39,6 +43,18 @@ public class UPnPManager {
    private static volatile long localIpCacheTime = 0L;
    private static volatile Future<?> startupFuture;
    private static volatile boolean startupAttempted = false;
+   // 租约续期: addPortMapping 默认 3600s, 超 1 小时的房间映射静默失效
+   // 50 分钟续租一次 (留 10 分钟余量)
+   private static final long RENEW_LEAD_MS = 50L * 60L * 1000L;
+   // 续租调度器: 单线程 daemon, 与项目里其它 ScheduledExecutor 风格一致
+   private static final ScheduledExecutorService RENEW_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+      Thread t = new Thread(r, "VoxLink-UPnPRenew");
+      t.setDaemon(true);
+      return t;
+   });
+   // 每个映射 (internal_external_protocol) 对应一个续租 future, close/stop 时取消
+   private static final ConcurrentHashMap<String, ScheduledFuture<?>> renewTasks = new ConcurrentHashMap<>();
+   private static volatile boolean stopped = false;
 
    public static UPnPManager.UPnPResult openPort(int port, String description) {
       return openPort(port, description, "TCP");
@@ -106,9 +122,30 @@ public class UPnPManager {
             LOGGER.error("UPnP close error: {}", e.getMessage());
          }
       }
+      // 取消该端口相关的所有续租任务 (internal_external_protocol 多变体)
+      renewTasks.keySet().removeIf(k -> {
+         if (k.endsWith("_" + protocol) && k.contains("_" + port + "_")) {
+            return true;
+         }
+         return false;
+      });
+   }
+
+   /** 关闭续租调度器并清空所有续租任务, 模块卸载时调用。 */
+   public static void stop() {
+      if (stopped) {
+         return;
+      }
+      stopped = true;
+      for (ScheduledFuture<?> f : renewTasks.values()) {
+         f.cancel(false);
+      }
+      renewTasks.clear();
+      RENEW_SCHEDULER.shutdownNow();
    }
 
    public static boolean addPortMapping(int internalPort, int externalPort) {
+      String key = internalPort + "_" + externalPort + "_UDP";
       try {
          UPnPManager.GatewayInfo gateway = getCachedGateway();
          if (gateway == null) {
@@ -124,6 +161,8 @@ public class UPnPManager {
                String response = sendSoapRequest(gateway, "AddPortMapping", soapBody);
                if (response != null && !response.contains("errorCode")) {
                   mappedPorts.put(externalPort + "_UDP", true);
+                  // 调度 50 分钟后续租, 避免 3600s 租约到期后静默失效
+                  scheduleRenewal(key, internalPort, externalPort);
                   return true;
                } else {
                   LOGGER.warn("UPnP: UDP port {} mapping failed", externalPort);
@@ -134,6 +173,59 @@ public class UPnPManager {
       } catch (Exception e) {
          LOGGER.error("UPnP mapping error: {}", e.getMessage());
          return false;
+      }
+   }
+
+   private static void scheduleRenewal(String key, int internalPort, int externalPort) {
+      if (stopped) {
+         return;
+      }
+      // 先取消旧任务 (同名端口可能重复 addPortMapping)
+      ScheduledFuture<?> old = renewTasks.remove(key);
+      if (old != null) {
+         old.cancel(false);
+      }
+      ScheduledFuture<?> f = RENEW_SCHEDULER.scheduleWithFixedDelay(
+         () -> {
+            if (stopped || !mappedPorts.containsKey(externalPort + "_UDP")) {
+               ScheduledFuture<?> cur = renewTasks.remove(key);
+               if (cur != null) {
+                  cur.cancel(false);
+               }
+               return;
+            }
+            try {
+               UPnPManager.GatewayInfo gw = getCachedGateway();
+               String ip = getCachedLocalIp();
+               if (gw == null || ip == null) {
+                  LOGGER.warn("UPnP renew {}:{} skipped, no gateway/localIp", internalPort, externalPort);
+                  return;
+               }
+               String body = buildAddPortMappingLease(internalPort, externalPort, ip, "VoxLink", "UDP", 3600);
+               String resp = sendSoapRequest(gw, "AddPortMapping", body);
+               if (resp == null || resp.contains("errorCode")) {
+                  LOGGER.warn("UPnP renew {}:{} failed, dropping mapping", internalPort, externalPort);
+                  mappedPorts.remove(externalPort + "_UDP");
+                  ScheduledFuture<?> cur = renewTasks.remove(key);
+                  if (cur != null) {
+                     cur.cancel(false);
+                  }
+               } else {
+                  LOGGER.info("UPnP renew {}:{} ok", internalPort, externalPort);
+               }
+            } catch (Exception e) {
+               LOGGER.warn("UPnP renew {}:{} exception: {}", internalPort, externalPort, e.getMessage());
+            }
+         },
+         RENEW_LEAD_MS, RENEW_LEAD_MS, TimeUnit.MILLISECONDS
+      );
+      renewTasks.put(key, f);
+   }
+
+   private static void cancelRenewal(String key) {
+      ScheduledFuture<?> f = renewTasks.remove(key);
+      if (f != null) {
+         f.cancel(false);
       }
    }
 

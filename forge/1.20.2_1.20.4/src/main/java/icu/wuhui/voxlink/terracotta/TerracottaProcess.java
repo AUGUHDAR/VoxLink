@@ -38,17 +38,26 @@ public final class TerracottaProcess {
    private TerracottaProcess() {
    }
 
-   public static CompletableFuture<Integer> start() {
+   private static synchronized boolean acquireStartingGuard() {
       if (startingGuard.get() && startingSince > 0L && System.currentTimeMillis() - startingSince > 60000L) {
          LOGGER.warn("startingGuard stuck over 60s, force reset");
          startingGuard.set(false);
+         startingSince = 0L;
       }
 
       if (!startingGuard.compareAndSet(false, true)) {
-         return CompletableFuture.failedFuture(new IOException("Terracotta 启动已在进行中"));
+         return false;
       }
 
       startingSince = System.currentTimeMillis();
+      return true;
+   }
+
+   public static CompletableFuture<Integer> start() {
+      if (!acquireStartingGuard()) {
+         return CompletableFuture.failedFuture(new IOException("Terracotta 启动已在进行中"));
+      }
+
       boolean enteredAsync = false;
 
       try {
@@ -345,7 +354,7 @@ public final class TerracottaProcess {
       }
 
       try {
-         TerracottaClient.getMeta(httpPort).orTimeout(1L, TimeUnit.SECONDS).join();
+         TerracottaClient.getMeta(httpPort).orTimeout(3L, TimeUnit.SECONDS).join();
          return true;
       } catch (Exception e) {
          return false;

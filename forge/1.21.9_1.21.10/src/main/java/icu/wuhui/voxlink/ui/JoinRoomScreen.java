@@ -55,8 +55,12 @@ public class JoinRoomScreen extends VoxLinkScreenBase {
             this.joinButton.active = this.isJoinable(text);
          }
 
-         if (text.length() >= 6 && this.passwordField != null && RoomCodeRouter.isVoxLinkCode(text)) {
-            this.setInitialFocus(this.passwordField);
+         // 避免在玩家输入过程中强抢焦点：仅在恰好 6 位且是 VoxLink 房间号、且密码框还为空时才静默切换到密码框
+         if (text.length() == 6
+            && this.passwordField != null
+            && this.passwordField.getValue().isEmpty()
+            && RoomCodeRouter.isVoxLinkCode(text)) {
+            this.setFocused(this.passwordField);
          }
       });
       this.addRenderableWidget(this.codeField);

@@ -555,6 +555,7 @@ public final class TerracottaManager {
       initialized = false;
       port = 0;
       lastStateJson = null;
+      lastStateEpoch = stateEpoch.get();
       skipNextIndexGuard = true;
       return initialize().thenApply(p -> null);
    }

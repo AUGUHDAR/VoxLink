@@ -8,11 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class TerracottaConfigScreen extends VoxLinkScreenBase {
    private final Screen parent;
@@ -21,7 +21,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    private Button pauseResumeBtn;
    private Button cancelBtn;
    private String statusMessage = "";
-   private int statusColor = -1;
+   private int statusColor = VoxLinkColors.WHITE;
    private boolean lastPausedState = false;
    private static final int BTN_W = 200;
    private static final int BTN_H = 20;
@@ -42,7 +42,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       super.init();
       int centerX = this.width / 2;
       boolean isDownloading = TerracottaManager.isDownloading();
-      int itemCount = isDownloading ? 7 : 6;
+      int itemCount = isDownloading ? 8 : 7;
       int formHeight = itemCount * 20 + (itemCount - 1) * 4;
       int y = Math.max(44, (this.height - formHeight) / 2);
       CycleButton<Boolean> updateCheckToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isUpdateCheckEnabled())
@@ -57,6 +57,13 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
             VoxLinkMod.getConfig().save();
          });
       this.addRenderableWidget(modSyncToggle);
+      // 简单配置：创建房间时自动收起UI（默认关）
+      CycleButton<Boolean> autoCollapseToggle = CycleButton.onOffBuilder(VoxLinkMod.getConfig().isAutoCollapseCreateUi())
+         .create(centerX - 100, y + 48, 200, 20, Component.translatable("voxlink.config.auto_collapse_create"), (btn, val) -> {
+            VoxLinkMod.getConfig().setAutoCollapseCreateUi(val);
+            VoxLinkMod.getConfig().save();
+         });
+      this.addRenderableWidget(autoCollapseToggle);
       boolean currentParallel = VoxLinkMod.getConfig().isParallelP2P();
       Button parallelToggle = Button.builder(
             Component.translatable(
@@ -73,23 +80,23 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
                );
             }
          )
-         .bounds(centerX - 100, y + 48, 200, 20)
-         .build();
-      // 下载中禁止切换，避免误以为本次下载/连接会立即应用新设置
-      parallelToggle.active = !isDownloading;
-      this.addRenderableWidget(parallelToggle);
-      this.deleteBinaryBtn = Button.builder(Component.translatable("voxlink.terracotta.delete_binary"), button -> this.deleteBinary())
          .bounds(centerX - 100, y + 72, 200, 20)
          .build();
-      this.deleteBinaryBtn.active = !isDownloading;
+      // 下载中禁止切换，避免误以为本次下载/连接会立即应用新设置
+      parallelToggle.active = !isDownloading && TerracottaManager.isBinaryReady();
+      this.addRenderableWidget(parallelToggle);
+      this.deleteBinaryBtn = Button.builder(Component.translatable("voxlink.terracotta.delete_binary"), button -> this.deleteBinary())
+         .bounds(centerX - 100, y + 96, 200, 20)
+         .build();
+      this.deleteBinaryBtn.active = !isDownloading && TerracottaManager.isBinaryReady();
       this.addRenderableWidget(this.deleteBinaryBtn);
-      int redownloadY = y + 96;
+      int redownloadY = y + 120;
       Component redownloadLabel = this.buildRedownloadLabel();
       this.redownloadBtn = Button.builder(redownloadLabel, button -> this.startRedownload()).bounds(centerX - 100, redownloadY, 200, 20).build();
-      this.redownloadBtn.active = !isDownloading;
+      this.redownloadBtn.active = !isDownloading && TerracottaManager.isBinaryReady();
       this.addRenderableWidget(this.redownloadBtn);
       if (isDownloading) {
-         int pauseCancelY = y + 120;
+         int pauseCancelY = y + 144;
          boolean paused = TerracottaManager.isDownloadPaused();
          this.pauseResumeBtn = Button.builder(Component.translatable(paused ? "voxlink.terracotta.resume" : "voxlink.terracotta.pause"), button -> {
             if (TerracottaManager.isDownloadPaused()) {
@@ -106,12 +113,17 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
          this.addRenderableWidget(this.pauseResumeBtn);
          this.cancelBtn = Button.builder(Component.translatable("voxlink.terracotta.cancel"), button -> {
             TerracottaManager.cancelDownload();
-            Minecraft.getInstance().execute(() -> this.init());
+            Minecraft mc = Minecraft.getInstance();
+            mc.execute(() -> {
+               if (mc.screen == this) {
+                  this.init();
+               }
+            });
          }).bounds(centerX + 4, pauseCancelY, 98, 20).build();
          this.addRenderableWidget(this.cancelBtn);
          this.addRenderableWidget(
             Button.builder(Component.translatable("gui.done"), button -> Minecraft.getInstance().setScreen(this.parent))
-               .bounds(centerX - 100, y + 144, 200, 20)
+               .bounds(centerX - 100, y + 168, 200, 20)
                .build()
          );
       } else {
@@ -119,7 +131,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
          this.cancelBtn = null;
          this.addRenderableWidget(
             Button.builder(Component.translatable("gui.done"), button -> Minecraft.getInstance().setScreen(this.parent))
-               .bounds(centerX - 100, y + 120, 200, 20)
+               .bounds(centerX - 100, y + 144, 200, 20)
                .build()
          );
       }
@@ -195,10 +207,15 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
 
          if (TerracottaManager.isBinaryReady() && !TerracottaManager.isDownloadFailed()) {
             this.statusMessage = Component.translatable("voxlink.terracotta.download_success").getString();
-            this.statusColor = -11141291;
+            this.statusColor = VoxLinkColors.SUCCESS;
          }
 
-         Minecraft.getInstance().execute(() -> this.init());
+         Minecraft mc = Minecraft.getInstance();
+         mc.execute(() -> {
+            if (mc.screen == this) {
+               this.init();
+            }
+         });
       }
    }
 
@@ -222,14 +239,19 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       try {
          deleteRecursively(cacheDir);
          this.statusMessage = Component.translatable("voxlink.terracotta.binary_deleted").getString();
-         this.statusColor = -11141291;
+         this.statusColor = VoxLinkColors.SUCCESS;
       } catch (IOException e) {
          VoxLinkMod.LOGGER.warn("Failed to delete Terracotta: {}", e.getMessage());
          this.statusMessage = Component.translatable("voxlink.terracotta.download_failed").getString();
-         this.statusColor = -43691;
+         this.statusColor = VoxLinkColors.ERROR;
       }
 
-      Minecraft.getInstance().execute(() -> this.init());
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(() -> {
+         if (mc.screen == this) {
+            this.init();
+         }
+      });
    }
 
    private static void deleteRecursively(Path path) throws IOException {
@@ -284,9 +306,9 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, -1);
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 16, VoxLinkColors.WHITE);
       boolean isDownloading = TerracottaManager.isDownloading();
-      int itemCount = isDownloading ? 7 : 6;
+      int itemCount = isDownloading ? 8 : 7;
       int formHeight = itemCount * 20 + (itemCount - 1) * 4;
       int y = Math.max(44, (this.height - formHeight) / 2);
       Component statusLabel = Component.translatable("voxlink.terracotta.status_label", new Object[]{Component.translatable(this.statusKey())});
@@ -294,7 +316,6 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       if (!this.statusMessage.isEmpty()) {
       }
 
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.terracotta.credit").getString(), centerX, this.height - 10, VoxLinkColors.MUTED);
    }
 
    public void onClose() {

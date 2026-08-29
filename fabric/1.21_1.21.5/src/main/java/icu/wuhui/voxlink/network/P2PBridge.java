@@ -37,6 +37,12 @@ public class P2PBridge {
    private static final int AWAIT_FINAL_SEC = 1;
    private static final int RETRY_DELAY_MS = 500;
    private static final int FIRST_PACKET_WATCHDOG_MS = 30000;
+   // host 桥连本地 MC 服务器的有界重试窗口：窗口内每 1s 重试一次，期间保持 P2P 传输存活
+   private static final int MC_CONNECT_RETRY_WINDOW_MS = 10000;
+   private static final int MC_CONNECT_RETRY_INTERVAL_MS = 1000;
+   // 建桥后首包 read<=0 的宽限期：短窗口内不判死，周期性重试读取
+   private static final int FIRST_PACKET_EOF_GRACE_MS = 10000;
+   private static final int WATCHDOG_POLL_INTERVAL_MS = 500;
    private static final AtomicBoolean running = new AtomicBoolean(false);
    private static final AtomicBoolean cancelled = new AtomicBoolean(false);
    private static volatile ExecutorService bridgeExecutor;
@@ -883,20 +889,69 @@ public class P2PBridge {
                Runnable onCloseFinal = onClose;
                Socket mcSocket = null;
                AtomicBoolean firstPacketArrived = new AtomicBoolean(false);
+               AtomicBoolean failureHandled = new AtomicBoolean(false);
 
                try {
                   InputStream udpIn = transport.getInputStream();
                   byte[] firstBuf = new byte[32768];
                   Thread firstPacketWatchdog = new Thread(() -> {
                      try {
+                        // 观察窗口 1：首包未到先不自行动作；
+                        // 若其他传输路径已活跃（TCP 直连桥对存在）或会话已在其他通道生效，
+                        // 说明竞争已被别的路径获胜，本桥已落选——不触发 ICE restart、不发错误广播
                         Thread.sleep(FIRST_PACKET_WATCHDOG_MS);
-                        if (!firstPacketArrived.get() && transport.isConnected() && running.get()) {
-                           if (ConnectionState.getCurrent() == ConnectionState.CONNECTED) {
-                              LOGGER.info("UDP host bridge for client {} idle {}s, session active on other channel, skip ICE restart", clientId, FIRST_PACKET_WATCHDOG_MS / 1000);
-                           } else {
-                              LOGGER.warn("UDP host bridge for client {} first packet timeout ({}s), request ICE restart", clientId, FIRST_PACKET_WATCHDOG_MS / 1000);
-                              transport.requestIceRestart();
+                        if (firstPacketArrived.get() || !transport.isConnected() || !running.get()) {
+                           return;
+                        }
+
+                        if (!activePairs.isEmpty()) {
+                           LOGGER.info(
+                              "[BridgeWatchdog] UDP host bridge for client {} idle {}s, TCP direct path active ({} pair(s)), skip",
+                              new Object[]{clientId, FIRST_PACKET_WATCHDOG_MS / 1000, activePairs.size()}
+                           );
+                           return;
+                        }
+
+                        if (ConnectionState.getCurrent() == ConnectionState.CONNECTED) {
+                           LOGGER.info("UDP host bridge for client {} idle {}s, session active on other channel, skip ICE restart", clientId, FIRST_PACKET_WATCHDOG_MS / 1000);
+                           return;
+                        }
+
+                        // 不再直接触发 ICE restart：仅记录 WARN 并进入延长观察窗口
+                        LOGGER.warn(
+                           "UDP host bridge for client {} first packet timeout ({}s), extended observation {}s before teardown",
+                           clientId, FIRST_PACKET_WATCHDOG_MS / 1000, FIRST_PACKET_WATCHDOG_MS / 1000
+                        );
+
+                        // 观察窗口 2：延长观察，期间收到任何对端数据或其他路径接管即撤销
+                        long extendedDeadlineMs = System.currentTimeMillis() + (long)FIRST_PACKET_WATCHDOG_MS;
+                        while (System.currentTimeMillis() < extendedDeadlineMs) {
+                           if (firstPacketArrived.get()) {
+                              LOGGER.info("[BridgeWatchdog] UDP host bridge for client {} received traffic, extended observation revoked", clientId);
+                              return;
                            }
+
+                           if (!transport.isConnected() || !running.get()) {
+                              return;
+                           }
+
+                           if (!activePairs.isEmpty()) {
+                              LOGGER.info("[BridgeWatchdog] UDP host bridge for client {} other path took over, extended observation revoked", clientId);
+                              return;
+                           }
+
+                           Thread.sleep((long)WATCHDOG_POLL_INTERVAL_MS);
+                        }
+
+                        // 连续两个窗口零流量且本桥仍是唯一路径时才走断开回调
+                        if (!firstPacketArrived.get() && transport.isConnected() && running.get() && activePairs.isEmpty() && ConnectionState.getCurrent() != ConnectionState.CONNECTED) {
+                           LOGGER.warn(
+                              "[BridgeWatchdog] UDP host bridge for client {} zero traffic for 2 consecutive windows ({}s each), closing bridge",
+                              clientId, FIRST_PACKET_WATCHDOG_MS / 1000
+                           );
+                           teardownUdpHostBridge(transport, null, failureHandled, onCloseFinal);
+                        } else {
+                           LOGGER.info("[BridgeWatchdog] UDP host bridge for client {} extended observation finished, bridge kept", clientId);
                         }
                      } catch (InterruptedException var3) {
                      }
@@ -904,16 +959,34 @@ public class P2PBridge {
                   firstPacketWatchdog.setDaemon(true);
                   firstPacketWatchdog.start();
                   int firstLen = udpIn.read(firstBuf);
-                  firstPacketArrived.set(true);
+                  // 容错：建桥后短窗口内 read<=0（如本地服务器刚重启导致的瞬断）
+                  // 不立即判死，在宽限期内周期性重试读取；期间保持 P2P 传输存活
+                  if (firstLen <= 0) {
+                     LOGGER.warn(
+                        "UDP host bridge for client {} stream closed before first packet (read={}), grace period {}ms before failing",
+                        new Object[]{clientId, firstLen, FIRST_PACKET_EOF_GRACE_MS}
+                     );
+                     long eofGraceDeadlineMs = System.currentTimeMillis() + (long)FIRST_PACKET_EOF_GRACE_MS;
+                     while (firstLen <= 0 && System.currentTimeMillis() < eofGraceDeadlineMs && running.get()) {
+                        Thread.sleep((long)MC_CONNECT_RETRY_INTERVAL_MS);
+                        if (transport.isConnected()) {
+                           firstLen = udpIn.read(firstBuf);
+                        }
+                     }
+                  }
+
+                  firstPacketArrived.set(firstLen > 0);
                   if (firstLen <= 0) {
                      throw new IOException("UDP stream closed before first packet (read=" + firstLen + ")");
                   }
 
-                  mcSocket = new Socket();
-                  mcSocket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), mcPort), 10000);
-                  mcSocket.setTcpNoDelay(true);
-                  mcSocket.setSendBufferSize(32768);
-                  mcSocket.setReceiveBufferSize(32768);
+                  // 连接本地 MC 服务器改为有界重试窗口：host 停服重建/集成服重启期间保持桥接等待，
+                  // 不立即拆链、不给对端发 DISCONNECT；窗口内任一次成功即进入正常转发循环
+                  mcSocket = connectMcWithRetryWindow(clientId, mcPort);
+                  if (mcSocket == null) {
+                     throw new IOException("local MC server on port " + mcPort + " unreachable after retry window");
+                  }
+
                   OutputStream mcOut = mcSocket.getOutputStream();
                   mcOut.write(firstBuf, 0, firstLen);
                   mcOut.flush();
@@ -922,30 +995,102 @@ public class P2PBridge {
                   );
                   ExecutorService exec = getOrCreateExecutor();
                   Socket mcSocketFinal = mcSocket;
-                  exec.submit(() -> bridgeUdpToMc(transport, mcSocketFinal, onCloseFinal));
-                  bridgeMcToUdp(transport, mcSocketFinal, onCloseFinal);
+                  // H7: UDP->MC 与 MC->UDP 两个方向的 finally 都会执行 onClose,
+                  // 必须把 onClose 包成 CAS 守卫的一次性 Runnable, 避免双跑
+                  AtomicBoolean onCloseFired = new AtomicBoolean(false);
+                  Runnable onCloseOnce = onCloseFinal == null ? null : () -> {
+                     if (onCloseFired.compareAndSet(false, true)) {
+                        onCloseFinal.run();
+                     }
+                  };
+                  exec.submit(() -> bridgeUdpToMc(transport, mcSocketFinal, onCloseOnce));
+                  bridgeMcToUdp(transport, mcSocketFinal, onCloseOnce);
                } catch (IOException e) {
                   LOGGER.error("UDP host bridge for client {} failed to connect to MC server: {}", clientId, e.getMessage());
-
-                  try {
-                     transport.close();
-                  } catch (Exception var13) {
-                  }
-
-                  if (mcSocket != null) {
-                     try {
-                        mcSocket.close();
-                     } catch (IOException var12) {
-                     }
-                  }
-
-                  activeUdpTransports.remove(transport);
-                  if (onCloseFinal != null) {
-                     onCloseFinal.run();
-                  }
+                  teardownUdpHostBridge(transport, mcSocket, failureHandled, onCloseFinal);
+               } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  teardownUdpHostBridge(transport, mcSocket, failureHandled, onCloseFinal);
                }
             }
          );
+   }
+
+   /**
+    * 有界重试连接本地 MC 服务器：在 MC_CONNECT_RETRY_WINDOW_MS 窗口内每
+    * MC_CONNECT_RETRY_INTERVAL_MS 重试一次。host 停服重建/集成服重启窗口内保持
+    * P2P 传输存活等待（不关闭传输、不向对端发 DISCONNECT），任一次成功即返回；
+    * 窗口耗尽仍失败返回 null，由调用方走原有失败路径。
+    */
+   private static Socket connectMcWithRetryWindow(String clientId, int mcPort) {
+      long retryDeadlineMs = System.currentTimeMillis() + (long)MC_CONNECT_RETRY_WINDOW_MS;
+      int attempt = 0;
+
+      while (true) {
+         attempt++;
+         Socket socket = new Socket();
+
+         try {
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), mcPort), CONNECT_TIMEOUT);
+            socket.setTcpNoDelay(true);
+            socket.setSendBufferSize(32768);
+            socket.setReceiveBufferSize(32768);
+            if (attempt > 1) {
+               LOGGER.info("UDP host bridge for client {} connected to MC server on port {} after {} attempts", new Object[]{clientId, mcPort, attempt});
+            }
+
+            return socket;
+         } catch (IOException e) {
+            try {
+               socket.close();
+            } catch (IOException var9) {
+            }
+
+            if (System.currentTimeMillis() >= retryDeadlineMs || !running.get()) {
+               LOGGER.warn(
+                  "UDP host bridge for client {} local MC server on port {} unreachable (attempts={}, window={}ms): {}",
+                  new Object[]{clientId, mcPort, attempt, MC_CONNECT_RETRY_WINDOW_MS, e.getMessage()}
+               );
+               return null;
+            }
+
+            LOGGER.warn(
+               "UDP host bridge for client {} local MC server on port {} not ready (attempt {}, window={}ms): {}, retrying in {}ms",
+               new Object[]{clientId, mcPort, attempt, MC_CONNECT_RETRY_WINDOW_MS, e.getMessage(), MC_CONNECT_RETRY_INTERVAL_MS}
+            );
+         }
+
+         try {
+            Thread.sleep((long)MC_CONNECT_RETRY_INTERVAL_MS);
+         } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return null;
+         }
+      }
+   }
+
+   /** UDP host 桥失败收尾（幂等）：关闭本地 MC 套接字与 P2P 传输并回调 onClose；watchdog 与主流程并发触发只执行一次。 */
+   private static void teardownUdpHostBridge(ReliableUdpTransport transport, Socket mcSocket, AtomicBoolean failureHandled, Runnable onClose) {
+      if (!failureHandled.compareAndSet(false, true)) {
+         return;
+      }
+
+      try {
+         transport.close();
+      } catch (Exception var7) {
+      }
+
+      if (mcSocket != null) {
+         try {
+            mcSocket.close();
+         } catch (IOException var6) {
+         }
+      }
+
+      activeUdpTransports.remove(transport);
+      if (onClose != null) {
+         onClose.run();
+      }
    }
 
    private static void bridgeUdpToMc(ReliableUdpTransport transport, Socket mcSocket, Runnable onClose) {

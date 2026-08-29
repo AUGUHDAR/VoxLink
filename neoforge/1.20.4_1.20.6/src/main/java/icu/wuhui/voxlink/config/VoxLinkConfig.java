@@ -49,6 +49,8 @@ public class VoxLinkConfig {
     private volatile boolean logUploadEnabled = true;
    /** 加入前请求房主必装 Mod 清单并引导下载/重启（ModSync）；关闭后跳过整套流程，能否进房由服务器决定 */
    private volatile boolean joinRequiredModsCheck = true;
+   /** 创建房间时自动收起UI（默认关）。 */
+   private volatile boolean autoCollapseCreateUi = false;
    /** 房主是否向信令服务器上报必装 Mod 清单（ModSync）；关闭后房客拉不到清单、直接进洞 */
    private volatile boolean hostModSyncPublish = true;
     /** 显式允许 http:// 信令服务器（默认拒绝，validate 中强制回退默认 https 地址） */
@@ -98,6 +100,7 @@ public class VoxLinkConfig {
                 config.useWebSocket = root.has("useWebSocket") ? root.get("useWebSocket").getAsBoolean() : true;
                 config.logUploadEnabled = root.has("logUploadEnabled") ? root.get("logUploadEnabled").getAsBoolean() : true;
             config.joinRequiredModsCheck = root.has("joinRequiredModsCheck") ? root.get("joinRequiredModsCheck").getAsBoolean() : true;
+            config.autoCollapseCreateUi = root.has("autoCollapseCreateUi") && root.get("autoCollapseCreateUi").getAsBoolean();
             config.hostModSyncPublish = root.has("hostModSyncPublish") ? root.get("hostModSyncPublish").getAsBoolean() : true;
                 config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
                 if (config.serverUrl == null || config.serverUrl.isEmpty()) {
@@ -217,4 +220,13 @@ public class VoxLinkConfig {
     }
 
     public int getConfigVersion() { return configVersion; }
+
+   public boolean isAutoCollapseCreateUi() {
+      return this.autoCollapseCreateUi;
+   }
+
+   public void setAutoCollapseCreateUi(boolean v) {
+      this.autoCollapseCreateUi = v;
+   }
+
 }

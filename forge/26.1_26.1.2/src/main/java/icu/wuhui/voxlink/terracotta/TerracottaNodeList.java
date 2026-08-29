@@ -26,6 +26,7 @@ public final class TerracottaNodeList {
    private static volatile List<TerracottaNodeList.NodeInfo> cachedNodes = null;
    private static volatile long cacheTime = 0L;
    private static volatile boolean fetchInFlight = false;
+   private static volatile CompletableFuture<List<TerracottaNodeList.NodeInfo>> inFlightFuture = null;
 
    private TerracottaNodeList() {
    }
@@ -53,14 +54,14 @@ public final class TerracottaNodeList {
          }
 
          if (fetchInFlight) {
-            return CompletableFuture.completedFuture(cached != null ? cached : new ArrayList<>());
+            return inFlightFuture != null ? inFlightFuture : CompletableFuture.completedFuture(cached != null ? cached : new ArrayList<>());
          }
 
          fetchInFlight = true;
       }
 
       HttpRequest req = HttpRequest.newBuilder().uri(URI.create("https://terracotta.glavo.site/nodes")).timeout(Duration.ofSeconds(8L)).GET().build();
-      return HTTP.sendAsync(req, BodyHandlers.ofString()).thenApply(resp -> {
+      CompletableFuture<List<TerracottaNodeList.NodeInfo>> future = HTTP.sendAsync(req, BodyHandlers.ofString()).thenApply(resp -> {
          List<TerracottaNodeList.NodeInfo> nodes = parseNodes(resp.body());
          cachedNodes = nodes;
          cacheTime = System.currentTimeMillis();
@@ -74,7 +75,12 @@ public final class TerracottaNodeList {
          }
 
          return cachedNodes;
-      }).whenComplete((r, e) -> fetchInFlight = false);
+      }).whenComplete((r, e) -> {
+         fetchInFlight = false;
+         inFlightFuture = null;
+      });
+      inFlightFuture = future;
+      return future;
    }
 
    public static CompletableFuture<List<URI>> fetch() {

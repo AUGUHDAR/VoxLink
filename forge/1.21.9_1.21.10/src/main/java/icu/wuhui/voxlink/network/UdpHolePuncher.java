@@ -66,6 +66,14 @@ public class UdpHolePuncher {
    private volatile boolean skipFirewallDetection;
    private volatile PunchProfile profile;
    private volatile PunchParams punchParams;
+   // 日志限流: birthday attack 同一会话会重复打印起动行/逐轮整张端口表(线上案例 77s 刷满 4MB 配额,
+   // 关键诊断信息被截断), 同一目标在时间窗内只保留首条 INFO, 其余降 DEBUG。
+   private static final long PUNCH_LOG_INFO_DEDUP_MS = 60000L;
+   private static final Object PUNCH_LOG_DEDUP_LOCK = new Object();
+   private static String punchStartLastInfoKey = "";
+   private static long punchStartLastInfoMs = 0L;
+   private static String multiPortLastInfoKey = "";
+   private static long multiPortLastInfoMs = 0L;
 
    public void setProfile(PunchProfile p) {
       this.profile = p;
@@ -378,14 +386,25 @@ public class UdpHolePuncher {
       int socketsTried = socketGroup.size();
       byte[] data = this.buildControl(TYPE_PUNCH);
       int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
-      LOGGER.info(
-         "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
-         new Object[]{remoteIp, targetPort, socketGroup.size(), this.effectiveSendInterval(), this.profile().describeInstance()}
-      );
+      // birthday attack 同会话重复起动行: 只保留首条 INFO, 其余降 DEBUG
+      if (shouldLogPunchStartInfo(remoteIp, targetPort)) {
+         LOGGER.info(
+            "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
+            new Object[]{remoteIp, targetPort, socketGroup.size(), this.effectiveSendInterval(), this.profile().describeInstance()}
+         );
+      } else {
+         LOGGER.debug(
+            "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
+            new Object[]{remoteIp, targetPort, socketGroup.size(), this.effectiveSendInterval(), this.profile().describeInstance()}
+         );
+      }
       List<DatagramChannel> channels = new ArrayList<>();
       Map<DatagramChannel, UdpHolePuncher> channelToPuncher = new HashMap<>();
       Map<DatagramChannel, Integer> channelToIndex = new HashMap<>();
       Selector selector = null;
+      // M6: 跟踪已 sp.replaceSocket 转交的 channel, catch 块回滚时绝不能重复 close
+      // (转交后 sp.socket 已指向新 channel.socket, 关闭 channel 会让上层拿到死 socket)
+      java.util.Set<DatagramChannel> transferredChannels = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
       try {
          selector = Selector.open();
@@ -408,6 +427,7 @@ public class UdpHolePuncher {
                   ch.configureBlocking(false);
                   ch.bind(new InetSocketAddress(localAddr, localPort));
                   sp.replaceSocket(ch.socket());
+                  transferredChannels.add(ch);
                } else {
                   ch.configureBlocking(false);
                }
@@ -420,6 +440,23 @@ public class UdpHolePuncher {
          }
       } catch (IOException e) {
          LOGGER.warn("[UdpHolePuncher] NIO Selector init failed, fallback to multi-thread mode: {}", e.getMessage());
+         // M6: 关闭已开 selector; channels 中已转交给 puncher 的不能关 (sp.socket 已指向新 socket),
+         // 仅清理未成功转交的部分 (configureBlocking/bind 失败时 ssock 已关, 通道也无法用)
+         if (selector != null) {
+            try {
+               selector.close();
+            } catch (Exception ignored) {
+            }
+         }
+         for (DatagramChannel ch : channels) {
+            if (ch == null || transferredChannels.contains(ch)) {
+               continue;
+            }
+            try {
+               ch.close();
+            } catch (Exception ignored) {
+            }
+         }
          return this.punchMultiSocketLegacy(remoteIp, targetPort, socketGroup, wonFlag);
       }
 
@@ -725,16 +762,6 @@ public class UdpHolePuncher {
          } catch (Exception e) {
             this.punching.set(false);
             return CompletableFuture.failedFuture(e);
-         }
-
-         if (isTargetBlacklisted(this.remoteAddress, targetPorts.get(0))) {
-            this.punching.set(false);
-            return blacklistedFuture();
-         }
-
-         if (isTargetBlacklisted(this.remoteAddress, targetPorts.get(0))) {
-            this.punching.set(false);
-            return blacklistedFuture();
          }
 
          if (isTargetBlacklisted(this.remoteAddress, targetPorts.get(0))) {
@@ -1256,6 +1283,37 @@ public class UdpHolePuncher {
       sendPkt(this.socket, packet);
    }
 
+   /** 起动行去重: 同一目标在时间窗内只保留首条 INFO(返回 false 时调用方降级 DEBUG), 换目标或超窗后重新允许 INFO。 */
+   private static boolean shouldLogPunchStartInfo(String remoteIp, int targetPort) {
+      return shouldLogDedupInfo(remoteIp + ":" + targetPort, true);
+   }
+
+   /** 逐轮端口表去重: 每会话(同目标)首轮保留完整 INFO, 其余轮次降 DEBUG。 */
+   private static boolean shouldLogMultiPortInfo(InetAddress addr, int centerPort) {
+      return shouldLogDedupInfo(addr.getHostAddress() + ":" + centerPort, false);
+   }
+
+   private static boolean shouldLogDedupInfo(String key, boolean punchStart) {
+      synchronized (PUNCH_LOG_DEDUP_LOCK) {
+         long now = System.currentTimeMillis();
+         String lastKey = punchStart ? punchStartLastInfoKey : multiPortLastInfoKey;
+         long lastMs = punchStart ? punchStartLastInfoMs : multiPortLastInfoMs;
+         if (key.equals(lastKey) && now - lastMs < PUNCH_LOG_INFO_DEDUP_MS) {
+            return false;
+         }
+
+         if (punchStart) {
+            punchStartLastInfoKey = key;
+            punchStartLastInfoMs = now;
+         } else {
+            multiPortLastInfoKey = key;
+            multiPortLastInfoMs = now;
+         }
+
+         return true;
+      }
+   }
+
    private void sendControlMultiPort(byte type, int basePort, int portRange, int round) {
       byte[] data = this.buildControl(type);
       InetAddress addr = this.remoteAddress;
@@ -1297,20 +1355,29 @@ public class UdpHolePuncher {
             }
          }
 
-         LOGGER.info(
-            "[UdpHolePuncher] sendControlMultiPort: send to {} ports (x{} rounds x{} pass, round={}): {} (center={}, range=+/-{}, random={}, local port={})",
-            new Object[]{
-               portsToSend.size(),
-               this.effectiveMinRounds(),
-               this.effectiveMinPass(),
-               round,
-               portsToSend.subList(0, Math.min(10, portsToSend.size())),
-               centerPort,
-               portRange,
-               useRandomScan,
-               this.socket.getLocalPort()
-            }
-         );
+         // 端口表逐轮全量打印刷爆日志(线上案例单文件 43827 行 Retransmit/端口表占 93.6%):
+         // 每会话首轮保留完整 INFO, 其余轮次降 DEBUG
+         if (shouldLogMultiPortInfo(addr, centerPort)) {
+            LOGGER.info(
+               "[UdpHolePuncher] sendControlMultiPort: send to {} ports (x{} rounds x{} pass, round={}): {} (center={}, range=+/-{}, random={}, local port={})",
+               new Object[]{
+                  portsToSend.size(),
+                  this.effectiveMinRounds(),
+                  this.effectiveMinPass(),
+                  round,
+                  portsToSend.subList(0, Math.min(10, portsToSend.size())),
+                  centerPort,
+                  portRange,
+                  useRandomScan,
+                  this.socket.getLocalPort()
+               }
+            );
+         } else {
+            LOGGER.debug(
+               "[UdpHolePuncher] sendControlMultiPort: sent multi-port control to {} ports (cycle={})",
+               portsToSend.size(), round
+            );
+         }
 
          for (int roundPass = 0; roundPass < this.effectiveMinRounds(); roundPass++) {
             for (int i = 0; i < portsToSend.size(); i++) {
@@ -1573,10 +1640,17 @@ public class UdpHolePuncher {
       int socketsTried = socketGroup.size();
       byte[] data = this.buildControl(TYPE_PUNCH);
       int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
-      LOGGER.info(
-         "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
-         new Object[]{remoteIp, targetPort, socketGroup.size(), this.profile().describeInstance()}
-      );
+      if (shouldLogPunchStartInfo(remoteIp, targetPort)) {
+         LOGGER.info(
+            "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
+            new Object[]{remoteIp, targetPort, socketGroup.size(), this.profile().describeInstance()}
+         );
+      } else {
+         LOGGER.debug(
+            "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
+            new Object[]{remoteIp, targetPort, socketGroup.size(), this.profile().describeInstance()}
+         );
+      }
       List<Thread> recvThreads = new ArrayList<>();
 
       for (int si = 0; si < socketGroup.size(); si++) {

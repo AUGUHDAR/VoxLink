@@ -281,6 +281,10 @@ public final class LogUploadManager
             VoxLinkMod.LOGGER.info("[LogUpload] transport silent after connect, upload now");
          } else if (now - connectedAtMs < STABLE_WINDOW_MS) {
             // 连接仍在稳定窗口内: 顺延复查, 稳定超窗口=成功不上传
+            // 先取消旧 future, 再排新 future, 避免双 runUpload 并发
+            if (uploadFuture != null) {
+               uploadFuture.cancel(false);
+            }
             uploadFuture = SCHEDULER.schedule(LogUploadManager::runUpload, 15L, TimeUnit.SECONDS);
             return;
          } else {
@@ -293,8 +297,18 @@ public final class LogUploadManager
 
    private static void uploadWithRetry(String code, int attemptsLeft)
    {
+      String cur = ACTIVE_CODE.get();
+      if (cur == null || !cur.equals(code)) {
+         // 已 disarm（取消加入/离开房间）：在途重试不得再上传，否则玩家取消后日志仍会冒出来
+         return;
+      }
       if (!UPLOAD_IN_FLIGHT.compareAndSet(false, true)) {
-         VoxLinkMod.LOGGER.info("[LogUpload] upload already in flight, skip duplicate");
+         // 修复: 之前直接 return 放弃, 可能永久失败; 改为 15s 后重试, 防重入
+         VoxLinkMod.LOGGER.info("[LogUpload] upload already in flight, retry in 15s");
+         if (uploadFuture != null) {
+            uploadFuture.cancel(false);
+         }
+         uploadFuture = SCHEDULER.schedule(() -> uploadWithRetry(code, attemptsLeft), RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
          return;
       }
       byte[] payload = buildPayload();

@@ -8,6 +8,8 @@ import com.google.gson.JsonElement;
 
 import com.google.gson.JsonObject;
 
+import icu.wuhui.voxlink.VoxLinkConstants;
+
 import icu.wuhui.voxlink.VoxLinkMod;
 
 import icu.wuhui.voxlink.network.AddressBlacklist;
@@ -305,6 +307,19 @@ public class ConnectionManager {
    private static final long[] BACKOFF_DELAYS_MS = new long[]{1000L, 2000L, 4000L};
 
    private static final int JOIN_QUEUE_RETRY_SEC = 10;
+
+   // 零收包终态：持续重试已达该轮数且全会话从未收到对端任何UDP包时，宣布最终失败并通知对端停手。
+   // 3轮（约2-3分钟）太激进，玩家感知为"无限打洞被砍"；20轮（约20分钟+）对真人会话等效无限，
+   // 仅兜住真正死链（双端对称NAT且预测全空）不再无限空转。
+   private static final int ZERO_RECV_FINAL_ROUND_LIMIT = 20;
+
+   private final AtomicBoolean sessionPunchRecvEver = new AtomicBoolean(false);
+
+   // 幽灵连接防护：joiner的"connected"就绪信令先于host桥建立到达时暂存，startHostUdpPunchBridge时消费
+   private final Set<String> peerReadyConfirmations = ConcurrentHashMap.newKeySet();
+
+   // 打洞占用期间排队的join_request重放任务(按peer记录)，对端断开时作废
+   private final ConcurrentHashMap<String, List<ScheduledFuture<?>>> queuedJoinReplays = new ConcurrentHashMap<>();
 
    private final AddressBlacklist addressBlacklist = AddressBlacklist.get();
    // punchAuthV1：当前连接周期的打洞认证密钥（applyPunchTemplate 注入每个 puncher）
@@ -1554,6 +1569,10 @@ public class ConnectionManager {
 
          .info("[RoomManager] Received join_request from {}, state={}", from, state != null && state != RoomManager.PENDING ? "active" : "null/pending");
 
+      // 先过期陈旧的punching占用标志，防止打洞已结束后join_request仍被无限排队(MM6SDJ)
+
+      this.expireStaleHostPunchContexts();
+
       if (state != null && state != RoomManager.PENDING && state.roomInfo.isHost()) {
 
          if (data.has("clientProtocolVersion") && !data.get("clientProtocolVersion").isJsonNull()) {
@@ -1589,6 +1608,27 @@ public class ConnectionManager {
             // punchAuthV1：joiner 声明了能力才启用打洞/数据面 MAC 认证（host 视角）
 
             this.setupPunchAuthForPeer(state, from, false);
+
+         }
+
+
+
+         // MC版本观测(S822QF)：仅记录日志供远端排障，不做任何拦截。
+         // 产品决策2026-08-26：兼容性交还原版与Via——对方装了Via自然能进；
+         // 没装Via时原版在登录阶段自有明确提示；mod层拦截属越俎代庖且有误伤面。
+
+         if (data.has("gameVersion") && !data.get("gameVersion").isJsonNull()) {
+
+            String joinerGameVersion = data.get("gameVersion").getAsString();
+
+            int joinerProto = VoxLinkConstants.getProtocolVersion(joinerGameVersion);
+
+            if (joinerProto > 0 && joinerProto != VoxLinkConstants.PROTOCOL_VERSION) {
+
+               VoxLinkMod.LOGGER.info("[handleJoinRequest] joiner MC version differs from host (joiner={}, proto={}, host={}, proto={}) — proceeding, vanilla/Via will handle compatibility",
+                  new Object[]{joinerGameVersion, joinerProto, VoxLinkConstants.GAME_VERSION, VoxLinkConstants.PROTOCOL_VERSION});
+
+            }
 
          }
 
@@ -1698,7 +1738,11 @@ public class ConnectionManager {
 
          } else if (retryCount >= 3) {
 
-            VoxLinkMod.LOGGER.warn("[RoomManager] join_request retry exhausted, discard {}", from);
+            // 重试耗尽不再默默丢弃：挂起等打洞周期结束后重放(最多再等120s)，对端断开时作废
+
+            VoxLinkMod.LOGGER.info("[RoomManager] join_request retry exhausted while punching, defer {} until punch cycle ends", from);
+
+            this.scheduleDeferredJoinReplay(state, from, data, 0);
 
          } else if (this.activeUdpTransports.containsKey(from)) {
 
@@ -1710,11 +1754,23 @@ public class ConnectionManager {
 
             int nextRetry = retryCount + 1;
 
-            this.scheduler.schedule(() -> {
+            // H3a: 闭包创建时捕获房间码,执行时校验,避免换房后排队的旧任务
+            // 错误地在新房间上重放 join_request。
+            String capturedRoomCode = state.roomInfo.getCode();
+
+            ScheduledFuture<?> queuedRetry = this.scheduler.schedule(() -> {
 
                RoomManager.RoomState st = this.roomManager.currentRoom.get();
 
                if (st != null && st != RoomManager.PENDING && st.roomInfo.isHost()) {
+
+                  if (capturedRoomCode == null || !capturedRoomCode.equals(st.roomInfo.getCode())) {
+
+                     VoxLinkMod.LOGGER.warn("[RoomManager] Drop queued join_request from {}: room changed (captured={}, current={})", new Object[]{from, capturedRoomCode, st.roomInfo.getCode()});
+
+                     return;
+
+                  }
 
                   if (this.activeUdpTransports.containsKey(from)) {
 
@@ -1731,6 +1787,10 @@ public class ConnectionManager {
                }
 
             }, 10L, TimeUnit.SECONDS);
+
+            // 登记排队任务：对端断开时作废其排队条目
+
+            this.registerQueuedJoinReplay(from, queuedRetry);
 
          }
 
@@ -2325,6 +2385,25 @@ public class ConnectionManager {
 
       VoxLinkMod.LOGGER.info("[RoomManager] Received holepunch_offer, state={}", state != null && state != RoomManager.PENDING ? "active" : "null/pending");
 
+      // 陈旧信号守卫：会话已终态(断开/失败)且无活跃连接周期时，丢弃迟到的holepunch_offer，
+      // 避免把已关闭的会话重新唤醒造成"Invalid state transition ... 326991ms"
+
+      ConnectionState currentStateNow = ConnectionState.getCurrent();
+
+      if ((currentStateNow == ConnectionState.DISCONNECTED || currentStateNow == ConnectionState.FAILED)
+         && !this.connectionCycleActive.get()
+         && !ConnectionHelper.isConnecting()) {
+
+         VoxLinkMod.LOGGER
+            .warn(
+               "[handleHolePunchOffer] Drop stale offer from={} in terminal state {} (stateAge={}ms)",
+               new Object[]{from, currentStateNow, ConnectionState.getStateDurationMs()}
+            );
+
+         return;
+
+      }
+
       if (state != null && state != RoomManager.PENDING && !state.roomInfo.isHost()) {
 
          // punchAuthV1：房主声明了能力才启用打洞/数据面 MAC 认证（joiner 视角）
@@ -2404,6 +2483,18 @@ public class ConnectionManager {
             if (data.has("hostIpv6") && !data.get("hostIpv6").isJsonNull() && !data.get("hostIpv6").getAsString().isEmpty()) {
 
                hostIpv6 = data.get("hostIpv6").getAsString();
+
+            }
+
+
+
+            // 地址族过滤：本端无全局IPv6时丢弃host发布的IPv6候选，避免朝不可达地址空转47轮(QWA6D3/S822QF)
+
+            if (hostIpv6 != null && this.filterAddressFamilyCandidate(hostIpv6, connectPort, "holepunch_offer:hostIpv6") == null) {
+
+               VoxLinkMod.LOGGER.warn("[handleHolePunchOffer] 忽略 1 个不可达 IPv6 候选(hostIpv6)，本端无全局IPv6");
+
+               hostIpv6 = null;
 
             }
 
@@ -3430,6 +3521,16 @@ public class ConnectionManager {
 
          : 0;
 
+      // 地址族过滤：joiner把IPv6当mapped上报而本端(host)无全局IPv6时，丢弃该候选不进入打洞(S822QF)
+
+      if (joinerMappedIp != null && this.filterAddressFamilyCandidate(joinerMappedIp, joinerMappedPort, "punch_info:joinerMapped") == null) {
+
+         VoxLinkMod.LOGGER.warn("[HostPunchInfo] Drop punch_info from {}: candidate address family unreachable locally", from);
+
+         return;
+
+      }
+
       String joinerLocalIp = null;
 
       if (data.has("joinerLocalIp") && !data.get("joinerLocalIp").isJsonNull()) {
@@ -4268,6 +4369,8 @@ public class ConnectionManager {
 
                      p.setOnPeerPunchReceived(addr -> {
 
+                        this.sessionPunchRecvEver.set(true);
+
                         String code = fState.roomInfo.getCode();
 
                         String token = fState.roomInfo.getToken();
@@ -4840,6 +4943,16 @@ public class ConnectionManager {
 
                : 0;
 
+            // 地址族过滤：host发布的候选对端不可达时丢弃(reverse方向同理)
+
+            if (joinerMappedIp != null && this.filterAddressFamilyCandidate(joinerMappedIp, joinerMappedPort, "reverse_offer:joinerMapped") == null) {
+
+               VoxLinkMod.LOGGER.warn("[ReversePunch] Drop reverse offer from {}: candidate address family unreachable locally", from);
+
+               return;
+
+            }
+
             if (joinerMappedIp != null && joinerMappedPort > 0) {
 
                String joinerNatType = joinerSymmetric ? "symmetric" : "full_cone";
@@ -4894,7 +5007,33 @@ public class ConnectionManager {
 
                   } catch (Exception e) {
 
+                     // H9: createSocket 失败裸 return 会让打洞占用/超时悬挂,后续 join_request
+                     // 被排队饿死。此处做最小收敛:清掉该 clientId 的 hostPunchContext,
+                     // 若没有其他活跃打洞则复位 connectionCycleActive 并取消超时,
+                     // 通知房客快速失败重试,避免无限等待。
                      VoxLinkMod.LOGGER.error("[ReversePunch] create socket failed: {}", e.getMessage());
+
+                     try { puncher.close(); } catch (Exception closeEx) { }
+
+                     this.hostPunchContexts.remove(from);
+
+                     if (!this.isAnyHostPunching() && this.connectionCycleActive.get()) {
+
+                        this.connectionCycleActive.set(false);
+
+                        if (this.connectionTimeoutFuture != null) {
+
+                           try { this.connectionTimeoutFuture.cancel(false); } catch (Exception cancelEx) { }
+
+                           this.connectionTimeoutFuture = null;
+
+                        }
+
+                     }
+
+                     // 不再向房客发 disconnect：一次 createSocket 失败可能是暂时性的（端口竞争等），
+                     // 发信号会把房客的持续重试整个杀掉（handleDisconnect→abortPunchOnPeerDisconnect），
+                     // 等于把"无限打洞"修没了。只做本端收敛，房客下一轮 join_request 重放会重新触发。
 
                      return;
 
@@ -5088,6 +5227,8 @@ public class ConnectionManager {
                               });
 
                            fPuncher.setOnPeerPunchReceived(addr -> {
+
+                              this.sessionPunchRecvEver.set(true);
 
                               String code = fState.roomInfo.getCode();
 
@@ -5621,6 +5762,8 @@ public class ConnectionManager {
                         puncher.setOnPeerPunchReceived(
 
                            addr -> {
+
+                              this.sessionPunchRecvEver.set(true);
 
                               VoxLinkMod.LOGGER
 
@@ -6171,7 +6314,13 @@ public class ConnectionManager {
 
             if (!this.connectionWon.get()) {
 
-               if (this.shouldContinuousRetry(state)) {
+               if (this.continuousRetryRound.get() >= ZERO_RECV_FINAL_ROUND_LIMIT && !this.sessionPunchRecvEver.get()) {
+
+               // 持续重试已打满且全会话从未收到对端任何UDP包：给出终态结论并让对端也停手(WB4V72/MTNFW4)
+
+               this.declareZeroRecvFinalFailure(state);
+
+            } else if (this.shouldContinuousRetry(state)) {
 
                   int round = this.continuousRetryRound.incrementAndGet();
 
@@ -7334,6 +7483,8 @@ public class ConnectionManager {
 
                puncher.setOnPeerPunchReceived(addr -> {
 
+                  this.sessionPunchRecvEver.set(true);
+
                   String code = state.roomInfo.getCode();
 
                   String token = state.roomInfo.getToken();
@@ -7684,6 +7835,8 @@ public class ConnectionManager {
 
                         sp.setOnPeerPunchReceived(addr -> {
 
+                           this.sessionPunchRecvEver.set(true);
+
                            String code = state.roomInfo.getCode();
 
                            String token = state.roomInfo.getToken();
@@ -7717,6 +7870,8 @@ public class ConnectionManager {
                         VoxLinkMod.LOGGER.info("[Connection] Cone side reuse STUN socket punch (port={})", puncher.getSocket().getLocalPort());
 
                         puncher.setOnPeerPunchReceived(addr -> {
+
+                           this.sessionPunchRecvEver.set(true);
 
                            String code = state.roomInfo.getCode();
 
@@ -7756,7 +7911,7 @@ public class ConnectionManager {
 
                                           "[Connection] cycle={} UDP punch failed (attempt{}/{}) reason={} recvPunch={} recvAck={}",
 
-                                          new Object[]{cycle, attempt, 3, reason, result.socketsReceivedPunch, result.socketsReceivedAck}
+                                          new Object[]{cycle, Math.min(attempt, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts, reason, result.socketsReceivedPunch, result.socketsReceivedAck}
 
                                        );
 
@@ -7828,7 +7983,7 @@ public class ConnectionManager {
 
                                              VoxLinkMod.LOGGER
 
-                                                .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, attempt + 1, 3});
+                                                .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, Math.min(attempt + 1, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts});
 
                                              this.scheduler
 
@@ -7984,7 +8139,7 @@ public class ConnectionManager {
 
                                        "[Connection] UDP punch failed (cycle {}/{}, attempt {}/{}): {}",
 
-                                       new Object[]{displayCycle, maxCycles, attempt, 3, e.getMessage()}
+                                       new Object[]{displayCycle, maxCycles, Math.min(attempt, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts, e.getMessage()}
 
                                     );
 
@@ -8040,7 +8195,7 @@ public class ConnectionManager {
 
                                           VoxLinkMod.LOGGER
 
-                                             .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, attempt + 1, 3});
+                                             .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, Math.min(attempt + 1, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts});
 
                                           this.scheduler
 
@@ -8252,7 +8407,7 @@ public class ConnectionManager {
 
                                           VoxLinkMod.LOGGER
 
-                                             .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, attempt + 1, 3});
+                                             .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, Math.min(attempt + 1, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts});
 
                                           this.scheduler
 
@@ -8426,7 +8581,7 @@ public class ConnectionManager {
 
                                        "[Connection] Multi-socket punch failed (cycle {}/{}, attempt {}/{}): {}",
 
-                                       new Object[]{displayCycle, maxCycles, attempt, 3, e.getMessage()}
+                                       new Object[]{displayCycle, maxCycles, Math.min(attempt, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts, e.getMessage()}
 
                                     );
 
@@ -8498,7 +8653,7 @@ public class ConnectionManager {
 
                                           VoxLinkMod.LOGGER
 
-                                             .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, attempt + 1, 3});
+                                             .info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, Math.min(attempt + 1, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts});
 
                                           this.scheduler
 
@@ -8632,7 +8787,7 @@ public class ConnectionManager {
 
                long delay = this.punchProfile().punchRetryDelayMs * (1L << Math.min(attempt - 1, 4));
 
-               VoxLinkMod.LOGGER.info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, attempt + 1, 3});
+               VoxLinkMod.LOGGER.info("[Connection] Retry UDP punch after {}ms (attempt {}/{})", new Object[]{delay, Math.min(attempt + 1, this.punchProfile().punchMaxAttempts), this.punchProfile().punchMaxAttempts});
 
                this.scheduler.schedule(() -> {
 
@@ -9292,6 +9447,8 @@ public class ConnectionManager {
 
                puncher.setOnPeerPunchReceived(addr -> {
 
+                  this.sessionPunchRecvEver.set(true);
+
                   String code = state.roomInfo.getCode();
 
                   String token = state.roomInfo.getToken();
@@ -9507,6 +9664,8 @@ public class ConnectionManager {
             puncher.setOnPeerPunchReceived(
 
                addr -> {
+
+                  this.sessionPunchRecvEver.set(true);
 
                   if (!won.get()) {
 
@@ -9963,6 +10122,16 @@ public class ConnectionManager {
       if (!this.shouldContinuousRetry(state)) {
 
          return false;
+
+      }
+
+      if (this.continuousRetryRound.get() >= ZERO_RECV_FINAL_ROUND_LIMIT && !this.sessionPunchRecvEver.get()) {
+
+         // 持续重试已打满且全会话双向零收包：宣布终态，不再进入新一轮(返回true避免调用方覆盖终态UI)
+
+         this.declareZeroRecvFinalFailure(state);
+
+         return true;
 
       }
 
@@ -11672,6 +11841,8 @@ public class ConnectionManager {
       this.cancelAllFallbacks();
       this.clearHostPunchContexts();
       this.closeVoiceForwardBridges();
+      this.peerReadyConfirmations.clear();
+      this.queuedJoinReplays.clear();
 
    }
 
@@ -11797,6 +11968,14 @@ public class ConnectionManager {
 
       this.consecutiveFailureCount.set(0);
 
+      // 新会话：零收包证据/对端就绪暂存/排队重放全部作废
+
+      this.sessionPunchRecvEver.set(false);
+
+      this.peerReadyConfirmations.clear();
+
+      this.queuedJoinReplays.clear();
+
    }
 
 
@@ -11817,6 +11996,8 @@ public class ConnectionManager {
       this.lastPunchResult = null;
       this.lastHostMappedPorts = null;
       this.hostPunchContexts.clear();
+      this.sessionPunchRecvEver.set(false);
+      this.peerReadyConfirmations.clear();
       for (UdpHolePuncher p : this.activeHolePunchers.values()) {
 
          try { p.cancel(); } catch (Exception ignored) {}
@@ -12760,9 +12941,19 @@ public class ConnectionManager {
 
       int mcPort = state.roomInfo.getHostPort();
 
-      ConnectionState.transitionTo(ConnectionState.CONNECTED, "Host桥接建立 client=" + clientId);
+      // 幽灵连接防护：punch成功只证明"对端→本端"单向可达(host收到joiner的PUNCH不代表host发出的包能到joiner，
+      // 实锤案例recvAck=0挂假连接61秒)。此处不再立即宣布CONNECTED：
+      // - 若此前已收到该client的"connected"就绪信令(双向证据)，立即补转CONNECTED；
+      // - 否则保持TRANSPORT_SETUP与等待文案，等RoomManager.handleConnected收到就绪信令后再确认。
+      // 兜底：若30s内桥上无首包且未确认，P2PBridge首包watchdog会自动requestIceRestart重打。
 
-      state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+      boolean peerReadyBeforeBridge = clientId != null && this.peerReadyConfirmations.remove(clientId);
+
+      if (!peerReadyBeforeBridge && ConnectionState.getCurrent() != ConnectionState.CONNECTED) {
+
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.await_peer_ready"));
+
+      }
 
       this.stopAllPunchingAfterHostBridge();
 
@@ -12800,6 +12991,447 @@ public class ConnectionManager {
          }
 
       });
+
+      // 桥已起、且joiner就绪信令先到：现在补转CONNECTED（双向证据齐备）
+
+      if (peerReadyBeforeBridge) {
+
+         this.finishHostBridgeConnect(state, clientId);
+
+      }
+
+   }
+
+
+
+   // ===== 幽灵连接防护：host侧进入CONNECTED需要对端就绪确认(joiner桥建立后发送的"connected"信令) =====
+
+   public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
+
+      if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost() || from == null) {
+
+         return;
+
+      }
+
+      if (this.activeUdpTransports.containsKey(from)) {
+
+         this.finishHostBridgeConnect(state, from);
+
+      } else {
+
+         // 就绪信令先于host桥建立到达：暂存，待startHostUdpPunchBridge时消费
+
+         this.peerReadyConfirmations.add(from);
+
+         VoxLinkMod.LOGGER.info("[RoomManager] Peer {} ready signal arrived before host bridge, defer confirm", from);
+
+      }
+
+   }
+
+   private void finishHostBridgeConnect(RoomManager.RoomState state, String clientId) {
+
+      if (state == null || state == RoomManager.PENDING || clientId == null) {
+
+         return;
+
+      }
+
+      if (this.roomManager.currentRoom.get() != state || !this.activeUdpTransports.containsKey(clientId)) {
+
+         VoxLinkMod.LOGGER.warn("[ConnState] Skip host CONNECTED confirm client={} (room/transport changed)", clientId);
+
+         return;
+
+      }
+
+      if (ConnectionState.getCurrent() != ConnectionState.CONNECTED) {
+
+         ConnectionState.transitionTo(ConnectionState.CONNECTED, "Host桥接就绪(对端就绪确认) client=" + clientId);
+
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+
+      }
+
+   }
+
+
+
+   // ===== 对端取消不停手修复：打洞进行中收到对端disconnect信号立即中止本轮打洞与持续重试 =====
+
+   public void abortPunchOnPeerDisconnect(String from) {
+
+      RoomManager.RoomState state = this.roomManager.currentRoom.get();
+
+      if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost()) {
+
+         return;
+
+      }
+
+      this.cancelQueuedJoinReplays(from);
+
+      boolean punchingBusy = this.connectionCycleActive.get() || this.continuousRetryRound.get() > 0 || this.isAnyHostPunching();
+
+      // 仅当断开的对端正是当前打洞/建链目标时才整体中止，避免多peer房间误杀其他会话
+
+      boolean targetsThisPeer = this.hostPunchContexts.containsKey(from)
+         || this.activeUdpTransports.containsKey(from)
+         || from.equals(this.savedConnectionFrom);
+
+      if (!punchingBusy || !targetsThisPeer || this.connectionWon.get()) {
+
+         return;
+
+      }
+
+      VoxLinkMod.LOGGER.warn("[ConnState] 对端 {} 已断开/取消连接，立即中止本轮打洞与持续重试，回IDLE / peer cancelled, stop punching now", from);
+
+      this.continuousRetryCancelled.set(true);
+
+      this.killAllConnectionAttempts("peer_disconnect");
+
+      this.peerReadyConfirmations.remove(from);
+
+      state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.peer_left"), true);
+
+   }
+
+
+
+   // ===== punching标志复位修复：打洞组已撤销但ctx.punching未清时及时过期，避免join_request被永久排队饿死(MM6SDJ) =====
+
+   private void expireStaleHostPunchContexts() {
+
+      long nowMs = System.currentTimeMillis();
+
+      for (Entry<String, ConnectionManager.HostPunchContext> e : this.hostPunchContexts.entrySet()) {
+
+         ConnectionManager.HostPunchContext c = e.getValue();
+
+         if (c == null || !c.punching) {
+
+            continue;
+
+         }
+
+         String prefix = this.peerPunchPrefix(e.getKey());
+
+         boolean groupAlive = false;
+
+         for (String k : this.activeHolePunchers.keySet()) {
+
+            if (k.startsWith(prefix)) {
+
+               groupAlive = true;
+
+               break;
+
+            }
+
+         }
+
+         if (!groupAlive && nowMs - c.punchStartMs > 5000L && nowMs - c.punchStartMs < 300000L) {
+
+            c.punching = false;
+
+            VoxLinkMod.LOGGER.info("[HostPunch] Expire stale punching flag for client {} (punch group gone)", e.getKey());
+
+         }
+
+      }
+
+   }
+
+   private void registerQueuedJoinReplay(String from, ScheduledFuture<?> future) {
+
+      if (from == null || future == null) {
+
+         return;
+
+      }
+
+      List<ScheduledFuture<?>> list = this.queuedJoinReplays.computeIfAbsent(from, k -> new CopyOnWriteArrayList<>());
+
+      list.add(future);
+
+   }
+
+   private void cancelQueuedJoinReplays(String from) {
+
+      if (from == null) {
+
+         return;
+
+      }
+
+      List<ScheduledFuture<?>> list = this.queuedJoinReplays.remove(from);
+
+      if (list != null && !list.isEmpty()) {
+
+         VoxLinkMod.LOGGER.info("[RoomManager] Invalidate {} queued join_request replay(s) for disconnected peer {}", list.size(), from);
+
+         for (ScheduledFuture<?> f : list) {
+
+            f.cancel(false);
+
+         }
+
+      }
+
+   }
+
+   // 打洞占用期结束后的join_request重放：不再默默丢弃，等打洞一停立即处理
+
+   private void scheduleDeferredJoinReplay(RoomManager.RoomState state, String from, JsonObject data, int waitCount) {
+
+      // H3a: 闭包创建时捕获房间码,执行时校验,避免换房后旧任务在新房间重放
+      String capturedRoomCode = state.roomInfo.getCode();
+
+      ScheduledFuture<?> future = this.scheduler.schedule(() -> {
+
+         try {
+
+            RoomManager.RoomState st = this.roomManager.currentRoom.get();
+
+            if (st == null || st == RoomManager.PENDING || !st.roomInfo.isHost()) {
+
+               return;
+
+            }
+
+            if (capturedRoomCode == null || !capturedRoomCode.equals(st.roomInfo.getCode())) {
+
+               VoxLinkMod.LOGGER.warn("[RoomManager] Drop deferred join_request from {}: room changed (captured={}, current={})", new Object[]{from, capturedRoomCode, st.roomInfo.getCode()});
+
+               return;
+
+            }
+
+            if (this.activeUdpTransports.containsKey(from)) {
+
+               VoxLinkMod.LOGGER.info("[RoomManager] Client {} connected, drop deferred join_request", from);
+
+               return;
+
+            }
+
+            this.expireStaleHostPunchContexts();
+
+            boolean busy = this.isAnyHostPunching() || this.connectionCycleActive.get();
+
+            if (!busy) {
+
+               VoxLinkMod.LOGGER.info("[RoomManager] Punch cycle ended, replay deferred join_request from {}", from);
+
+               this.handleJoinRequest(from, data, 0);
+
+            } else if (waitCount < 12) {
+
+               this.scheduleDeferredJoinReplay(st, from, data, waitCount + 1);
+
+            } else {
+
+               // H3b: 排队满120s仍无可用打洞槽位,通知房客放弃等待,避免无限挂死
+               VoxLinkMod.LOGGER.warn("[RoomManager] Deferred join_request from {} dropped after 120s of waiting, notify peer to give up", from);
+
+               try {
+
+                  JsonObject giveUpData = new JsonObject();
+
+                  giveUpData.addProperty("reason", "join_queue_timeout");
+
+                  this.signalingClient.sendSignal(st.roomInfo.getCode(), st.roomInfo.getToken(), st.roomInfo.isHost(), "disconnect", giveUpData, from);
+
+               } catch (Exception sigEx) {
+
+                  VoxLinkMod.LOGGER.debug("[RoomManager] Send join_queue_timeout disconnect failed: {}", sigEx.getMessage());
+
+               }
+
+            }
+
+         } catch (Exception ex) {
+
+            VoxLinkMod.LOGGER.warn("[RoomManager] Deferred join_request replay error: {}", ex.getMessage());
+
+         }
+
+      }, JOIN_QUEUE_RETRY_SEC, TimeUnit.SECONDS);
+
+      this.registerQueuedJoinReplay(from, future);
+
+   }
+
+
+
+   // ===== 零收包终态广播：持续重试耗尽且全会话双向零收包时给出明确结论(WB4V72/MTNFW4) =====
+
+   private void declareZeroRecvFinalFailure(RoomManager.RoomState state) {
+
+      if (this.connectionWon.get() || this.voxlinkWon || this.terracottaWon) {
+
+         return;
+
+      }
+
+      VoxLinkMod.LOGGER
+         .warn(
+            "[ConnState] 打洞最终失败：双向零收包(持续重试{}轮全程recvPunch=0/recvAck=0)，当前网络环境无法直连，建议开启中继或更换网络 / Punch finally failed: zero packets received in both directions, try relay or another network",
+            new Object[]{this.continuousRetryRound.get()}
+         );
+
+      this.continuousRetryCancelled.set(true);
+
+      this.connectionCycleActive.set(false);
+
+      ConnectionState.transitionTo(ConnectionState.FAILED, "持续重试耗尽且双向零收包");
+
+      ConnectionHelper.resetConnecting();
+
+      for (UdpHolePuncher puncher : this.activeHolePunchers.values()) {
+
+         try {
+
+            puncher.cancel();
+
+         } catch (Exception e) {
+
+         }
+
+         try {
+
+            puncher.close();
+
+         } catch (Exception e) {
+
+         }
+
+      }
+
+      this.activeHolePunchers.clear();
+
+      this.clearHostPunchContexts();
+
+      if (state != null && state != RoomManager.PENDING && state.roomInfo != null) {
+
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.zero_recv_failed"), true);
+
+         this.notifyPeerGiveUpOnZeroRecv(state);
+
+      }
+
+   }
+
+   private void notifyPeerGiveUpOnZeroRecv(RoomManager.RoomState state) {
+
+      try {
+
+         JsonObject giveUpData = new JsonObject();
+
+         giveUpData.addProperty("reason", "zero_recv_final");
+
+         String target = state.roomInfo.isHost() ? "all" : "host";
+
+         this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), state.roomInfo.isHost(), "disconnect", giveUpData, target);
+
+         VoxLinkMod.LOGGER.info("[Connection] Sent give-up (disconnect, reason=zero_recv_final) to {}, peer will stop punching too", target);
+
+      } catch (Exception e) {
+
+         VoxLinkMod.LOGGER.debug("[Connection] Send give-up signal failed: {}", e.getMessage());
+
+      }
+
+   }
+
+
+
+   // ===== joiner侧：收到host的"incompatible"信令(MC版本不匹配)，明确提示并终止加入流程(S822QF) =====
+
+   public void handleIncompatibleVersion(String from, JsonObject data) {
+
+      String hostVer = data.has("hostVersion") && !data.get("hostVersion").isJsonNull() ? data.get("hostVersion").getAsString() : "unknown";
+
+      String myVer = VoxLinkConstants.GAME_VERSION;
+
+      VoxLinkMod.LOGGER.warn("[ConnState] Host MC version incompatible: host={} you={} / 与房主版本不匹配", hostVer, myVer);
+
+      String mismatchMsg = "[VoxLink] 与房主 Minecraft 版本不匹配 (host=" + hostVer + ", you=" + myVer
+         + ")，请换用相同版本 / MC version mismatch with host, please use the same MC version";
+
+      Minecraft mc = Minecraft.getInstance();
+
+      if (mc != null) {
+
+         mc.execute(() -> {
+
+            Minecraft mc1 = Minecraft.getInstance();
+
+            if (mc1 != null && mc1.player != null) {
+
+               mc1.player.sendSystemMessage(Component.literal(mismatchMsg).withStyle(ChatFormatting.RED));
+
+            }
+
+         });
+
+      }
+
+      RoomManager.RoomState state = this.roomManager.currentRoom.get();
+
+      if (state != null && state != RoomManager.PENDING && !state.roomInfo.isHost()) {
+
+         state.roomInfo.setConnectionMode(Component.literal("MC 版本不匹配 / MC version mismatch"), true);
+
+         ConnectionState.transitionTo(ConnectionState.FAILED, "与房主MC版本不兼容 host=" + hostVer);
+
+         this.leaveRoomOnFailure(state);
+
+      }
+
+   }
+
+
+
+   // ===== 地址族过滤：本端无全局IPv6时丢弃IPv6打洞候选(S822QF/QWA6D3)，结果有60s缓存不会反复探测 =====
+
+   private String filterAddressFamilyCandidate(String ip, int port, String tag) {
+
+      if (ip == null || ip.isEmpty()) {
+
+         return ip;
+
+      }
+
+      if (ip.indexOf(':') >= 0) {
+
+         if (!StunDetector.verifyIPv6Connectivity()) {
+
+            VoxLinkMod.LOGGER
+               .warn(
+                  "[AddrFilter] 忽略不可达 IPv6 候选 {}:{} ({})：本端无全局IPv6 / dropped unreachable IPv6 candidate (no local global IPv6)",
+                  new Object[]{ip, port, tag}
+               );
+
+            return null;
+
+         }
+
+         return ip;
+
+      }
+
+      if (ip.startsWith("127.") || ip.startsWith("0.") || "localhost".equals(ip)) {
+
+         VoxLinkMod.LOGGER.warn("[AddrFilter] 忽略不可达候选 {}:{} ({})：环回地址 / dropped loopback candidate", ip, port, tag);
+
+         return null;
+
+      }
+
+      return ip;
 
    }
 

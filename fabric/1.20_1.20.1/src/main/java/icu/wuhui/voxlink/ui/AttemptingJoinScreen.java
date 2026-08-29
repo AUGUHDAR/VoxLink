@@ -53,7 +53,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       "voxlink.tip.knowledge_fallback",
       "voxlink.tip.turn_future",
       "voxlink.tip.edge_terracotta",
-      "voxlink.tip.reverse_relay"
+      "voxlink.tip.reverse_relay",
+      "voxlink.tip.auto_collapse_create",
+      "voxlink.tip.disable_join_check"
    };
    private final List<String> tipQueue = new ArrayList<>();
    private String currentTipKey = "";
@@ -75,17 +77,26 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private ScheduledFuture<?> connectionFuture;
    private int monitorTicks = 0;
    private static final int MAX_MONITOR_TICKS = 360;
-   private static final int BRIDGE_HANDSHAKE_TICKS = 120;
+   private static final int BRIDGE_HANDSHAKE_TICKS = 60;
    private int bridgeEstablishedAtTick = -1;
    private volatile boolean relayButtonVisible = false;
    private volatile long relayFailedMsgTime = 0L;
    private volatile boolean lastManualRelayInProgress = false;
+   /** ModSync 门控已放行（清单拉完/玩家直接加入或直接进入）：重建本屏时不再走门控。 */
+   private final boolean modSyncChecked;
+   /** 正处于"正在获取房主必装清单"阶段：展示"直接进入"出口。 */
+   private boolean modSyncChecking = false;
 
    public AttemptingJoinScreen(Screen parent, String roomCode, String password) {
+      this(parent, roomCode, password, false);
+   }
+
+   public AttemptingJoinScreen(Screen parent, String roomCode, String password, boolean modSyncChecked) {
       super(Component.translatable("voxlink.attempting_join"));
       this.parent = parent;
       this.roomCode = roomCode != null ? roomCode : "";
       this.password = password;
+      this.modSyncChecked = modSyncChecked;
    }
 
    @Override
@@ -111,10 +122,24 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
       int centerX = this.width / 2;
       int btnY = this.height / 2 + 45;
+      // 首次 init 且即将走门控时，本屏就是"正在获取房主必装清单"页：给出不等清单的出口
+      boolean gatePending = !this.joinApiDone && !this.modSyncChecked
+         && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
+         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
+         && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode);
       if (!bridgeReady) {
          if (this.joinApiDone && !this.active) {
             this.addRenderableWidget(
                Button.builder(Component.translatable("voxlink.back"), button -> this.goBack()).bounds(centerX - 100, btnY, 200, 20).build()
+            );
+         } else if (gatePending) {
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.modsync.skip_check"), button -> this.onSkipCheckClicked())
+                  .bounds(centerX - 100, btnY, 200, 20)
+                  .build()
+            );
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY + 24, 200, 20).build()
             );
          } else {
             this.addRenderableWidget(
@@ -160,6 +185,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    }
 
    private void cancelJoin() {
+      if (this.modSyncChecking) {
+         // 取消时清单可能仍在拉取：标记跳过，防止稍后选择窗突然弹出打断玩家
+         icu.wuhui.voxlink.modsync.ModSyncGuestService.bypass(this.roomCode);
+         this.modSyncChecking = false;
+      }
+
+      // 取消加入必须撤销日志上传定时器：否则 90s 后 runUpload 照跑，
+      // 玩家"取消了还上传日志"
+      icu.wuhui.voxlink.network.LogUploadManager.disarm();
       this.active = false;
       VoxLinkMod.getRoomManager().leaveRoom();
       Minecraft.getInstance().setScreen(this.parent);
@@ -178,19 +212,23 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private void startJoin() {
       this.active = true;
       LogUploadManager.arm(this.roomCode, false);
+
+
       // ModSync 门控：开关开启且为 VoxLink 房间号时，先拉必装清单再进入连接流程；
-      // 检查过程会切换屏幕，继续时重建本屏（joinApiDone 随新实例复位）
-      if (icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
-         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)) {
+      // 已门控过/已跳过的房间直接放行；放行回调一律以 modSyncChecked=true 重建本屏，
+      // 绝不再入 gate()——否则快速通道会在本屏上空转，卡死在"正在获取清单"
+      if (!this.modSyncChecked
+         && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
+         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
+         && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode)) {
          Minecraft mc0 = Minecraft.getInstance();
          AttemptingJoinScreen self = this;
+         this.modSyncChecking = true;
+         this.voxlinkStatusText = Component.translatable("voxlink.modsync.checking").getString();
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
          icu.wuhui.voxlink.modsync.ModSyncGuestService.gate(
             this.roomCode,
-            () -> mc0.execute(() -> {
-               if (mc0.screen == null || mc0.screen instanceof icu.wuhui.voxlink.modsync.ModSyncSelectScreen) {
-                  mc0.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password));
-               }
-            }),
+            () -> mc0.execute(() -> mc0.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password, true))),
             () -> mc0.execute(() -> {
                if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
                   VoxLinkMod.getRoomManager().leaveRoom();
@@ -202,6 +240,20 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          return;
       }
 
+      this.doStartDualP2P();
+   }
+
+   /** 获取清单页"直接进入"：跳过必装检查立刻开始连接；在途清单结果作废（bypass）。 */
+   private void onSkipCheckClicked() {
+      if (!this.modSyncChecking) {
+         return;
+      }
+
+      this.modSyncChecking = false;
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.bypass(this.roomCode);
+      this.voxlinkStatusText = "";
+      this.clearOurWidgets();
+      this.init();
       this.doStartDualP2P();
    }
 
@@ -264,6 +316,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    }
 
    private void onFailed(String msg) {
+      // 加入失败后放行门控缓存：下次再加入可重新看到必装模组下载窗
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.clearGateFor(this.roomCode);
       this.voxlinkFinal = true;
       this.voxlinkStatusText = msg;
       this.voxlinkStatusColor = VoxLinkColors.ERROR;
@@ -277,6 +331,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    public void onRoomLost() {
       this.stopConnectionMonitor();
       this.active = false;
+      // 房间丢失时需要重建按钮布局：onFailed 路径也是同样的处理。
+      // onRoomLost 可能被非主线程调用，必须走 mc.execute 并加 mc.screen 守卫避免误重建已关闭的界面。
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(() -> {
+         if (mc.screen == this) {
+            this.clearOurWidgets();
+            this.init();
+         }
+      });
    }
 
    private void stopConnectionMonitor() {

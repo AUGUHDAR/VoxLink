@@ -48,6 +48,8 @@ public class VoxLinkConfig {
    private volatile boolean joinRequiredModsCheck = true;
    /** 房主是否向信令服务器上报必装 Mod 清单（ModSync）；关闭后房客拉不到清单、直接进洞 */
    private volatile boolean hostModSyncPublish = true;
+   /** 创建房间时自动收起UI（默认关）。 */
+   private volatile boolean autoCollapseCreateUi = false;
    /** 显式允许 http:// 信令服务器（默认拒绝，validate 中强制回退默认 https 地址） */
    private volatile boolean allowInsecureServerUrl = false;
 
@@ -94,6 +96,7 @@ public class VoxLinkConfig {
             config.logUploadEnabled = root.has("logUploadEnabled") ? root.get("logUploadEnabled").getAsBoolean() : true;
             config.joinRequiredModsCheck = root.has("joinRequiredModsCheck") ? root.get("joinRequiredModsCheck").getAsBoolean() : true;
             config.hostModSyncPublish = root.has("hostModSyncPublish") ? root.get("hostModSyncPublish").getAsBoolean() : true;
+            config.autoCollapseCreateUi = root.has("autoCollapseCreateUi") && root.get("autoCollapseCreateUi").getAsBoolean();
             config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
             if (config.serverUrl == null || config.serverUrl.isEmpty()) {
                config.serverUrl = "https://p2p.wuhui.icu";
@@ -116,6 +119,13 @@ public class VoxLinkConfig {
             return config;
          } catch (Exception e) {
             LOGGER.warn("Config load failed, using defaults: {}", e.getMessage());
+            try {
+               Path bakPath = FabricLoader.getInstance().getConfigDir().resolve("voxlink.json.bak");
+               Files.copy(configPath, bakPath, StandardCopyOption.REPLACE_EXISTING);
+               LOGGER.warn("Backed up corrupted config to {}", bakPath);
+            } catch (Exception be) {
+               LOGGER.warn("Failed to back up corrupted config: {}", be.getMessage());
+            }
          }
       }
 
@@ -153,10 +163,9 @@ public class VoxLinkConfig {
 
       // 安全修复：明文 http:// 信令默认拒绝（凭据/房间令牌会明文出网）；
       // 显式设置 allowInsecureServerUrl=true 可放行自建 http 服务器。
-      if (this.serverUrl != null && this.serverUrl.toLowerCase().startsWith("http://") && !this.allowInsecureServerUrl) {
+      if ((this.serverUrl != null && this.serverUrl.toLowerCase().startsWith("http://")) && !this.allowInsecureServerUrl) {
          this.serverUrl = "https://p2p.wuhui.icu";
       }
-
       if (this.heartbeatInterval < 5) {
          this.heartbeatInterval = 5;
       }
@@ -283,6 +292,14 @@ public class VoxLinkConfig {
 
    public void setHostModSyncPublish(boolean v) {
       this.hostModSyncPublish = v;
+   }
+
+   public boolean isAutoCollapseCreateUi() {
+      return this.autoCollapseCreateUi;
+   }
+
+   public void setAutoCollapseCreateUi(boolean v) {
+      this.autoCollapseCreateUi = v;
    }
 
    public boolean isAllowInsecureServerUrl() {

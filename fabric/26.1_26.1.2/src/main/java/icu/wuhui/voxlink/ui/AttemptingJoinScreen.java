@@ -53,7 +53,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       "voxlink.tip.knowledge_fallback",
       "voxlink.tip.turn_future",
       "voxlink.tip.edge_terracotta",
-      "voxlink.tip.reverse_relay"
+      "voxlink.tip.reverse_relay",
+      "voxlink.tip.auto_collapse_create",
+      "voxlink.tip.disable_join_check"
    };
    private final List<String> tipQueue = new ArrayList<>();
    private String currentTipKey = "";
@@ -62,11 +64,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private final String roomCode;
    private final String password;
    private String voxlinkStatusText = "";
-   private int voxlinkStatusColor = -5592406;
+   private int voxlinkStatusColor = VoxLinkColors.MUTED;
    private volatile boolean voxlinkFinal = false;
    private volatile long voxlinkStatusLastUpdate = 0L;
    private String terracottaStatusText = "";
-   private int terracottaStatusColor = -5592406;
+   private int terracottaStatusColor = VoxLinkColors.MUTED;
    private volatile boolean terracottaFinal = false;
    private volatile boolean active = false;
    private boolean joinApiDone = false;
@@ -75,17 +77,26 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private ScheduledFuture<?> connectionFuture;
    private int monitorTicks = 0;
    private static final int MAX_MONITOR_TICKS = 360;
-   private static final int BRIDGE_HANDSHAKE_TICKS = 120;
+   private static final int BRIDGE_HANDSHAKE_TICKS = 60;
    private int bridgeEstablishedAtTick = -1;
    private volatile boolean relayButtonVisible = false;
    private volatile long relayFailedMsgTime = 0L;
    private volatile boolean lastManualRelayInProgress = false;
+   /** ModSync 门控已放行（清单拉完/玩家直接加入或直接进入）：重建本屏时不再走门控。 */
+   private final boolean modSyncChecked;
+   /** 正处于"正在获取房主必装清单"阶段：展示"直接进入"出口。 */
+   private boolean modSyncChecking = false;
 
    public AttemptingJoinScreen(Screen parent, String roomCode, String password) {
+      this(parent, roomCode, password, false);
+   }
+
+   public AttemptingJoinScreen(Screen parent, String roomCode, String password, boolean modSyncChecked) {
       super(Component.translatable("voxlink.attempting_join"));
       this.parent = parent;
       this.roomCode = roomCode != null ? roomCode : "";
       this.password = password;
+      this.modSyncChecked = modSyncChecked;
    }
 
    @Override
@@ -98,23 +109,37 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
          this.voxlinkFinal = true;
          this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-         this.voxlinkStatusColor = -11141291;
+         this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
       } else if (room != null && room.isConnectionFailed()) {
          this.active = false;
          this.voxlinkFinal = true;
          this.voxlinkStatusText = Component.translatable("voxlink.connection.all_failed").getString();
-         this.voxlinkStatusColor = -43691;
+         this.voxlinkStatusColor = VoxLinkColors.ERROR;
       } else if (room != null && room.getLocalBridgePort() > 0) {
          this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-         this.voxlinkStatusColor = -171;
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
       }
 
       int centerX = this.width / 2;
       int btnY = this.height / 2 + 45;
+      // 首次 init 且即将走门控时，本屏就是"正在获取房主必装清单"页：给出不等清单的出口
+      boolean gatePending = !this.joinApiDone && !this.modSyncChecked
+         && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
+         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
+         && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode);
       if (!bridgeReady) {
          if (this.joinApiDone && !this.active) {
             this.addRenderableWidget(
                Button.builder(Component.translatable("voxlink.back"), button -> this.goBack()).bounds(centerX - 100, btnY, 200, 20).build()
+            );
+         } else if (gatePending) {
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.modsync.skip_check"), button -> this.onSkipCheckClicked())
+                  .bounds(centerX - 100, btnY, 200, 20)
+                  .build()
+            );
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY + 24, 200, 20).build()
             );
          } else {
             this.addRenderableWidget(
@@ -160,6 +185,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    }
 
    private void cancelJoin() {
+      if (this.modSyncChecking) {
+         // 取消时清单可能仍在拉取：标记跳过，防止稍后选择窗突然弹出打断玩家
+         icu.wuhui.voxlink.modsync.ModSyncGuestService.bypass(this.roomCode);
+         this.modSyncChecking = false;
+      }
+
+      // 取消加入必须撤销日志上传定时器：否则 90s 后 runUpload 照跑，
+      // 玩家"取消了还上传日志"
+      icu.wuhui.voxlink.network.LogUploadManager.disarm();
       this.active = false;
       VoxLinkMod.getRoomManager().leaveRoom();
       Minecraft.getInstance().setScreen(this.parent);
@@ -181,18 +215,20 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
 
       // ModSync 门控：开关开启且为 VoxLink 房间号时，先拉必装清单再进入连接流程；
-      // 检查过程会切换屏幕，继续时重建本屏（joinApiDone 随新实例复位）
-      if (icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
-         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)) {
+      // 已门控过/已跳过的房间直接放行；放行回调一律以 modSyncChecked=true 重建本屏，
+      // 绝不再入 gate()——否则快速通道会在本屏上空转，卡死在"正在获取清单"
+      if (!this.modSyncChecked
+         && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
+         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
+         && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode)) {
          Minecraft mc0 = Minecraft.getInstance();
          AttemptingJoinScreen self = this;
+         this.modSyncChecking = true;
+         this.voxlinkStatusText = Component.translatable("voxlink.modsync.checking").getString();
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
          icu.wuhui.voxlink.modsync.ModSyncGuestService.gate(
             this.roomCode,
-            () -> mc0.execute(() -> {
-               if (mc0.screen == null || mc0.screen instanceof icu.wuhui.voxlink.modsync.ModSyncSelectScreen) {
-                  mc0.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password));
-               }
-            }),
+            () -> mc0.execute(() -> mc0.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password, true))),
             () -> mc0.execute(() -> {
                if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
                   VoxLinkMod.getRoomManager().leaveRoom();
@@ -204,6 +240,20 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          return;
       }
 
+      this.doStartDualP2P();
+   }
+
+   /** 获取清单页"直接进入"：跳过必装检查立刻开始连接；在途清单结果作废（bypass）。 */
+   private void onSkipCheckClicked() {
+      if (!this.modSyncChecking) {
+         return;
+      }
+
+      this.modSyncChecking = false;
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.bypass(this.roomCode);
+      this.voxlinkStatusText = "";
+      this.clearOurWidgets();
+      this.init();
       this.doStartDualP2P();
    }
 
@@ -255,20 +305,22 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    private int colorForStatus(String statusKey) {
       if (statusKey == null) {
-         return -5592406;
+         return VoxLinkColors.MUTED;
       } else if (statusKey.endsWith(".connected") || statusKey.endsWith(".p2p_established")) {
-         return -11141291;
+         return VoxLinkColors.SUCCESS;
       } else if (statusKey.endsWith(".all_failed") || statusKey.endsWith(".channel_failed")) {
-         return -43691;
+         return VoxLinkColors.ERROR;
       } else {
-         return statusKey.endsWith(".status_cancelled") ? -5592406 : -171;
+         return statusKey.endsWith(".status_cancelled") ? VoxLinkColors.MUTED : VoxLinkColors.WARNING;
       }
    }
 
    private void onFailed(String msg) {
+      // 加入失败后放行门控缓存：下次再加入可重新看到必装模组下载窗
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.clearGateFor(this.roomCode);
       this.voxlinkFinal = true;
       this.voxlinkStatusText = msg;
-      this.voxlinkStatusColor = -43691;
+      this.voxlinkStatusColor = VoxLinkColors.ERROR;
       this.active = false;
       this.stopConnectionMonitor();
       VoxLinkMod.getRoomManager().getConnectionManager().killAllConnectionAttempts();
@@ -279,6 +331,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    public void onRoomLost() {
       this.stopConnectionMonitor();
       this.active = false;
+      // 房间丢失时需要重建按钮布局：onFailed 路径也是同样的处理。
+      // onRoomLost 可能被非主线程调用，必须走 mc.execute 并加 mc.screen 守卫避免误重建已关闭的界面。
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(() -> {
+         if (mc.screen == this) {
+            this.clearOurWidgets();
+            this.init();
+         }
+      });
    }
 
    private void stopConnectionMonitor() {
@@ -374,7 +435,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                            if (mc.screen == AttemptingJoinScreen.this) {
                               AttemptingJoinScreen.this.voxlinkFinal = true;
                               AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
-                              AttemptingJoinScreen.this.voxlinkStatusColor = -11141291;
+                              AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
                               AttemptingJoinScreen.this.active = false;
                            }
                         });
@@ -404,7 +465,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                         if (mc.screen == AttemptingJoinScreen.this) {
                            if (!AttemptingJoinScreen.this.voxlinkFinal) {
                               AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
-                              AttemptingJoinScreen.this.voxlinkStatusColor = -171;
+                              AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.WARNING;
                            }
                         }
                      });
@@ -458,7 +519,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                                  }
 
                                  AttemptingJoinScreen.this.voxlinkStatusText = newText;
-                                 AttemptingJoinScreen.this.voxlinkStatusColor = -171;
+                                 AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.WARNING;
                                  AttemptingJoinScreen.this.voxlinkStatusLastUpdate = now;
                               }
                            }
@@ -510,18 +571,18 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       super.extractRenderState(graphics, mouseX, mouseY, partialTick);
       this.renderNatOverlay(graphics);
       int centerX = this.width / 2;
-      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, -1);
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, VoxLinkColors.WHITE);
       this.drawCenteredString(
          graphics,
          ChatFormatting.YELLOW.toString() + ChatFormatting.BOLD.toString() + Component.translatable("voxlink.chat.room_code_label").getString().trim(),
          centerX,
          this.height / 2 - 30,
-         -171
+         VoxLinkColors.WARNING
       );
       if (this.relayFailedMsgTime > 0L) {
          long elapsed = System.currentTimeMillis() - this.relayFailedMsgTime;
          if (elapsed < 3000L) {
-            this.drawCenteredString(graphics, Component.translatable("voxlink.relay.failed_retry_punch").getString(), centerX, this.height / 2 - 30 - 12, -171);
+            this.drawCenteredString(graphics, Component.translatable("voxlink.relay.failed_retry_punch").getString(), centerX, this.height / 2 - 30 - 12, VoxLinkColors.WARNING);
          } else {
             this.relayFailedMsgTime = 0L;
          }
@@ -581,12 +642,12 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          tipText = tipText + "...";
       }
 
-      this.drawString(graphics, tipText, 4, this.height - 12, -5592406);
+      this.drawString(graphics, tipText, 4, this.height - 12, VoxLinkColors.MUTED);
 
       if (LogUploadManager.isUploadFinished()) {
          String uploadText = Component.translatable("voxlink.log_upload.uploaded").getString();
          int uploadWidth = this.fontWidth(uploadText);
-         this.drawString(graphics, uploadText, this.width - uploadWidth - 6, this.height - 12, 0xFF55FF55);
+         this.drawString(graphics, uploadText, this.width - uploadWidth - 6, this.height - 12, VoxLinkColors.SUCCESS);
       }
    }
 
@@ -613,9 +674,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       int x = 4;
       int y = 18;
       int line = 10;
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, -5592406);
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, -5592406);
-      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, -171);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, VoxLinkColors.WARNING);
    }
 
    private String natCnName(NatClass nat) {

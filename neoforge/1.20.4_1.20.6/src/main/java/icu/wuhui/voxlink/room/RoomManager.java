@@ -28,6 +28,7 @@ import java.util.UUID;
 import java.util.UUID;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -85,6 +86,20 @@ public class RoomManager {
    private volatile String lastModeratedName = "";
    volatile Runnable roomLostCallback;
    private volatile String roomLostReason = "";
+   /**
+    * 信令降级保活：服务器传输类故障累计达阈值后进入——房间对象、已建立的
+    * P2P 桥、Terracotta 会话全部保留，只停高频信号轮询并把心跳切为 30s 探活；
+    * 任一次探活成功即自动退出并重启轮询。权威性错误（房主关房/房间不存在/
+    * token 失效）不走此路径，照常按真实掉线处理。
+    */
+   private volatile boolean signalingDegraded = false;
+   private volatile String guestOpPolicyRoomCode = "";
+   // H2: OP策略按房缓存应用记录。同一房间+同一(hostOp,guestOp)策略下,仅对未应用过
+   // 的玩家执行 op/deop,保留房主手动调整。策略变更时清空已应用集合,触发全量重应用。
+   private volatile String opPolicyAppliedRoomCode = "";
+   private volatile boolean opPolicyAppliedHostOp = false;
+   private volatile boolean opPolicyAppliedGuestOp = false;
+   private final Set<String> opPolicyAppliedPlayers = ConcurrentHashMap.newKeySet();
 
    public RoomManager(SignalingClient signalingClient, TopologyClient topologyClient) {
       this.signalingClient = signalingClient;
@@ -124,6 +139,9 @@ public class RoomManager {
       if (!this.currentRoom.compareAndSet(null, PENDING)) {
          return CompletableFuture.failedFuture(new IllegalStateException(Component.translatable("voxlink.error.already_in_room_or_pending").getString()));
       }
+
+      // 新会话入口：状态与计时归零，避免沿用上一会话的终态/陈旧stateEnterTime
+      ConnectionState.reset();
 
       try {
          TerracottaManager.shutdown();
@@ -394,7 +412,6 @@ public class RoomManager {
                                           if (mc.player != null) {
                                              mc.player
                                                 .sendSystemMessage(
-
                                                    Component.translatable("voxlink.chat.terracotta_code_label", new Object[]{""})
                                                       .append(
                                                          Component.literal(
@@ -406,8 +423,7 @@ public class RoomManager {
                                                             )
                                                             .withStyle(ChatCompat.styleWithCopy(tc, Component.translatable("voxlink.chat.click_to_copy")))
                                                       )
-                                                
-);
+                                                );
                                           }
                                        }
                                     );
@@ -595,6 +611,9 @@ public class RoomManager {
          return CompletableFuture.failedFuture(new IllegalStateException(Component.translatable("voxlink.error.already_in_room_or_pending").getString()));
       }
 
+      // 新会话入口：状态与计时归零，避免沿用上一会话的终态/陈旧stateEnterTime(出现超长时长日志)
+      ConnectionState.reset();
+
       try {
          TerracottaManager.shutdown();
       } catch (Exception e) {
@@ -661,6 +680,23 @@ public class RoomManager {
                      JsonObject roomData = response.data.has("room") && response.data.get("room").isJsonObject()
                         ? response.data.getAsJsonObject("room")
                         : new JsonObject();
+                     // MC版本观测(S822QF)：仅记录日志供排障，不拦截。
+                     // 产品决策2026-08-26：兼容性归原版与Via——房主装了Via自然能进；
+                     // 未装Via时原版登录阶段自有提示；mod不越俎代庖。
+                     String hostGameVersion = roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()
+                        ? roomData.get("gameVersion").getAsString().trim()
+                        : "";
+                     int nativeHostProto = (hostGameVersion.isEmpty() || "unknown".equals(hostGameVersion))
+                        ? 0
+                        : VoxLinkConstants.getProtocolVersion(hostGameVersion);
+                     int advertisedHostProto = roomData.has("protocolVersion") && !roomData.get("protocolVersion").isJsonNull()
+                        ? roomData.get("protocolVersion").getAsInt()
+                        : 0;
+                     if (nativeHostProto > 0 && nativeHostProto != VoxLinkConstants.PROTOCOL_VERSION) {
+                        VoxLinkMod.LOGGER.info("[joinRoom] Host MC version differs from local (host={}, proto={}, you={}, proto={}{}) — proceeding",
+                           hostGameVersion, nativeHostProto, GAME_VERSION, VoxLinkConstants.PROTOCOL_VERSION,
+                           advertisedHostProto > 0 ? ", host runs Via" : "");
+                     }
                      RoomInfo roomInfo = new RoomInfo(
                         roomData.has("code") ? roomData.get("code").getAsString() : "",
                         roomData.has("name") ? roomData.get("name").getAsString() : "VoxLink",
@@ -792,6 +828,10 @@ public class RoomManager {
       this.connectionManager.resetDualRaceState();
       this.connectionManager.resetContinuousRetryState();
       this.connectionManager.resetIceRestartState();
+      this.guestOpPolicyRoomCode = "";
+      // H2: 离开房间时清空已应用OP记录
+      this.opPolicyAppliedPlayers.clear();
+      this.opPolicyAppliedRoomCode = "";
       RoomManager.RoomState state = this.currentRoom.getAndSet(null);
       if (state != null && state != PENDING) {
          this.cleanupRoomResources();
@@ -874,6 +914,10 @@ public class RoomManager {
       this.connectionManager.resetDualRaceState();
       this.connectionManager.resetContinuousRetryState();
       this.connectionManager.resetIceRestartState();
+      this.guestOpPolicyRoomCode = "";
+      // H2: 离开房间时清空已应用OP记录
+      this.opPolicyAppliedPlayers.clear();
+      this.opPolicyAppliedRoomCode = "";
       RoomManager.RoomState state = this.currentRoom.getAndSet(null);
       if (state != null && state != PENDING) {
          this.cleanupRoomResources();
@@ -1010,6 +1054,8 @@ public class RoomManager {
       // 离开房间/关闭时清理 WS 推送监听器
       this.signalingClient.setSignalPushHandler(null);
       this.connectionManager.stopAllConnectionWork();
+      // 任何完整拆解（主动离开/权威掉线）都应复位降级状态，避免影响下一房间
+      this.signalingDegraded = false;
    }
 
    private synchronized void handleNameModerationUpdate(RoomManager.RoomState state, String status, String reason, String newName, boolean approved) {
@@ -1060,6 +1106,61 @@ public class RoomManager {
 
    public void setRoomLostCallback(Runnable callback) {
       this.roomLostCallback = callback;
+   }
+
+
+   public boolean isSignalingDegraded() {
+      return this.signalingDegraded;
+   }
+
+   /** 传输类失败达到阈值：进入降级保活（数据面不动，停高频轮询，30s 探活）。 */
+   private void enterSignalingDegraded() {
+      if (this.signalingDegraded || this.currentRoom.get() == null) {
+         return;
+      }
+
+      this.signalingDegraded = true;
+      VoxLinkMod.LOGGER.warn("Signaling unreachable: entering degraded keep-alive — room & data plane kept, new joins paused until recovery");
+      try {
+         synchronized (this) {
+            if (this.signalPollFuture != null) {
+               this.signalPollFuture.cancel(false);
+               this.signalPollFuture = null;
+            }
+         }
+      } catch (Exception ignored) {
+      }
+
+      this.notifyChatYellow(Component.translatable("voxlink.signaling.degraded"));
+      this.rescheduleHeartbeat(30L);
+   }
+
+   /** 心跳成功即退出降级：清计数、重启信号轮询、知会恢复。若房间实际已被服务器清理，后续权威错误会照常走掉线流程。 */
+   private void exitSignalingDegradedIfAny() {
+      if (!this.signalingDegraded) {
+         return;
+      }
+
+      this.signalingDegraded = false;
+      this.heartbeatFailCount.set(0);
+      VoxLinkMod.LOGGER.info("Signaling recovered: resume heartbeat/poll and normal join flow");
+      this.startSignalPoll();
+      this.notifyChatYellow(Component.translatable("voxlink.signaling.recovered"));
+   }
+
+   private void notifyChatYellow(Component msg) {
+      try {
+         Minecraft mc = Minecraft.getInstance();
+         if (mc != null && mc.player != null) {
+            mc.execute(() -> {
+               if (mc.player != null) {
+                  mc.player.sendSystemMessage(msg.copy().withStyle(ChatFormatting.YELLOW));
+               }
+            });
+         }
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.debug("notify chat failed: {}", e.getMessage());
+      }
    }
 
    private void handleRoomLost() {
@@ -1116,6 +1217,7 @@ public class RoomManager {
                            }
                         }
 
+                        // host失联仅关入口/停信令, 不拆已建立数据面, 让已连玩家存活; 加入端照常断
                         if (!st.roomInfo.isHost()) {
                            P2PBridge.disconnect();
                         }
@@ -1333,9 +1435,9 @@ public class RoomManager {
                                  this.heartbeatFailCount.decrementAndGet();
                               }
 
-                              if (fails >= 8) {
-                                 VoxLinkMod.LOGGER.error("Heartbeat failed too many times, room may be lost");
-                                 this.handleRoomLost();
+                              if (fails >= 8 && !this.signalingDegraded) {
+                                 VoxLinkMod.LOGGER.error("Heartbeat failed {} times: degraded keep-alive (room kept, joins paused)", fails);
+                                 this.enterSignalingDegraded();
                               }
 
                               return;
@@ -1363,6 +1465,7 @@ public class RoomManager {
 
                         return;
                      } else {
+                        this.exitSignalingDegradedIfAny();
                         this.heartbeatFailCount.set(0);
                         long baseInterval = Math.max(VoxLinkMod.getConfig().getHeartbeatInterval(), 5L);
                         if (this.currentHeartbeatInterval > baseInterval) {
@@ -1428,8 +1531,8 @@ public class RoomManager {
             .exceptionally(ex -> {
                int fails = this.heartbeatFailCount.incrementAndGet();
                VoxLinkMod.LOGGER.warn("Heartbeat exception ({}/{}): {}", new Object[]{fails, 8, ex.getMessage()});
-               if (fails >= 8) {
-                  this.handleRoomLost();
+               if (fails >= 8 && !this.signalingDegraded) {
+                  this.enterSignalingDegraded();
                }
 
                return null;
@@ -1443,6 +1546,7 @@ public class RoomManager {
       this.signalPollTimestamp.set(System.currentTimeMillis() - 10000L);
       RoomManager.RoomState state = this.currentRoom.get();
       if (state != null && !state.roomInfo.isHost()) {
+         // WS 健康时放宽到 1000ms，断开则保持 200ms 高频兜底
          this.currentSignalPollInterval = this.signalingClient.isWsConnected() ? 1000L : 200L;
       } else {
          this.currentSignalPollInterval = VoxLinkMod.getConfig().getSignalPollInterval();
@@ -1611,6 +1715,7 @@ public class RoomManager {
    private void recoverSignalPollInterval() {
       RoomManager.RoomState state = this.currentRoom.get();
       boolean isJoiner = state != null && state != PENDING && !state.roomInfo.isHost();
+      // 加入方在 WS 健康时放宽到 1000ms，断开恢复 250ms；房主不变
       long normalInterval = isJoiner
          ? (this.signalingClient.isWsConnected() ? 1000L : 250L)
          : VoxLinkMod.getConfig().getSignalPollInterval();
@@ -1687,6 +1792,10 @@ public class RoomManager {
             case "cancel_connection":
                this.connectionManager.handleCancelConnection(from, data);
                break;
+            case "incompatible":
+               // MC版本不匹配预检结果(S822QF)：提示并终止加入流程；老版本对端走default忽略
+               this.connectionManager.handleIncompatibleVersion(from, data);
+               break;
             case "ice_restart":
                this.connectionManager.handleIceRestart(from, data);
                break;
@@ -1747,11 +1856,33 @@ public class RoomManager {
          } else {
             VoxLinkMod.LOGGER.info("[RoomManager] Peer connected but host transport not ready, keep punching");
          }
+         // 幽灵连接防护：joiner桥就绪信令到达后，host才允许进入CONNECTED(双向证据)
+         this.connectionManager.onPeerBridgeReady(st, from);
          // 访客/宿主OP基线每个房间只应用一次(以roomCode记), 避免每次有玩家连接都重跑、
          // 覆盖玩家手动 /op /deop
          String roomCode = st.roomInfo.getCode();
          if (roomCode != null && !roomCode.equals(this.guestOpPolicyRoomCode)) {
             this.guestOpPolicyRoomCode = roomCode;
+            // H2: 切换到新房间前清空旧房间的"已应用"集合,避免跨房间污染
+            this.opPolicyAppliedPlayers.clear();
+            this.opPolicyAppliedRoomCode = "";
+            this.scheduler.schedule(() -> {
+               try {
+                  Minecraft mc = Minecraft.getInstance();
+                  if (mc == null) {
+                     return;
+                  }
+                  mc.execute(() -> this.applyGuestOpPolicy(st, mc));
+               } catch (Exception e) {
+                  VoxLinkMod.LOGGER.warn("[RoomManager] handleConnected exception: {}", e.getMessage());
+               }
+            }, 2L, TimeUnit.SECONDS);
+         } else if (roomCode != null && roomCode.equals(this.guestOpPolicyRoomCode)
+            && (st.roomInfo.isHostOp() != this.opPolicyAppliedHostOp
+               || st.roomInfo.isGuestOp() != this.opPolicyAppliedGuestOp)) {
+            // H2: 同一房间内用户改了 hostOp/guestOp 开关,清空已应用集合触发全量重应用
+            this.opPolicyAppliedPlayers.clear();
+            this.opPolicyAppliedRoomCode = "";
             this.scheduler.schedule(() -> {
                try {
                   Minecraft mc = Minecraft.getInstance();
@@ -1772,6 +1903,14 @@ public class RoomManager {
       // 离线UUID 的攻击者不再被误判为房主）；快照为空时回退旧的 name 匹配以保底不回归。
       Set<UUID> bootstrapSnapshot = LanHostRegistry.snapshot();
       String hostName = Minecraft.getInstance().getUser().getName();
+      // H2: 与本房间上次已应用策略比对,仅未应用过的玩家需要重新执行 op/deop。
+      // 策略变化(用户改了 hostOp/guestOp 开关)时由调用方清空 opPolicyAppliedPlayers
+      // 触发全量重应用;此处仅决定是否跳过每个玩家。
+      String currentRoomCode = this.currentRoom.get() != null && this.currentRoom.get() != PENDING
+         ? this.currentRoom.get().roomInfo.getCode() : "";
+      boolean policyUnchanged = currentRoomCode.equals(this.opPolicyAppliedRoomCode)
+         && hostOp == this.opPolicyAppliedHostOp
+         && guestOp == this.opPolicyAppliedGuestOp;
       server.execute(() -> {
          try {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
@@ -1784,18 +1923,26 @@ public class RoomManager {
                   isHost = name.equals(hostName);
                }
 
+               // H2: 策略未变且该玩家已应用过 -> 跳过,保留房主手动 /op /deop 调整
+               if (policyUnchanged && this.opPolicyAppliedPlayers.contains(name)) {
+                  continue;
+               }
+
                boolean want = isHost ? hostOp : guestOp;
                String cmd = want ? "op " + name : "deop " + name;
                server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), cmd);
                VoxLinkMod.LOGGER.info("[RoomManager] {}{}: {}", new Object[]{isHost ? "Host" : "Visitor", want ? "OP" : "DEOP", name});
+               this.opPolicyAppliedPlayers.add(name);
             }
+            // 记录本次应用的策略快照,供下次比对
+            this.opPolicyAppliedRoomCode = currentRoomCode;
+            this.opPolicyAppliedHostOp = hostOp;
+            this.opPolicyAppliedGuestOp = guestOp;
          } catch (Exception e) {
             VoxLinkMod.LOGGER.warn("[RoomManager] OP policy apply failed: {}", e.getMessage());
          }
       });
    }
-
-   private volatile String guestOpPolicyRoomCode = "";
 
    private void applyGuestOpPolicy(RoomManager.RoomState st, Minecraft mc) {
       try {
@@ -1815,6 +1962,8 @@ public class RoomManager {
       RoomManager.RoomState state = this.currentRoom.get();
       if (state != null && state != PENDING && state.roomInfo.isHost() && from != null) {
          this.connectionManager.clearHostPunchingState();
+         // 对端取消不停手修复：打洞进行中收到disconnect立即中止本轮打洞/持续重试并作废其排队join_request
+         this.connectionManager.abortPunchOnPeerDisconnect(from);
          ReliableUdpTransport transport = this.connectionManager.removeUdpTransport(from);
          if (transport != null) {
             try {

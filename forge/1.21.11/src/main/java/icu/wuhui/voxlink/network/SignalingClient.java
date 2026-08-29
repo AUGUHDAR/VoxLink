@@ -3,6 +3,7 @@ package icu.wuhui.voxlink.network;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import icu.wuhui.voxlink.VoxLinkConstants;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.config.VoxLinkConfig;
 import java.io.UnsupportedEncodingException;
@@ -191,6 +192,13 @@ public class SignalingClient {
       JsonArray capsArr = new JsonArray();
 
       for (String cap : ProtocolNegotiator.CURRENT_CAPABILITIES) {
+         // 上报开关关闭时不声明 modSyncV1：房客据此与旧版房主一样秒判"无清单"，
+         // 零等待直通，不再对着永不到来的清单空耗整个重试周期
+         if (ProtocolNegotiator.CAP_MOD_SYNC_V1.equals(cap)
+            && !icu.wuhui.voxlink.VoxLinkMod.getConfig().isHostModSyncPublish()) {
+            continue;
+         }
+
          capsArr.add(cap);
       }
 
@@ -266,6 +274,7 @@ public class SignalingClient {
 
       body.addProperty("idempotencyKey", this.joinIdempotencyNonce);
       body.addProperty("clientProtocolVersion", 7);
+      body.addProperty("gameVersion", VoxLinkConstants.GAME_VERSION);
       JsonArray capsArr = new JsonArray();
 
       for (String cap : ProtocolNegotiator.CURRENT_CAPABILITIES) {
@@ -405,6 +414,7 @@ public class SignalingClient {
    public CompletableFuture<SignalingClient.ApiResponse> getCategories() {
       return this.get(this.buildGetPath("get_categories", null));
    }
+
    /** ModSync：房主创建房间后发布必装 Mod 清单（需 hostToken，服务端校验）。 */
    public CompletableFuture<SignalingClient.ApiResponse> publishModManifest(String code, String token, JsonObject manifest) {
       JsonObject body = new JsonObject();
@@ -422,7 +432,6 @@ public class SignalingClient {
       body.addProperty("action", "get_room_mods");
       return this.postNoRetry(this.buildPath("get_room_mods"), body);
    }
-
 
    public CompletableFuture<SignalingClient.ApiResponse> reportLinkReady(String code, String token, boolean isHost) {
       JsonObject body = new JsonObject();

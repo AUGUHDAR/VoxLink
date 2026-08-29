@@ -3,6 +3,7 @@ package icu.wuhui.voxlink.network;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import icu.wuhui.voxlink.VoxLinkConstants;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.config.VoxLinkConfig;
 import java.io.UnsupportedEncodingException;
@@ -191,6 +192,13 @@ public class SignalingClient {
       JsonArray capsArr = new JsonArray();
 
       for (String cap : ProtocolNegotiator.CURRENT_CAPABILITIES) {
+         // 上报开关关闭时不声明 modSyncV1：房客据此与旧版房主一样秒判"无清单"，
+         // 零等待直通，不再对着永不到来的清单空耗整个重试周期
+         if (ProtocolNegotiator.CAP_MOD_SYNC_V1.equals(cap)
+            && !icu.wuhui.voxlink.VoxLinkMod.getConfig().isHostModSyncPublish()) {
+            continue;
+         }
+
          capsArr.add(cap);
       }
 
@@ -266,6 +274,7 @@ public class SignalingClient {
 
       body.addProperty("idempotencyKey", this.joinIdempotencyNonce);
       body.addProperty("clientProtocolVersion", 7);
+      body.addProperty("gameVersion", VoxLinkConstants.GAME_VERSION);
       JsonArray capsArr = new JsonArray();
 
       for (String cap : ProtocolNegotiator.CURRENT_CAPABILITIES) {

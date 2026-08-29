@@ -62,6 +62,12 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final int LOSS_SAMPLE_LIMIT = 200;
    private static final long MAX_RETRANSMIT_TOTAL_MS = 24000L;
    private static final long RETRANSMIT_BACKOFF_MS = 250L;
+   // 死对端熔断: 连续重传轮次达到 ROUNDS 且全程对端零收包、总静默超过 MIN_SILENCE_MS 时
+   // 清空积压重传队列(只 WARN 一次)。MIN_SILENCE_MS=23s: 对端 keepalive 间隔仅 1s,
+   // 活链接绝不可能 23s 零收包; 且贴着下方既有的 24s 强制关闭, 保证熔断绝不早于
+   // 旧版行为掐断任何可能自愈的链路, 主要收益是清理对端已死后的僵尸重传。
+   private static final int DEAD_PEER_BREAKER_ROUNDS = 20;
+   private static final long DEAD_PEER_BREAKER_MIN_SILENCE_MS = 23000L;
    private volatile long srtt = -1L;
    private volatile long rttvar = 0L;
    private volatile long rto = 200L;
@@ -82,6 +88,10 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final int STATE_UNRELIABLE = 1;
    private volatile int consecutiveFailures = 0;
    private final AtomicBoolean iceRestartTriggered = new AtomicBoolean(false);
+   // 死对端熔断状态(仅在 retransmitCheck 的单线程 scheduler 上访问):
+   // streakStartMs 锚定到本段连续重传起点, 期间任何对端收包都会使 lastRecvTime 前移从而整体复位
+   private int deadPeerRetransmitRounds = 0;
+   private long deadPeerStreakStartMs = 0L;
    // punchAuthV1：数据面认证上下文（null = 非认证模式，帧格式与旧版本逐字节一致）
    private volatile byte[] authKeyBytes;
    private volatile Mac authMac;
@@ -325,6 +335,15 @@ public class ReliableUdpTransport implements AutoCloseable {
                         case 4:
                            this.handleAck(ack);
                            this.lastRecvTime = System.currentTimeMillis();
+                           // M4: 纯 ACK 帧视为对端活性证据, 与 case 8 同样复位连续失败计数
+                           // 并在 writeState 降级时恢复 (不放 ACK 回包, 避免放大流量)
+                           this.consecutiveFailures = 0;
+                           if (this.writeState != 0) {
+                              this.writeState = 0;
+                              LOGGER.info("[ReliableUdp] writeState restored to WRITABLE (via ACK)");
+                           }
+
+                           break;
                         case 5:
                         case 6:
                         default:
@@ -808,6 +827,15 @@ public class ReliableUdpTransport implements AutoCloseable {
             synchronized (this.sendLock) {
                long maxRetransmits = Math.max(10L, Math.min(120L, 24000L / Math.max(this.rto, 100L)));
 
+               // 死对端熔断锚点: 本段连续重传期间一旦收到过对端任何包(lastRecvTime 前移),
+               // 计数自然复位; 只有完全零收包的死路径才会持续累积。
+               if (this.lastRecvTime > this.deadPeerStreakStartMs) {
+                  this.deadPeerStreakStartMs = this.lastRecvTime;
+                  this.deadPeerRetransmitRounds = 0;
+               }
+
+               boolean didRetransmit = false;
+
                for (Entry<Integer, ReliableUdpTransport.PendingPacket> entry : this.pendingAcks.entrySet()) {
                   ReliableUdpTransport.PendingPacket pp = entry.getValue();
                   long backoff = this.rto + Math.min(pp.retries, 3) * 250L;
@@ -822,7 +850,7 @@ public class ReliableUdpTransport implements AutoCloseable {
                      }
 
                      if (pp.retries == 0) {
-                        LOGGER.info("[ReliableUdp] Retransmit seq {} (pending={})", entry.getKey(), this.pendingAcks.size());
+                        LOGGER.debug("[ReliableUdp] Retransmit seq {} (pending={})", entry.getKey(), this.pendingAcks.size());
                      }
 
                      pp.sendTime = now;
@@ -830,6 +858,28 @@ public class ReliableUdpTransport implements AutoCloseable {
                      this.consecutiveFailures++;
                      this.recordLoss(true);
                      this.sendDataPacket(entry.getKey(), pp.data, false);
+                     didRetransmit = true;
+                  }
+               }
+
+               // 熔断判定: 连续重传轮次达标且总静默超阈值(期间对端零收包), 清空积压重传队列,
+               // 只打一次 WARN。收到对端包后 lastRecvTime 前移, 状态自然复位恢复正常传输。
+               if (didRetransmit) {
+                  this.deadPeerRetransmitRounds++;
+                  long silenceNowMs = now - this.lastRecvTime;
+                  if (silenceNowMs > DEAD_PEER_BREAKER_MIN_SILENCE_MS && this.deadPeerRetransmitRounds >= DEAD_PEER_BREAKER_ROUNDS) {
+                     LOGGER.warn(
+                        "[ReliableUdp] Peer unresponsive ({}ms no rx, {} retransmits), dropping {} pending packets",
+                        silenceNowMs, this.deadPeerRetransmitRounds, this.pendingAcks.size()
+                     );
+                     this.pendingAcks.clear();
+                     // 队列清空后必须推进基序号, 否则 sendBytes 的窗口判定(oldestUnackedSeq)
+                     // 永远阻塞, 写侧 30s 后必然 transport stuck
+                     this.oldestUnackedSeq = this.nextSendSeq;
+                     this.consecutiveFailures = 0;
+                     this.dupAckCount = 0;
+                     this.deadPeerRetransmitRounds = 0;
+                     this.deadPeerStreakStartMs = 0L;
                   }
                }
             }
