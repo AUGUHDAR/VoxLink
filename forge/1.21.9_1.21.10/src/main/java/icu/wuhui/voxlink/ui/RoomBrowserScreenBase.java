@@ -635,8 +635,11 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             String loaderKey = r.loader != null && !r.loader.isEmpty() ? r.loader : "unknown";
             String loaderLabel = Component.translatable("voxlink.loader." + loaderKey).getString();
             int loaderW = this.fontWidth(loaderLabel) + 4;
-            graphics.fill(x + cardW - loaderW - 3, y + 35, x + cardW - 3, y + 45, COLOR_CAT_BADGE_BG);
-            this.drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + 36, VoxLinkColors.CAT_BADGE_TEXT);
+            // 小卡片（cardH<48）跳过 loader 角标以免溢出
+            if (cardH >= 48) {
+               graphics.fill(x + cardW - loaderW - 3, y + 35, x + cardW - 3, y + 45, COLOR_CAT_BADGE_BG);
+               this.drawString(graphics, ChatFormatting.GRAY.toString() + loaderLabel, x + cardW - loaderW - 1, y + 36, VoxLinkColors.CAT_BADGE_TEXT);
+            }
          }
       }
 
@@ -660,7 +663,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
       }
 
       // 当过滤后排除了密码房（且显示列表为空或只显示非密码房时），给玩家一条提示：可通过"输入房间号"加入
-      if (this.hiddenPasswordCount > 0 && this.displayedRooms.isEmpty()) {
+      if (this.hiddenPasswordCount > 0 && this.displayedRooms.isEmpty() && this.height >= 360) {
          String hiddenHint = Component.translatable("voxlink.browser.password_rooms_hidden", new Object[]{this.hiddenPasswordCount}).getString();
          int maxHintWidth = this.width - 20;
          if (this.fontWidth(hiddenHint) > maxHintWidth) {
@@ -774,7 +777,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    }
 
    protected int getCardHeight() {
-      return 48;
+      // 小高度屏幕：卡片缩为 36 以让出底部空间给分页/状态/提示/按钮
+      return this.height < 360 ? 36 : 48;
    }
 
    protected int getGap() {

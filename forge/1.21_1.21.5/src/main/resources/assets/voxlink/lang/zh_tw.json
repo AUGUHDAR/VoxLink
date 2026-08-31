@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "設定已儲存，房間名稱審核中...",
     "voxlink.pause.room_management": "房間管理",
     "voxlink.terracotta.delete_binary": "刪除陶瓦",
+    "voxlink.terracotta.delete_binary_confirm": "再次點擊確認刪除",
     "voxlink.terracotta.binary_deleted": "陶瓦已刪除",
     "voxlink.update.check": "VoxLink 更新提示",
     "voxlink.update.available": "發現新版本 %s，快去更新吧 awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "已隱藏 %s 間有密碼的房間，請用「以代碼加入」進入",
     "voxlink.modsync.disabled_hint": "%s 已安裝但未啟用 (xxx.jar.disabled) — 如有需要請手動啟用",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] 必裝模組檢查失敗，直接加入。請確認你的模組與房主一致。",
-    "voxlink.modsync.download_cancelled": "已取消下載。"
+    "voxlink.modsync.download_cancelled": "已取消下載。",
+    "voxlink.modsync.loader_mismatch": "房主載入器 %s 與你 (%s) 不同：mod 無法執行，請安裝相符的載入器",
+    "voxlink.modsync.host_published": "已發佈 %d 項必裝 mod，房客可下載。",
+    "voxlink.modsync.host_unknown": "%d 個 mod 無法識別，房客須手動安裝：%s",
+    "voxlink.relay.searching": "正在尋找適合中繼的玩家…",
+    "voxlink.relay.trying_batch": "第 %s 輪：%s 個候選玩家…",
+    "voxlink.relay.cancel": "取消中繼，回到直連",
+    "voxlink.relay.failed_no_candidates": "中繼失敗：沒有可用的中繼玩家",
+    "voxlink.relay.failed_timeout": "中繼失敗：候選玩家未回應",
+    "voxlink.relay.failed_host_no_response": "中繼失敗：房主未回應",
+    "voxlink.turn.use": "使用中繼",
+    "voxlink.turn.connecting": "正在連線中繼節點…",
+    "voxlink.turn.failed": "中繼不可用，繼續嘗試直連",
+    "voxlink.turn.switched_p2p": "已平滑切換至P2P直連",
+    "voxlink.turn.standby": "該房客已建立玩家中繼備用線路"
 }

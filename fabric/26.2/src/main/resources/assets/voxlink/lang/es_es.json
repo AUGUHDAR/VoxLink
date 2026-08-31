@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "Ajustes guardados, nombre de sala en revisión...",
     "voxlink.pause.room_management": "Gestión de sala",
     "voxlink.terracotta.delete_binary": "Eliminar Terracotta",
+    "voxlink.terracotta.delete_binary_confirm": "Pulsa otra vez para confirmar el borrado",
     "voxlink.terracotta.binary_deleted": "Terracotta eliminado",
     "voxlink.update.check": "Buscar actualizaciones de VoxLink",
     "voxlink.update.available": "Nueva versión %s disponible, ¡a actualizar awa!",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "%s sala(s) con contraseña ocultas — usa «Unirse por código» para entrar",
     "voxlink.modsync.disabled_hint": "%s está instalado pero deshabilitado (xxx.jar.disabled) — habilítalo manualmente si lo necesitas",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] Comprobación de mods obligatorios falló, entrando directamente. Verifica que tus mods coincidan con los del host.",
-    "voxlink.modsync.download_cancelled": "Descarga cancelada."
+    "voxlink.modsync.download_cancelled": "Descarga cancelada.",
+    "voxlink.modsync.loader_mismatch": "Loader del host %s vs. el tuyo (%s): los mods no funcionarán, instala el loader correspondiente",
+    "voxlink.modsync.host_published": "Publicado(s) %d mod(s) obligatorio(s), los invitados pueden descargarlos.",
+    "voxlink.modsync.host_unknown": "%d mod(s) no reconocido(s), los invitados deben instalarlos manualmente: %s",
+    "voxlink.relay.searching": "Buscando un jugador para retransmitir...",
+    "voxlink.relay.trying_batch": "Ronda %s: %s candidato(s)...",
+    "voxlink.relay.cancel": "Cancelar retransmisión, volver a directo",
+    "voxlink.relay.failed_no_candidates": "Retransmisión fallida: no hay jugador disponible",
+    "voxlink.relay.failed_timeout": "Retransmisión fallida: los candidatos no respondieron",
+    "voxlink.relay.failed_host_no_response": "Retransmisión fallida: el anfitrión no respondió",
+    "voxlink.turn.use": "Usar relé",
+    "voxlink.turn.connecting": "Conectando al nodo de relé...",
+    "voxlink.turn.failed": "Relé no disponible, reintentando directo",
+    "voxlink.turn.switched_p2p": "Cambiado a P2P directo",
+    "voxlink.turn.standby": "Un invitado estableció un enlace de relé de respaldo"
 }

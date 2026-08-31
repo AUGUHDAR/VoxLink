@@ -224,6 +224,7 @@
     "voxlink.terracotta.status.running": "运行中",
     "voxlink.terracotta.status.exception": "异常",
     "voxlink.terracotta.delete_binary": "删除陶瓦",
+    "voxlink.terracotta.delete_binary_confirm": "再次点击确认删除",
     "voxlink.terracotta.redownload": "重新下载陶瓦",
     "voxlink.terracotta.download_failed": ":( 下载失败，点击重试",
     "voxlink.terracotta.unsupported_platform": ":( 当前平台不支持陶瓦下载",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "已隐藏 %s 个带密码房间，可通过「输入房间号」加入",
     "voxlink.modsync.disabled_hint": "%s 已安装但被禁用（xxx.jar.disabled），如需请手动启用",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] 必装 Mod 检查失败，已直接加入，请自行确认 Mod 一致",
-    "voxlink.modsync.download_cancelled": "已取消下载。"
+    "voxlink.modsync.download_cancelled": "已取消下载。",
+    "voxlink.modsync.loader_mismatch": "房主加载器 %s 与你 (%s) 不同：mod 无法运行，请安装匹配的加载器",
+    "voxlink.modsync.host_published": "已发布 %d 项必装 mod，房客可下载。",
+    "voxlink.modsync.host_unknown": "%d 个 mod 无法识别，房客需手动安装：%s",
+    "voxlink.relay.searching": "正在寻找适合中继的玩家…",
+    "voxlink.relay.trying_batch": "第 %s 轮：%s 个候选玩家…",
+    "voxlink.relay.cancel": "取消中继，回到直连",
+    "voxlink.relay.failed_no_candidates": "中继失败：没有可用的中继玩家",
+    "voxlink.relay.failed_timeout": "中继失败：候选玩家未响应",
+    "voxlink.relay.failed_host_no_response": "中继失败：房主未响应",
+    "voxlink.turn.use": "使用中继",
+    "voxlink.turn.connecting": "正在连接中继节点…",
+    "voxlink.turn.failed": "中继不可用，继续尝试直连",
+    "voxlink.turn.switched_p2p": "已平滑切换至P2P直连",
+    "voxlink.turn.standby": "该房客已建立玩家中继备用线路"
 }

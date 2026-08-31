@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "設定を保存しました。ルーム名を審査中...",
     "voxlink.pause.room_management": "ルーム管理",
     "voxlink.terracotta.delete_binary": "テラコッタを削除",
+    "voxlink.terracotta.delete_binary_confirm": "もう一度クリックして削除を確認",
     "voxlink.terracotta.binary_deleted": "テラコッタを削除しました",
     "voxlink.update.check": "VoxLink 更新通知",
     "voxlink.update.available": "新バージョン %s があります。更新しよう awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "パスワード保護された部屋 %s 件を非表示 — 「コードで参加」から入室してください",
     "voxlink.modsync.disabled_hint": "%s はインストール済みですが無効化されています (xxx.jar.disabled) — 必要なら手動で有効化してください",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] 必須Modチェックに失敗、直接参加します。Modがホストと一致しているか確認してください。",
-    "voxlink.modsync.download_cancelled": "ダウンロードをキャンセルしました。"
+    "voxlink.modsync.download_cancelled": "ダウンロードをキャンセルしました。",
+    "voxlink.modsync.loader_mismatch": "ホストのローダー %s とあなたの (%s) が異なります：modは動作しません、一致するローダーを導入してください",
+    "voxlink.modsync.host_published": "必須mod %d 件を公開しました。ゲストがダウンロードできます。",
+    "voxlink.modsync.host_unknown": "%d 件のmodが識別できません。ゲストは手動で導入してください：%s",
+    "voxlink.relay.searching": "中継してくれるプレイヤーを探しています…",
+    "voxlink.relay.trying_batch": "ラウンド %s：候補 %s 人…",
+    "voxlink.relay.cancel": "中継をキャンセルして直接接続に戻す",
+    "voxlink.relay.failed_no_candidates": "中継失敗：中継可能なプレイヤーがいません",
+    "voxlink.relay.failed_timeout": "中継失敗：候補が応答しませんでした",
+    "voxlink.relay.failed_host_no_response": "中継失敗：ホストが応答しませんでした",
+    "voxlink.turn.use": "中継を使う",
+    "voxlink.turn.connecting": "中継ノードに接続中…",
+    "voxlink.turn.failed": "中継不可用、直接接続を継続",
+    "voxlink.turn.switched_p2p": "P2P直接接続へ平滑切替済み",
+    "voxlink.turn.standby": "参加者がプレイヤー中継の予備経路を確立しました"
 }

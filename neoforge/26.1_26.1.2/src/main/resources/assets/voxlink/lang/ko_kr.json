@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "설정이 저장되었습니다. 방 이름 심사 중...",
     "voxlink.pause.room_management": "방 관리",
     "voxlink.terracotta.delete_binary": "테라코타 삭제",
+    "voxlink.terracotta.delete_binary_confirm": "삭제 확인을 위해 다시 클릭",
     "voxlink.terracotta.binary_deleted": "테라코타가 삭제되었습니다",
     "voxlink.update.check": "VoxLink 업데이트 알림",
     "voxlink.update.available": "새 버전 %s이(가) 있습니다. 업데이트해요 awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "비밀번호 보호된 방 %s개 숨김 — \"코드로 참여\"로 입장하세요",
     "voxlink.modsync.disabled_hint": "%s이(가) 설치되어 있지만 비활성화됨 (xxx.jar.disabled) — 필요시 수동으로 활성화하세요",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] 필수 모드 검사 실패, 바로 참여합니다. 모드가 호스트와 일치하는지 확인하세요.",
-    "voxlink.modsync.download_cancelled": "다운로드가 취소되었습니다."
+    "voxlink.modsync.download_cancelled": "다운로드가 취소되었습니다.",
+    "voxlink.modsync.loader_mismatch": "호스트 로더 %s와 당신 (%s)이(가) 다릅니다: mod가 실행되지 않습니다. 일치하는 로더를 설치하세요",
+    "voxlink.modsync.host_published": "필수 mod %d개를 게스트가 다운로드할 수 있도록 게시했습니다.",
+    "voxlink.modsync.host_unknown": "%d개의 mod를 인식할 수 없습니다. 게스트가 수동으로 설치해야 합니다: %s",
+    "voxlink.relay.searching": "중계할 플레이어를 찾는 중...",
+    "voxlink.relay.trying_batch": "%s라운드: 후보 %s명...",
+    "voxlink.relay.cancel": "중계 취소, 직접 연결로 돌아가기",
+    "voxlink.relay.failed_no_candidates": "중계 실패: 사용 가능한 중계 플레이어 없음",
+    "voxlink.relay.failed_timeout": "중계 실패: 후보가 응답하지 않음",
+    "voxlink.relay.failed_host_no_response": "중계 실패: 호스트가 응답하지 않음",
+    "voxlink.turn.use": "중계 사용",
+    "voxlink.turn.connecting": "중계 노드 연결 중...",
+    "voxlink.turn.failed": "중계 불가, 직접 연결 재시도",
+    "voxlink.turn.switched_p2p": "P2P 직접 연결로 전환됨",
+    "voxlink.turn.standby": "참가자가 플레이어 중비 경로를 설정했습니다"
 }

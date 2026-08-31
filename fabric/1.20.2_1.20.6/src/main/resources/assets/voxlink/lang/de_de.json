@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "Einstellungen gespeichert, Raumname wird geprüft...",
     "voxlink.pause.room_management": "Raumverwaltung",
     "voxlink.terracotta.delete_binary": "Terracotta löschen",
+    "voxlink.terracotta.delete_binary_confirm": "Erneut klicken, um Löschen zu bestätigen",
     "voxlink.terracotta.binary_deleted": "Terracotta gelöscht",
     "voxlink.update.check": "VoxLink Update-Prüfung",
     "voxlink.update.available": "Neue Version %s verfügbar, Zeit für ein Update awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "%s passwortgeschützte Räume ausgeblendet — nutze „Per Code beitreten\"",
     "voxlink.modsync.disabled_hint": "%s ist installiert, aber deaktiviert (xxx.jar.disabled) — bei Bedarf manuell aktivieren",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] Pflicht-Mods-Prüfung fehlgeschlagen, direkter Beitritt. Bitte prüfe, ob deine Mods zum Host passen.",
-    "voxlink.modsync.download_cancelled": "Download abgebrochen."
+    "voxlink.modsync.download_cancelled": "Download abgebrochen.",
+    "voxlink.modsync.loader_mismatch": "Host-Loader %s vs. deiner (%s): Mods laufen nicht, installiere den passenden Loader",
+    "voxlink.modsync.host_published": "%d Pflicht-Mod(s) veröffentlicht, Gäste können sie herunterladen.",
+    "voxlink.modsync.host_unknown": "%d Mod(s) unbekannt, Gäste müssen sie manuell installieren: %s",
+    "voxlink.relay.searching": "Suche nach einem Spieler zum Weiterleiten...",
+    "voxlink.relay.trying_batch": "Runde %s: %s Kandidat(en)...",
+    "voxlink.relay.cancel": "Relay abbrechen, zurück zu direkt",
+    "voxlink.relay.failed_no_candidates": "Relay fehlgeschlagen: kein Relay-Spieler verfügbar",
+    "voxlink.relay.failed_timeout": "Relay fehlgeschlagen: Kandidaten haben nicht geantwortet",
+    "voxlink.relay.failed_host_no_response": "Relay fehlgeschlagen: Host hat nicht geantwortet",
+    "voxlink.turn.use": "Relais nutzen",
+    "voxlink.turn.connecting": "Verbinde mit Relaisknoten...",
+    "voxlink.turn.failed": "Relais nicht verfügbar, Direktverbindung läuft",
+    "voxlink.turn.switched_p2p": "Nahtlos zu P2P gewechselt",
+    "voxlink.turn.standby": "Ein Gast hat eine Spieler-Relais-Reserveleitung aufgebaut"
 }

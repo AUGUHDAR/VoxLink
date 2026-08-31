@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "تم حفظ الإعدادات، اسم الغرفة قيد المراجعة...",
     "voxlink.pause.room_management": "إدارة الغرفة",
     "voxlink.terracotta.delete_binary": "حذف تيراكوتا",
+    "voxlink.terracotta.delete_binary_confirm": "انقر مرة أخرى لتأكيد الحذف",
     "voxlink.terracotta.binary_deleted": "تم حذف تيراكوتا",
     "voxlink.update.check": "تنبيه تحديث VoxLink",
     "voxlink.update.available": "إصدار جديد %s متاح، حان وقت التحديث awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "%s غرفة محمية بكلمة المرور مخفية — استخدم «الانضمام بالرمز» للدخول",
     "voxlink.modsync.disabled_hint": "%s مُثبَّت لكن معطّل (xxx.jar.disabled) — فعّله يدوياً إن احتجت",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] فشل فحص المودات المطلوبة، يتم الدخول مباشرة. يرجى التحقق من تطابق موداتك مع المضيف.",
-    "voxlink.modsync.download_cancelled": "تم إلغاء التنزيل."
+    "voxlink.modsync.download_cancelled": "تم إلغاء التنزيل.",
+    "voxlink.modsync.loader_mismatch": "مُحمِّل المضيف %s مقابل محمِّلك (%s): المودات لن تعمل، ثبّت المُحمِّل المطابق",
+    "voxlink.modsync.host_published": "تم نشر %d مود مطلوب، يمكن للضيوف تنزيلها.",
+    "voxlink.modsync.host_unknown": "%d مود غير مُعرَّف، على الضيوف تثبيتها يدوياً: %s",
+    "voxlink.relay.searching": "جاري البحث عن لاعب يصلح للت relay...",
+    "voxlink.relay.trying_batch": "الجولة %s: %s لاعب(ين) مرشح(ين)...",
+    "voxlink.relay.cancel": "إلغاء الت relay، العودة إلى الاتصال المباشر",
+    "voxlink.relay.failed_no_candidates": "فشل الت relay: لا يوجد لاعب متاح للت relay",
+    "voxlink.relay.failed_timeout": "فشل الت relay: المرشحون لم يستجيبوا",
+    "voxlink.relay.failed_host_no_response": "فشل الت relay: المضيف لم يستجب",
+    "voxlink.turn.use": "استخدم الترحيل",
+    "voxlink.turn.connecting": "جاري الاتصال بعقدة الترحيل...",
+    "voxlink.turn.failed": "الترحيل غير متوفر، استئناف الاتصال المباشر",
+    "voxlink.turn.switched_p2p": "تم التبديل إلى الاتصال المباشر",
+    "voxlink.turn.standby": "أنشأ أحد الضيوف مسار ترحيل احتياطي"
 }

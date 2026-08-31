@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "Configurações salvas, nome da sala em revisão...",
     "voxlink.pause.room_management": "Gerenciar sala",
     "voxlink.terracotta.delete_binary": "Excluir Terracotta",
+    "voxlink.terracotta.delete_binary_confirm": "Clique novamente para confirmar a exclusão",
     "voxlink.terracotta.binary_deleted": "Terracotta excluído",
     "voxlink.update.check": "Verif. atualizações VoxLink",
     "voxlink.update.available": "Nova versão %s disponível, hora de atualizar awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "%s sala(s) com senha ocultada(s) — use \"Entrar por código\"",
     "voxlink.modsync.disabled_hint": "%s está instalado mas desativado (xxx.jar.disabled) — ative manualmente se precisar",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] Falha na checagem de mods obrigatórios, entrando direto. Verifique se seus mods batem com os do host.",
-    "voxlink.modsync.download_cancelled": "Download cancelado."
+    "voxlink.modsync.download_cancelled": "Download cancelado.",
+    "voxlink.modsync.loader_mismatch": "Loader do host %s vs. o seu (%s): os mods não rodam, instale o loader correspondente",
+    "voxlink.modsync.host_published": "%d mod(s) obrigatório(s) publicado(s), convidados podem baixar.",
+    "voxlink.modsync.host_unknown": "%d mod(s) não reconhecido(s), convidados precisam instalar manualmente: %s",
+    "voxlink.relay.searching": "Procurando um jogador para retransmitir...",
+    "voxlink.relay.trying_batch": "Rodada %s: %s candidato(s)...",
+    "voxlink.relay.cancel": "Cancelar retransmissão, voltar ao direto",
+    "voxlink.relay.failed_no_candidates": "Retransmissão falhou: nenhum jogador disponível",
+    "voxlink.relay.failed_timeout": "Retransmissão falhou: candidatos não responderam",
+    "voxlink.relay.failed_host_no_response": "Retransmissão falhou: anfitrião não respondeu",
+    "voxlink.turn.use": "Usar retransmissão",
+    "voxlink.turn.connecting": "Conectando ao nó de retransmissão...",
+    "voxlink.turn.failed": "Retransmissão indisponível, tentando direto",
+    "voxlink.turn.switched_p2p": "Alternado para P2P direto",
+    "voxlink.turn.standby": "Um convidado estabeleceu enlace de retransmissão de reserva"
 }

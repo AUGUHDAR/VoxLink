@@ -78,6 +78,11 @@ public class ReliableUdpTransport implements AutoCloseable {
    private int dupAckCount = 0;
    private final DatagramSocket socket;
    private volatile InetSocketAddress remoteAddress;
+   // 平滑切换（双路径）：primary 永远是发送路径；secondary 为切换候选/宽限期旧路径。
+   // 初始 primary 与 this.socket 同引用（直连路径，无包封）。
+   private volatile UdpPath primaryPath;
+   private volatile UdpPath secondaryPath;
+   private volatile long switchGraceUntilMs = 0L;
    private volatile boolean remoteConfirmed = false;
    private volatile boolean running = true;
    private final AtomicBoolean connected = new AtomicBoolean(false);
@@ -128,8 +133,14 @@ public class ReliableUdpTransport implements AutoCloseable {
    private volatile long pendingRebindTime = 0L;
 
    public ReliableUdpTransport(DatagramSocket socket, InetSocketAddress remoteAddress) {
+      this(socket, remoteAddress, null);
+   }
+
+   /** TURN 路径构造器：primary 即为 TURN 包封路径（rudp 帧套 TURN DATA 头）。 */
+   public ReliableUdpTransport(DatagramSocket socket, InetSocketAddress remoteAddress, UdpPath.Codec primaryCodec) {
       this.socket = socket;
       this.remoteAddress = remoteAddress;
+      this.primaryPath = new UdpPath(socket, remoteAddress, primaryCodec);
 
       try {
          socket.setSoTimeout(100);
@@ -174,7 +185,7 @@ public class ReliableUdpTransport implements AutoCloseable {
             writeInt32(data, 3, 0);
             writeInt32(data, 7, 0);
             byte[] framed = this.finalizeFrame(data);
-            this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
+            this.sendOnPrimary(framed);
          } catch (IOException var2) {
          }
 
@@ -189,6 +200,11 @@ public class ReliableUdpTransport implements AutoCloseable {
 
    public boolean isConnected() {
       return this.connected.get() && this.running;
+   }
+
+   /** 热备线路保活用：对外暴露 keepalive 帧发送（不改变连接状态机）。 */
+   public void sendKeepaliveFrame() {
+      this.sendKeepalive();
    }
 
    public void setOnIceRestartRequested(Runnable r) {
@@ -211,7 +227,7 @@ public class ReliableUdpTransport implements AutoCloseable {
       System.arraycopy(payload, 0, data, 11, payload.length);
       byte[] framed = this.finalizeFrame(data);
       try {
-         this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
+         this.sendOnPrimary(framed);
       } catch (IOException e) {
          LOGGER.debug("[ReliableUdp] Voice send failed: {}", e.getMessage());
       }
@@ -257,7 +273,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          writeInt32(data, 3, 0);
          writeInt32(data, 7, 0);
          byte[] framed = this.finalizeFrame(data);
-         this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
+         this.sendOnPrimary(framed);
       } catch (IOException var2) {
       }
    }
@@ -271,27 +287,44 @@ public class ReliableUdpTransport implements AutoCloseable {
       }
    }
 
-   private void maybeRebindRemote(DatagramPacket packet) {
-      InetSocketAddress cur = this.remoteAddress;
+   /**
+    * 地址漂移重绑：仅对无包封的直连路径生效（TURN 路径对端固定为节点，不漂移）。
+    * 更新的是该路径自身的 remoteAddress；primary 路径的漂移同步到 this.remoteAddress 以兼容旧读取方。
+    */
+   private void maybeRebindRemote(DatagramPacket packet, UdpPath path) {
+      if (path.codec != null) {
+         return;
+      }
+
+      InetSocketAddress cur = path.remoteAddress;
       if (cur == null) {
          return;
       }
 
+      boolean isPrimary = path == this.primaryPath;
       boolean fromCurrent = packet.getPort() == cur.getPort() && packet.getAddress().equals(cur.getAddress());
       if (fromCurrent) {
-         this.remoteConfirmed = true;
+         if (isPrimary) {
+            this.remoteConfirmed = true;
+            this.lastCurrentPortRecvMs = System.currentTimeMillis();
+         }
+
          this.pendingRebindPort = -1;
-         this.lastCurrentPortRecvMs = System.currentTimeMillis();
       } else if (packet.getAddress().equals(cur.getAddress())) {
          long now = System.currentTimeMillis();
          // 1.0.0兼容(其remoteAddress为final无rebind): 当前端口仍存活(6s内收到过其有效包)时绝不rebind。
          // 连接初期对端其它打洞socket的噪声包会把发送目标切到即将关闭的死映射, ACK全进黑洞
          // (1.1.0-2实测: host重传1130次后70s断链)。仅当前端口真死(超时无包)才允许切换, 保留真漂移兜底。
-         boolean currentAlive = this.lastCurrentPortRecvMs > 0L && now - this.lastCurrentPortRecvMs < 6000L;
+         boolean currentAlive = isPrimary && this.lastCurrentPortRecvMs > 0L && now - this.lastCurrentPortRecvMs < 6000L;
          if (!currentAlive) {
             if (packet.getPort() == this.pendingRebindPort && now - this.pendingRebindTime < 5000L) {
-               this.remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
-               this.remoteConfirmed = true;
+               path.remoteAddress = new InetSocketAddress(cur.getAddress(), packet.getPort());
+               if (isPrimary) {
+                  this.remoteAddress = path.remoteAddress;
+                  this.remoteConfirmed = true;
+                  this.lastCurrentPortRecvMs = now;
+               }
+
                this.pendingRebindPort = -1;
                LOGGER.info("[ReliableUdp] Remote port drifted {} -> {}, rebind to actual peer socket (symmetric NAT)", cur.getPort(), packet.getPort());
             } else {
@@ -303,95 +336,37 @@ public class ReliableUdpTransport implements AutoCloseable {
    }
 
    private void receiveLoop() {
+      this.recvPathLoop(this.primaryPath);
+   }
+
+   /** 单路径接收循环：主/次路径各跑一份（平滑切换双收），包处理统一进 processDatagram。 */
+   private void recvPathLoop(UdpPath path) {
       byte[] buf = new byte[1454];
       DatagramPacket packet = new DatagramPacket(buf, buf.length);
+      boolean isPrimaryThread = path == this.primaryPath;
 
-      while (this.running) {
+      while (this.running && !path.socket.isClosed()) {
          try {
-            this.socket.receive(packet);
+            path.socket.receive(packet);
             LogUploadManager.onTransportActivity();
-            if (packet.getLength() >= 3 && buf[0] == MAGIC[0] && buf[1] == MAGIC[1]) {
-               // punchAuthV1：认证模式下所有帧必须携带有效截断 MAC，失败一律丢弃；
-               // 因此 maybeRebindRemote / 状态机只可能被认证源驱动
-               Mac rxMac = this.authMac;
-               if (rxMac != null) {
-                  boolean macOk = packet.getLength() >= 9 && PunchAuth.verifyTrailer4(rxMac, buf, packet.getLength());
-                  if (!macOk) {
-                     PunchAuth.logDrop("rudp-data");
-                     continue;
-                  }
-               }
-
-               byte type = buf[2];
-               if (type != 1 && type != 2) {
-                  if (packet.getLength() >= 11) {
-                     this.maybeRebindRemote(packet);
-                     int seq = readInt32(buf, 3);
-                     int ack = readInt32(buf, 7);
-                     switch (type) {
-                        case 3:
-                           this.handleData(seq, ack, buf, packet.getLength());
-                           break;
-                        case 4:
-                           this.handleAck(ack);
-                           this.lastRecvTime = System.currentTimeMillis();
-                           // M4: 纯 ACK 帧视为对端活性证据, 与 case 8 同样复位连续失败计数
-                           // 并在 writeState 降级时恢复 (不放 ACK 回包, 避免放大流量)
-                           this.consecutiveFailures = 0;
-                           if (this.writeState != 0) {
-                              this.writeState = 0;
-                              LOGGER.info("[ReliableUdp] writeState restored to WRITABLE (via ACK)");
-                           }
-
-                           break;
-                        case 5:
-                        case 6:
-                        default:
-                           break;
-                        case 7:
-                           this.handleDisconnect();
-                           break;
-                        case 8:
-                           this.lastRecvTime = System.currentTimeMillis();
-                           this.consecutiveFailures = 0;
-                           if (this.writeState != 0) {
-                              this.writeState = 0;
-                              LOGGER.info("[ReliableUdp] writeState restored to WRITABLE");
-                           }
-
-                           this.sendKeepalive();
-                           break;
-                        case 9:
-                           this.handleFecXor(readInt32(buf, 3), buf, packet.getLength());
-                           break;
-                        case 10:
-                           this.lastRecvTime = System.currentTimeMillis();
-                           LOGGER.info("[ReliableUdp] Received peer RESTART signal, trigger ICE Restart");
-                           this.triggerIceRestart();
-                           break;
-                        case 11:
-                           this.handleVoice(buf, packet.getLength());
-                           break;
-                     }
-                  }
-               } else {
-                  this.maybeRebindRemote(packet);
-                  this.lastRecvTime = System.currentTimeMillis();
-                  if (type == 1) {
-                     this.sendPunchAck(packet.getSocketAddress());
-                  }
-               }
-            }
+            this.processDatagram(buf, packet.getLength(), packet, path);
          } catch (SocketTimeoutException var11) {
          } catch (IOException e) {
-            if (this.socket.isClosed() || !this.running) {
-               this.running = false;
+            if (path.socket.isClosed() || !this.running) {
+               if (isPrimaryThread) {
+                  this.running = false;
+               }
                break;
             }
 
             LOGGER.warn("[ReliableUdp] Receive error: {}", e.getMessage());
          } catch (Throwable t) {
+            // 致命异常只允许主路径线程关闭整条连接；次路径线程退出即可（平滑切换候选失败不连累主路径）
             LOGGER.error("[ReliableUdp] receiveLoop died with exception: {}", t.getMessage(), t);
+            if (!isPrimaryThread) {
+               break;
+            }
+
             this.running = false;
             this.connected.set(false);
             synchronized (this.recvLock) {
@@ -407,6 +382,87 @@ public class ReliableUdpTransport implements AutoCloseable {
             } catch (Exception var8) {
             }
             break;
+         }
+      }
+   }
+
+   private void processDatagram(byte[] buf, int packetLen, DatagramPacket packet, UdpPath path) {
+      if (packetLen >= 3 && buf[0] == MAGIC[0] && buf[1] == MAGIC[1]) {
+         // punchAuthV1：认证模式下所有帧必须携带有效截断 MAC，失败一律丢弃；
+         // 因此 maybeRebindRemote / 状态机只可能被认证源驱动
+         Mac rxMac = this.authMac;
+         if (rxMac != null) {
+            boolean macOk = packetLen >= 9 && PunchAuth.verifyTrailer4(rxMac, buf, packetLen);
+            if (!macOk) {
+               PunchAuth.logDrop("rudp-data");
+               return;
+            }
+         }
+
+         byte type = buf[2];
+         if (type != 1 && type != 2) {
+            if (packetLen >= 11) {
+               this.maybeRebindRemote(packet, path);
+               int seq = readInt32(buf, 3);
+               int ack = readInt32(buf, 7);
+               switch (type) {
+                  case 3:
+                     this.handleData(seq, ack, buf, packetLen);
+                     path.rxCount++;
+                     path.lastRxMs = System.currentTimeMillis();
+                     break;
+                  case 4:
+                     this.handleAck(ack);
+                     this.lastRecvTime = System.currentTimeMillis();
+                     path.rxCount++;
+                     path.lastRxMs = System.currentTimeMillis();
+                     // M4: 纯 ACK 帧视为对端活性证据, 与 case 8 同样复位连续失败计数
+                     // 并在 writeState 降级时恢复 (不放 ACK 回包, 避免放大流量)
+                     this.consecutiveFailures = 0;
+                     if (this.writeState != 0) {
+                        this.writeState = 0;
+                        LOGGER.info("[ReliableUdp] writeState restored to WRITABLE (via ACK)");
+                     }
+
+                     break;
+                  case 5:
+                  case 6:
+                  default:
+                     break;
+                  case 7:
+                     this.handleDisconnect();
+                     break;
+                  case 8:
+                     this.lastRecvTime = System.currentTimeMillis();
+                     this.consecutiveFailures = 0;
+                     path.rxCount++;
+                     path.lastRxMs = System.currentTimeMillis();
+                     if (this.writeState != 0) {
+                        this.writeState = 0;
+                        LOGGER.info("[ReliableUdp] writeState restored to WRITABLE");
+                     }
+
+                     this.sendKeepalive();
+                     break;
+                  case 9:
+                     this.handleFecXor(readInt32(buf, 3), buf, packetLen);
+                     break;
+                  case 10:
+                     this.lastRecvTime = System.currentTimeMillis();
+                     LOGGER.info("[ReliableUdp] Received peer RESTART signal, trigger ICE Restart");
+                     this.triggerIceRestart();
+                     break;
+                  case 11:
+                     this.handleVoice(buf, packetLen);
+                     break;
+               }
+            }
+         } else {
+            this.maybeRebindRemote(packet, path);
+            this.lastRecvTime = System.currentTimeMillis();
+            if (type == 1) {
+               this.sendPunchAck(packet.getSocketAddress());
+            }
          }
       }
    }
@@ -730,7 +786,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          byte[] data;
          while ((data = this.outboundQueue.poll()) != null) {
             try {
-               this.socket.send(new DatagramPacket(data, data.length, this.remoteAddress));
+               this.sendOnPrimary(data);
             } catch (IOException e) {
                LOGGER.debug("[ReliableUdp] Outbound send failed: {}", e.getMessage());
                break;
@@ -779,7 +835,7 @@ public class ReliableUdpTransport implements AutoCloseable {
 
          System.arraycopy(xorPayload, 0, data, bodyOffset, xorPayload.length);
          byte[] framed = this.finalizeFrame(data);
-         this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
+         this.sendOnPrimary(framed);
       } catch (IOException e) {
          LOGGER.debug("[ReliableUdp] FEC send failed: {}", e.getMessage());
       }
@@ -794,7 +850,7 @@ public class ReliableUdpTransport implements AutoCloseable {
             writeInt32(data, 3, 0);
             writeInt32(data, 7, this.nextExpectedSeq.get());
             byte[] framed = this.finalizeFrame(data);
-            this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
+            this.sendOnPrimary(framed);
          } catch (IOException var2) {
          }
       }
@@ -958,6 +1014,111 @@ public class ReliableUdpTransport implements AutoCloseable {
       }
    }
 
+   // ================= 平滑切换（双路径，make-before-break） =================
+
+   /**
+    * 出包统一出口：走主路径；路径切换后 10s 宽限内新旧路径双发，切换瞬间在途包零丢失。
+    * 保留 throws IOException 声明以兼容既有调用点的 catch 结构。
+    */
+   private void sendOnPrimary(byte[] framed) throws IOException {
+      UdpPath p = this.primaryPath;
+      if (p == null) {
+         return;
+      }
+
+      try {
+         p.send(framed);
+      } catch (IOException e) {
+         LOGGER.debug("[ReliableUdp] send failed: {}", e.getMessage());
+      }
+
+      UdpPath s = this.secondaryPath;
+      if (s != null && s != p && System.currentTimeMillis() < this.switchGraceUntilMs) {
+         try {
+            s.send(framed);
+         } catch (IOException e) {
+         }
+      }
+   }
+
+   /**
+    * 挂载第二条路径作为平滑切换候选，即刻启动其接收线程（双收）。
+    * 次路径收包喂同一序号空间，重复包由 nextExpectedSeq 天然去重——因此对端无感知，
+    * 双方无需协商切换时机（各自独立 promote，永不脑裂）。
+    */
+   public synchronized void addSecondaryPath(DatagramSocket sock, InetSocketAddress addr, UdpPath.Codec codec) {
+      if (sock == null || addr == null || this.closed.get() || this.secondaryPath != null) {
+         return;
+      }
+
+      try {
+         sock.setSoTimeout(100);
+      } catch (Exception e) {
+      }
+
+      UdpPath path = new UdpPath(sock, addr, codec);
+      this.secondaryPath = path;
+      Thread t = new Thread(() -> this.recvPathLoop(path), "VoxLink-UdpRecv-Alt");
+      t.setDaemon(true);
+      t.start();
+      LOGGER.info("[ReliableUdp] secondary path added: {} (codec={})", addr, codec != null ? "turn" : "raw");
+   }
+
+   public synchronized UdpPath getSecondaryPath() {
+      return this.secondaryPath;
+   }
+
+   public UdpPath getPrimaryPath() {
+      return this.primaryPath;
+   }
+
+   /** 次路径累计有效收包数（切发前的健康观测指标）。 */
+   public long getSecondaryRxCount() {
+      UdpPath s = this.secondaryPath;
+      return s == null ? 0L : s.rxCount;
+   }
+
+   /** 次路径最近一次有效收包时刻（0=从未）。 */
+   public long getSecondaryLastRxMs() {
+      UdpPath s = this.secondaryPath;
+      return s == null ? 0L : s.lastRxMs;
+   }
+
+   /**
+    * 提升 secondary 为 primary（切发送路径），旧路径降级为宽限备胎（10s 双发后可 drop）。
+    * 只影响本端发送方向——对端继续双收直到它自己也完成切换。
+    */
+   public synchronized void promoteSecondaryPath() {
+      UdpPath sec = this.secondaryPath;
+      UdpPath pri = this.primaryPath;
+      if (sec == null || sec == pri) {
+         return;
+      }
+
+      this.primaryPath = sec;
+      this.secondaryPath = pri;
+      this.switchGraceUntilMs = System.currentTimeMillis() + 10000L;
+      LOGGER.info("[ReliableUdp] path promoted: {} -> {} (grace dual-send 10s)", pri.remoteAddress, sec.remoteAddress);
+   }
+
+   /** 宽限期结束收尾：关闭并移除非主路径的 socket（其接收线程随 socket 关闭退出）。 */
+   public synchronized void dropInactivePath() {
+      UdpPath sec = this.secondaryPath;
+      if (sec == null) {
+         return;
+      }
+
+      this.secondaryPath = null;
+      this.switchGraceUntilMs = 0L;
+
+      try {
+         sec.socket.close();
+      } catch (Exception e) {
+      }
+
+      LOGGER.info("[ReliableUdp] inactive path dropped");
+   }
+
    @Override
    public void close() {
       if (this.closed.compareAndSet(false, true)) {
@@ -971,7 +1132,7 @@ public class ReliableUdpTransport implements AutoCloseable {
             writeInt32(data, 3, 0);
             writeInt32(data, 7, 0);
             byte[] framed = this.finalizeFrame(data);
-            this.socket.send(new DatagramPacket(framed, framed.length, this.remoteAddress));
+            this.sendOnPrimary(framed);
          } catch (IOException var7) {
          }
 
@@ -997,10 +1158,19 @@ public class ReliableUdpTransport implements AutoCloseable {
          }
 
          try {
-            if (this.socket != null && !this.socket.isClosed()) {
-               this.socket.close();
+            if (this.primaryPath != null && this.primaryPath.socket != null && !this.primaryPath.socket.isClosed()) {
+               this.primaryPath.socket.close();
             }
          } catch (Exception var4) {
+         }
+
+         UdpPath sec = this.secondaryPath;
+         if (sec != null) {
+            try {
+               sec.socket.close();
+            } catch (Exception e) {
+            }
+            this.secondaryPath = null;
          }
       }
    }

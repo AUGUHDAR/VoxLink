@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<launchConfiguration type="org.eclipse.jdt.launching.localJavaApplication">
+  <stringAttribute key="org.eclipse.jdt.launching.PROJECT_ATTR" value="voxlink-forge-1.21.11-1.21.11"/>
+  <stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="net.minecraftforge.launcher.Main"/>
+  <stringAttribute key="org.eclipse.jdt.launching.VM_ARGUMENTS" value="-Djava.net.preferIPv6Addresses=system -Dforge.enableGameTest=true -Dforge.enabledGameTestNamespaces=voxlink"/>
+  <stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="--main net.minecraftforge.bootstrap.ForgeBootstrap --cache D:\.gradle\caches\minecraftforge\forgegradle\slime-launcher\cache\net\minecraftforge\forge\1.21.11-61.1.14 --metadata D:\桌面\voxlink\forge\1.21.11\.gradle\mavenizer\repo\net\minecraftforge\forge\1.21.11-61.1.14\forge-1.21.11-61.1.14-metadata.zip --to-srg D:\.gradle\caches\minecraftforge\forgegradle\mavenizer\caches\mcp\de\oceanlabs\mcp\mcp_config\1.21.11-20251223.124241\data\mapings\official\1.21.11\official-1.21.11-obf.tsrg.gz --to-obf D:\.gradle\caches\minecraftforge\forgegradle\mavenizer\caches\mcp\de\oceanlabs\mcp\mcp_config\1.21.11-20251223.124241\data\mapings\official\1.21.11\official-1.21.11-srg.tsrg.gz -- --gameDir . --launchTarget forge_userdev_client --version MOD_DEV --assetIndex {asset_index} --assetsDir {assets_root}"/>
+  <stringAttribute key="org.eclipse.jdt.launching.WORKING_DIRECTORY" value="D:\桌面\voxlink\forge\1.21.11\run"/>
+  <mapAttribute key="org.eclipse.debug.core.environmentVariables">
+    <mapEntry key="MCP_MAPPINGS" value="official_1.21.11"/>
+  </mapAttribute>
+  <listAttribute key="org.eclipse.jdt.launching.CLASSPATH">
+    <listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&lt;runtimeClasspathEntry projectName=&quot;voxlink-forge-1.21.11-1.21.11&quot; type=&quot;1&quot; path=&quot;5&quot; /&gt;"/>
+    <listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&lt;runtimeClasspathEntry containerPath=&quot;org.eclipse.buildship.core.gradleclasspathcontainer&quot; javaProject=&quot;voxlink-forge-1.21.11-1.21.11&quot; type=&quot;4&quot; path=&quot;5&quot; /&gt;"/>
+    <listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&lt;runtimeClasspathEntry externalArchive=&quot;D:\.gradle\caches\modules-2\files-2.1\net.minecraftforge\slime-launcher\0.2.2\c3f4d4b8306cf40d8a0a86ecdf816be088b6d6bf\slime-launcher-0.2.2.jar&quot; type=&quot;2&quot; path=&quot;5&quot; /&gt;"/>
+    <listEntry value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&lt;runtimeClasspathEntry containerPath=&quot;org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-21&quot; type=&quot;4&quot; path=&quot;5&quot; /&gt;"/>
+  </listAttribute>
+  <booleanAttribute key="org.eclipse.jdt.launching.DEFAULT_CLASSPATH" value="false"/>
+</launchConfiguration>

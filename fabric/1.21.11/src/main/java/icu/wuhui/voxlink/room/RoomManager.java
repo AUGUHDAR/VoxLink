@@ -101,6 +101,10 @@ public class RoomManager {
    private volatile boolean opPolicyAppliedGuestOp = false;
    private final Set<String> opPolicyAppliedPlayers = ConcurrentHashMap.newKeySet();
 
+   public SignalingClient getSignalingClient() {
+      return this.signalingClient;
+   }
+
    public RoomManager(SignalingClient signalingClient, TopologyClient topologyClient) {
       this.signalingClient = signalingClient;
       this.topologyClient = topologyClient;
@@ -1796,6 +1800,18 @@ public class RoomManager {
             case "relay_ready":
                this.connectionManager.handleRelayReady(from, data);
                break;
+            case "turn_alloc":
+               this.connectionManager.handleTurnAlloc(from, data);
+               break;
+            case "turn_ready":
+               this.connectionManager.handleTurnReady(from, data);
+               break;
+            case "turn_bg_punch":
+               this.connectionManager.handleTurnBgPunch(from, data);
+               break;
+            case "turn_stby":
+               this.connectionManager.handleTurnStby(from, data);
+               break;
             case "cancel_connection":
                this.connectionManager.handleCancelConnection(from, data);
                break;
@@ -1966,6 +1982,7 @@ public class RoomManager {
 
    private void handleDisconnect(String from, JsonObject data) {
       VoxLinkMod.LOGGER.info("Peer disconnected: {}", from);
+      this.connectionManager.cleanupTurnQuietly();
       RoomManager.RoomState state = this.currentRoom.get();
       if (state != null && state != PENDING && state.roomInfo.isHost() && from != null) {
          this.connectionManager.clearHostPunchingState();

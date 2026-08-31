@@ -107,7 +107,8 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             this.lyUploadLog = uploadLog;
             this.lyConfig = config;
             this.lyDownloadRow = downloadRow;
-            this.lyTopStart = Math.max(headerFloor, ideal);
+            // 头部文字与第一行按钮至少留 4px 间距，避免极端矮屏时头部文字与按钮粘连
+            this.lyTopStart = Math.max(headerFloor + 4, ideal);
             this.lyWebsite = this.lyTopStart + sectionH - L_ROW;
             if (decor) {
                this.lySloganText = uploadLog - 14;
@@ -474,28 +475,28 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       }
    }
 
-   public boolean mouseClicked(MouseButtonEvent event, boolean processed) {
-      if (processed) {
-         return super.mouseClicked(event, processed);
-      }
-
-      double mx = event.x();
-      double my = event.y();
-
-      for (int i = 0; i < this.codeClickAreas.size(); i++) {
-         int[] a = this.codeClickAreas.get(i);
-         if (mx >= a[0] && mx < a[0] + a[2] && my >= a[1] && my < a[1] + a[3]) {
-            String text = this.codeClickTexts.get(i);
-            Minecraft.getInstance().keyboardHandler.setClipboard(text);
-            if (Minecraft.getInstance().player != null) {
-               Minecraft.getInstance().player.sendSystemMessage(Component.translatable("voxlink.chat.copied_to_clipboard", new Object[]{text}));
-            }
-
-            return true;
-         }
-      }
-
-      return super.mouseClicked(event, processed);
+   public boolean mouseClicked(MouseButtonEvent event, boolean processed) {
+      if (processed) {
+         return super.mouseClicked(event, processed);
+      }
+
+      double mx = event.x();
+      double my = event.y();
+
+      for (int i = 0; i < this.codeClickAreas.size(); i++) {
+         int[] a = this.codeClickAreas.get(i);
+         if (mx >= a[0] && mx < a[0] + a[2] && my >= a[1] && my < a[1] + a[3]) {
+            String text = this.codeClickTexts.get(i);
+            Minecraft.getInstance().keyboardHandler.setClipboard(text);
+            if (Minecraft.getInstance().player != null) {
+               Minecraft.getInstance().player.sendSystemMessage(Component.translatable("voxlink.chat.copied_to_clipboard", new Object[]{text}));
+            }
+
+            return true;
+         }
+      }
+
+      return super.mouseClicked(event, processed);
    }
    public void onClose() {
       Minecraft.getInstance().gui.setScreen(this.parent);

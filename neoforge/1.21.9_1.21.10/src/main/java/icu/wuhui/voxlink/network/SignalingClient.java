@@ -52,6 +52,10 @@ public class SignalingClient {
       Map.entry("poll_topology", "/topology/poll"),
       Map.entry("relay_register", "/relay/register"),
       Map.entry("relay_candidates", "/relay/candidates"),
+      Map.entry("relay_status", "/relay/status"),
+      Map.entry("relay_list", "/relay/list"),
+      Map.entry("relay_allocate", "/relay/allocate"),
+      Map.entry("relay_release", "/relay/release"),
       Map.entry("publish_mod_manifest", "/room/mods/publish"),
       Map.entry("get_room_mods", "/room/mods")
    );
@@ -409,6 +413,28 @@ public class SignalingClient {
 
    public CompletableFuture<SignalingClient.ApiResponse> getRelayCandidates() {
       return this.get(this.buildGetPath("relay_candidates", null));
+   }
+
+   /** TURN 总控：中继功能开关（打洞 20s 后客户端据此决定是否显示"使用中继"）。 */
+   public CompletableFuture<SignalingClient.ApiResponse> getRelayStatus() {
+      return this.getOnce(this.buildGetPath("relay_status", null), 3000L);
+   }
+
+   /** TURN 总控：可用节点列表（服务端已按在线+余量过滤、负载升序、硬上限截断）。 */
+   public CompletableFuture<SignalingClient.ApiResponse> getRelayList() {
+      return this.getOnce(this.buildGetPath("relay_list", null), 3000L);
+   }
+
+   /** TURN 总控：申请中继分配（房间 token 鉴权，返回 sessionId+双角色票据）。 */
+   public CompletableFuture<SignalingClient.ApiResponse> relayAllocate(JsonObject body) {
+      body.addProperty("action", "relay_allocate");
+      return this.postOnce(this.buildPath("relay_allocate"), body, 5000L);
+   }
+
+   /** TURN 总控：释放中继会话（平滑切换成功后归还容量）。 */
+   public CompletableFuture<SignalingClient.ApiResponse> relayRelease(JsonObject body) {
+      body.addProperty("action", "relay_release");
+      return this.postOnce(this.buildPath("relay_release"), body, 5000L);
    }
 
    public CompletableFuture<SignalingClient.ApiResponse> getCategories() {

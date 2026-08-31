@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "Настройки сохранены, имя комнаты на проверке...",
     "voxlink.pause.room_management": "Управление комнатой",
     "voxlink.terracotta.delete_binary": "Удалить Terracotta",
+    "voxlink.terracotta.delete_binary_confirm": "Нажмите ещё раз для подтверждения удаления",
     "voxlink.terracotta.binary_deleted": "Terracotta удалена",
     "voxlink.update.check": "Проверка обновлений VoxLink",
     "voxlink.update.available": "Доступна новая версия %s, пора обновляться awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "Скрыто комнат с паролем: %s — используйте «Войти по коду»",
     "voxlink.modsync.disabled_hint": "%s установлен, но отключён (xxx.jar.disabled) — при необходимости включите вручную",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] Проверка обязательных модов не пройдена, входим напрямую. Проверьте, что ваши моды совпадают с модом хоста.",
-    "voxlink.modsync.download_cancelled": "Загрузка отменена."
+    "voxlink.modsync.download_cancelled": "Загрузка отменена.",
+    "voxlink.modsync.loader_mismatch": "Загрузчик хоста %s против вашего (%s): моды не запустятся, установите подходящий загрузчик",
+    "voxlink.modsync.host_published": "Опубликовано %d обязательных мод(ов), гости могут скачать.",
+    "voxlink.modsync.host_unknown": "%d мод(ов) не распознано, гости должны установить вручную: %s",
+    "voxlink.relay.searching": "Ищу игрока для ретрансляции...",
+    "voxlink.relay.trying_batch": "Раунд %s: %s кандидат(ов)...",
+    "voxlink.relay.cancel": "Отменить ретрансляцию, вернуться к прямому",
+    "voxlink.relay.failed_no_candidates": "Ретрансляция не удалась: нет игроков",
+    "voxlink.relay.failed_timeout": "Ретрансляция не удалась: кандидаты не ответили",
+    "voxlink.relay.failed_host_no_response": "Ретрансляция не удалась: хост не ответил",
+    "voxlink.turn.use": "Исп. ретранслятор",
+    "voxlink.turn.connecting": "Подключение к узлу ретрансляции...",
+    "voxlink.turn.failed": "Ретранслятор недоступен, прямое соединение",
+    "voxlink.turn.switched_p2p": "Плавно переключено на P2P",
+    "voxlink.turn.standby": "Гость создал резервный маршрут через игрока"
 }

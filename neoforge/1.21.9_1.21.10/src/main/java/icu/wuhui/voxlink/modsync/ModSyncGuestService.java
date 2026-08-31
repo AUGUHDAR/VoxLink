@@ -134,6 +134,15 @@ public final class ModSyncGuestService {
                   Component.translatable("voxlink.modsync.mc_mismatch",
                      new Object[]{hostMc, ModSyncEnv.GAME_VERSION}).getString());
             }
+            // 加载器检测: 房主与房客的 loader 不同时, 清单里的 mod 文件本端无法直接运行, 仅作参考
+            String hostLoader = manifest.has("loader") && manifest.get("loader").isJsonPrimitive()
+               ? manifest.get("loader").getAsString() : "";
+            if (!hostLoader.isEmpty() && !hostLoader.equalsIgnoreCase(ModSyncEnv.LOADER)) {
+               ModSyncLog.warn("Loader mismatch: host={} guest={}", new Object[]{hostLoader, ModSyncEnv.LOADER});
+               diff.unresolvable.add(0,
+                  Component.translatable("voxlink.modsync.loader_mismatch",
+                     new Object[]{hostLoader, ModSyncEnv.LOADER}).getString());
+            }
 
             ModSyncLog.info(
                "guest diff: downloadable={} versionDiff={} unresolvable={} titles={}",
@@ -269,7 +278,12 @@ public final class ModSyncGuestService {
                m.add("mods", resp.data.has("mods") && resp.data.get("mods").isJsonArray()
                   ? resp.data.getAsJsonArray("mods")
                   : new com.google.gson.JsonArray());
-               if (m.getAsJsonArray("mods").size() == 0) {
+               m.add("unknownMods", resp.data.has("unknownMods") && resp.data.get("unknownMods").isJsonArray()
+                  ? resp.data.getAsJsonArray("unknownMods")
+                  : new com.google.gson.JsonArray());
+               // mods 为空时不再一律静默: 若 unknownMods 非空, 仍返回 m 让 computeDiff 展示给玩家,
+               // 面板会提示"无法识别/需手动安装"的 mod 列表; 两者都为空才是真正的空清单, 才 return null。
+               if (m.getAsJsonArray("mods").size() == 0 && m.getAsJsonArray("unknownMods").size() == 0) {
                   return null;
                }
 

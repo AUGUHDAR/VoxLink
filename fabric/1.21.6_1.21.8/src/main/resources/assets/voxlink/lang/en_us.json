@@ -224,6 +224,7 @@
     "voxlink.terracotta.status.running": "Running",
     "voxlink.terracotta.status.exception": "Error",
     "voxlink.terracotta.delete_binary": "Delete Terracotta",
+    "voxlink.terracotta.delete_binary_confirm": "Click again to confirm deletion",
     "voxlink.terracotta.redownload": "Re-download Terracotta",
     "voxlink.terracotta.download_failed": ":( Download failed, click to retry",
     "voxlink.terracotta.unsupported_platform": ":( Current platform doesn't support Terracotta download.",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "%s password-protected room(s) hidden — use \"Join by Code\" to enter",
     "voxlink.modsync.disabled_hint": "%s is installed but disabled (xxx.jar.disabled) — enable it manually if needed",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] Required-mods check failed, joining directly. Please verify your mods match the host.",
-    "voxlink.modsync.download_cancelled": "Download cancelled."
+    "voxlink.modsync.download_cancelled": "Download cancelled.",
+    "voxlink.modsync.loader_mismatch": "Host loader %s vs yours (%s): mods won't run, install the matching loader",
+    "voxlink.modsync.host_published": "Published %d required mod(s) for guests to download.",
+    "voxlink.modsync.host_unknown": "%d mod(s) unrecognised, guests must install manually: %s",
+    "voxlink.relay.searching": "Looking for a player to relay through...",
+    "voxlink.relay.trying_batch": "Round %s: %s candidate player(s)...",
+    "voxlink.relay.cancel": "Cancel relay, back to direct",
+    "voxlink.relay.failed_no_candidates": "Relay failed: no relay player available",
+    "voxlink.relay.failed_timeout": "Relay failed: candidate players didn't respond",
+    "voxlink.relay.failed_host_no_response": "Relay failed: host didn't respond",
+    "voxlink.turn.use": "Use Relay",
+    "voxlink.turn.connecting": "Connecting to relay node...",
+    "voxlink.turn.failed": "Relay unavailable, retrying direct",
+    "voxlink.turn.switched_p2p": "Smoothly switched to P2P direct",
+    "voxlink.turn.standby": "A guest established a player-relay standby link"
 }

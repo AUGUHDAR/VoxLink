@@ -317,7 +317,8 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
 
                String msg = cause.getMessage();
                VoxLinkMod.LOGGER.error("Room update failed: {}", msg, cause);
-               String finalMsg = msg != null ? msg : Component.translatable("voxlink.error.unknown").getString();
+               // 兜底文案,避免直接外露底层异常原文;LOG 已记录,排查用日志即可
+               String finalMsg = Component.translatable("voxlink.error.unknown").getString();
                mc.execute(() -> {
                   this.saving = false;
                   this.saveButton.active = true;
@@ -349,7 +350,9 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
 
          int formHeight = 230;
          int y = Math.max(24, (this.height - formHeight) / 2);
-         this.drawCenteredString(graphics, clipped, centerX, y + 186, this.statusColor);
+         // 矮屏时夹住状态行 Y，避免状态跑到按钮之上或屏幕外
+         int statusY = Math.min(y + 186, this.height - 12);
+         this.drawCenteredString(graphics, clipped, centerX, statusY, this.statusColor);
       }
    }
 

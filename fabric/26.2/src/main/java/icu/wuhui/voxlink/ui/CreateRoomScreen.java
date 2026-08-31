@@ -661,7 +661,13 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
       } else if (msg.contains("QUEUED")) {
          return Component.translatable("voxlink.create_room.error.server_busy").getString();
       } else {
-         return msg.contains("PARSE_ERROR") ? Component.translatable("voxlink.error.server_response_abnormal").getString() : msg;
+         // 未匹配分类:不直接外露底层原文,统一兜底为 voxlink.error.unknown;原文写入日志便于排查
+         if (msg.contains("PARSE_ERROR")) {
+            return Component.translatable("voxlink.error.server_response_abnormal").getString();
+         } else {
+            VoxLinkMod.LOGGER.warn("[CreateRoom] simplifyError unmatched: {}", msg);
+            return Component.translatable("voxlink.error.unknown").getString();
+         }
       }
    }
 

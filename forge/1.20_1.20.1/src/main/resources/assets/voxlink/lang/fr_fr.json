@@ -239,6 +239,7 @@
     "voxlink.manage_room.name_pending_review": "Paramètres enregistrés, nom du salon en cours de vérification...",
     "voxlink.pause.room_management": "Gestion du salon",
     "voxlink.terracotta.delete_binary": "Supprimer Terracotta",
+    "voxlink.terracotta.delete_binary_confirm": "Cliquez à nouveau pour confirmer la suppression",
     "voxlink.terracotta.binary_deleted": "Terracotta supprimé",
     "voxlink.update.check": "Vérif. mises à jour VoxLink",
     "voxlink.update.available": "Nouvelle version %s disponible, mise à jour awa",
@@ -324,5 +325,19 @@
     "voxlink.browser.password_rooms_hidden": "%s salle(s) protégée(s) par mot de passe masquée(s) — utilise « Rejoindre par code »",
     "voxlink.modsync.disabled_hint": "%s est installé mais désactivé (xxx.jar.disabled) — active-le manuellement si besoin",
     "voxlink.modsync.gate_failed_warn": "[VoxLink] Vérification des mods requis échouée, entrée directe. Vérifie que tes mods correspondent à ceux de l'hôte.",
-    "voxlink.modsync.download_cancelled": "Téléchargement annulé."
+    "voxlink.modsync.download_cancelled": "Téléchargement annulé.",
+    "voxlink.modsync.loader_mismatch": "Loader de l'hôte %s vs. le tien (%s) : les mods ne tourneront pas, installe le loader correspondant",
+    "voxlink.modsync.host_published": "%d mod(s) requis publiés, les invités peuvent les télécharger.",
+    "voxlink.modsync.host_unknown": "%d mod(s) non reconnu(s), les invités doivent les installer manuellement : %s",
+    "voxlink.relay.searching": "Recherche d'un joueur pour relayer...",
+    "voxlink.relay.trying_batch": "Tour %s : %s joueur(s) candidat(s)...",
+    "voxlink.relay.cancel": "Annuler le relais, revenir au direct",
+    "voxlink.relay.failed_no_candidates": "Relais échoué : aucun joueur disponible",
+    "voxlink.relay.failed_timeout": "Relais échoué : les candidats n'ont pas répondu",
+    "voxlink.relay.failed_host_no_response": "Relais échoué : l'hôte n'a pas répondu",
+    "voxlink.turn.use": "Utiliser relais",
+    "voxlink.turn.connecting": "Connexion au nœud relais...",
+    "voxlink.turn.failed": "Relais indisponible, direct en cours",
+    "voxlink.turn.switched_p2p": "Bascule fluide vers P2P",
+    "voxlink.turn.standby": "Un invité a établi une liaison de relais de secours"
 }

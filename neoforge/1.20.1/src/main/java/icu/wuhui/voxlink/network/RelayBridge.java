@@ -1,6 +1,8 @@
 package icu.wuhui.voxlink.network;
 
+import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.room.ConnectionManager;
+import icu.wuhui.voxlink.room.RoomInfo;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -52,15 +54,19 @@ public class RelayBridge {
          } else {
             session.startForwarding();
             LOGGER.info("[Relay] Relay started: {} (A={}, B={})", new Object[]{relayKey, peerAId, peerBId});
-            // 网络线程不可直调 GUI：包一层主线程调度
-            Minecraft mc = Minecraft.getInstance();
-            if (mc != null) {
-               mc.execute(() -> {
-                  Minecraft m = Minecraft.getInstance();
-                  if (m.player != null) {
-                     m.player.sendSystemMessage(Component.translatable("voxlink.relay.started"));
-                  }
-               });
+            // 仅房主向玩家展示 relay.started 提示；防未来误投给房客
+            RoomInfo currentRoom = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
+            if (currentRoom != null && currentRoom.isHost()) {
+               // 网络线程不可直调 GUI：包一层主线程调度
+               Minecraft mc = Minecraft.getInstance();
+               if (mc != null) {
+                  mc.execute(() -> {
+                     Minecraft m = Minecraft.getInstance();
+                     if (m.player != null) {
+                        m.player.sendSystemMessage(Component.translatable("voxlink.relay.started"));
+                     }
+                  });
+               }
             }
 
             if (this.running.compareAndSet(false, true)) {

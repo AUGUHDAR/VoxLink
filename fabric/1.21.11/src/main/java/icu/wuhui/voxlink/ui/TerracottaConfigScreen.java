@@ -23,6 +23,9 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    private String statusMessage = "";
    private int statusColor = VoxLinkColors.WHITE;
    private boolean lastPausedState = false;
+   /** 两次确认删除陶瓦：第一次点击仅置位并不删，3 秒内再点才真正执行。 */
+   private boolean deleteConfirmArmed = false;
+   private long deleteConfirmArmTime = 0L;
    private static final int BTN_W = 200;
    private static final int BTN_H = 20;
    private static final int GAP = 4;
@@ -31,6 +34,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    private static final int TITLE_Y = 16;
    private static final int STATUS_LABEL_Y_OFFSET = 14;
    private static final int STATUS_MSG_Y_OFFSET = 6;
+   private static final long DELETE_CONFIRM_WINDOW_MS = 3000L;
 
    public TerracottaConfigScreen(Screen parent) {
       super(Component.translatable("voxlink.terracotta.config"));
@@ -85,7 +89,7 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       // 下载中禁止切换，避免误以为本次下载/连接会立即应用新设置
       parallelToggle.active = !isDownloading && TerracottaManager.isBinaryReady();
       this.addRenderableWidget(parallelToggle);
-      this.deleteBinaryBtn = Button.builder(Component.translatable("voxlink.terracotta.delete_binary"), button -> this.deleteBinary())
+      this.deleteBinaryBtn = Button.builder(this.buildDeleteBinaryLabel(), button -> this.onDeleteBinaryClicked())
          .bounds(centerX - 100, y + 96, 200, 20)
          .build();
       this.deleteBinaryBtn.active = !isDownloading && TerracottaManager.isBinaryReady();
@@ -173,6 +177,17 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
    }
 
    public void tick() {
+      // 二次确认超时(3 秒)后自动撤销"武装"状态,把按钮文案还原成"删除陶瓦"
+      if (this.deleteConfirmArmed
+         && this.deleteConfirmArmTime > 0L
+         && System.currentTimeMillis() - this.deleteConfirmArmTime > DELETE_CONFIRM_WINDOW_MS) {
+         this.deleteConfirmArmed = false;
+         this.deleteConfirmArmTime = 0L;
+         if (this.deleteBinaryBtn != null) {
+            this.deleteBinaryBtn.setMessage(this.buildDeleteBinaryLabel());
+         }
+      }
+
       if (TerracottaManager.isDownloading() && this.redownloadBtn != null) {
          TerracottaBinary.DownloadProgress p = TerracottaManager.getLastProgress();
          if (TerracottaManager.isDownloadPaused()) {
@@ -227,6 +242,28 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       }
    }
 
+   private Component buildDeleteBinaryLabel() {
+      return this.deleteConfirmArmed
+         ? Component.translatable("voxlink.terracotta.delete_binary_confirm")
+         : Component.translatable("voxlink.terracotta.delete_binary");
+   }
+
+   /** 两段式确认：第一次点击仅把按钮文案换成"再次点击确认删除"；3 秒内再点才执行删除。 */
+   private void onDeleteBinaryClicked() {
+      long now = System.currentTimeMillis();
+      if (this.deleteConfirmArmed && now - this.deleteConfirmArmTime <= DELETE_CONFIRM_WINDOW_MS) {
+         this.deleteConfirmArmed = false;
+         this.deleteConfirmArmTime = 0L;
+         this.deleteBinary();
+      } else {
+         this.deleteConfirmArmed = true;
+         this.deleteConfirmArmTime = now;
+         if (this.deleteBinaryBtn != null) {
+            this.deleteBinaryBtn.setMessage(this.buildDeleteBinaryLabel());
+         }
+      }
+   }
+
    private void deleteBinary() {
       try {
          TerracottaManager.shutdown();
@@ -234,10 +271,35 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
          VoxLinkMod.LOGGER.warn("Failed to stop Terracotta before delete: {}", e.getMessage());
       }
 
+      // 删除范围收窄:仅删陶瓦二进制与解压/下载产物子文件,不再删整个缓存根目录,
+      // 以免误清掉 .voxlink/terracotta/ 下其他无关文件/目录
       Path cacheDir = TerracottaBinary.getCacheDir();
+      Path binaryPath = TerracottaBinary.getBinaryPath();
 
       try {
-         deleteRecursively(cacheDir);
+         // 1. 陶瓦可执行/库本体
+         if (binaryPath != null) {
+            Files.deleteIfExists(binaryPath);
+         }
+
+         // 2. 同目录下的 .downloading 半成品压缩包与临时解压子目录
+         if (Files.isDirectory(cacheDir)) {
+            try (Stream<Path> stream = Files.list(cacheDir)) {
+               for (Path p : stream.toList()) {
+                  String name = p.getFileName().toString();
+                  if (name.endsWith(".downloading") || name.startsWith("extract-")) {
+                     deleteRecursively(p);
+                  }
+               }
+            }
+         }
+
+         // 3. .download_pending 标记也一并清理,下次走完整流程而非续传
+         try {
+            Files.deleteIfExists(cacheDir.resolve(".download_pending"));
+         } catch (IOException ignored) {
+         }
+
          this.statusMessage = Component.translatable("voxlink.terracotta.binary_deleted").getString();
          this.statusColor = VoxLinkColors.SUCCESS;
       } catch (IOException e) {
@@ -249,6 +311,12 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
       Minecraft mc = Minecraft.getInstance();
       mc.execute(() -> {
          if (mc.screen == this) {
+            // 删完后重置一次确认态,避免下次进入屏幕时仍处于武装中
+            this.deleteConfirmArmed = false;
+            this.deleteConfirmArmTime = 0L;
+            if (this.deleteBinaryBtn != null) {
+               this.deleteBinaryBtn.setMessage(this.buildDeleteBinaryLabel());
+            }
             this.init();
          }
       });

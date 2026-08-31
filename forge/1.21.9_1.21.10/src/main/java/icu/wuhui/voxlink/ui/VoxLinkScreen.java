@@ -107,7 +107,8 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             this.lyUploadLog = uploadLog;
             this.lyConfig = config;
             this.lyDownloadRow = downloadRow;
-            this.lyTopStart = Math.max(headerFloor, ideal);
+            // 头部文字与第一行按钮至少留 4px 间距，避免极端矮屏时头部文字与按钮粘连
+            this.lyTopStart = Math.max(headerFloor + 4, ideal);
             this.lyWebsite = this.lyTopStart + sectionH - L_ROW;
             if (decor) {
                this.lySloganText = uploadLog - 14;
