@@ -15,7 +15,6 @@ Terracotta is developed by [burningtnt](https://github.com/burningtnt/Terracotta
 
 > Still in Beta. Sometimes connects in seconds, sometimes just... doesn't. Connection success depends heavily on both sides' network: same ISP home broadband usually works fine, campus WiFi, office network, phone hotspot not so much. Both sides on symmetric NAT? Lower success rate. If it fails, both restart the game to refresh NAT ports. We're improving the punch strategies every update. You can also enable Terracotta in the mod to boost success rate.
 
-Huge thanks to XIOPNM, he joined over 200 remote tests himself. We ran more than 300 total.
 
 ## Fallback & Relay
 
@@ -75,8 +74,6 @@ Website: `https://p2p.wuhui.icu/`
 陶瓦由 [burningtnt](https://github.com/burningtnt/Terracotta) 开发，遵循 AGPL-3.0 协议，特此致谢！其二进制仅从官方 release 下载并做 SHA-256 校验。注意：若启动器（如 HMCL）已自带并运行陶瓦，模组会以副实例接入同一进程，请勿同时在两边操作陶瓦；安卓启动器（FCL 等）上模组内陶瓦不可用，请使用启动器自带的联机功能。
 
 > 仍为 Beta 版本。有时几秒就能连上，有时就是连不上。连接成功率与双方网络环境密切相关：同运营商家用宽带通常没问题，校园网、企业网、手机热点成功率较低。双方都是对称 NAT？成功率会更低。连接失败时建议双方重启游戏刷新 NAT 端口。我们每个版本都在优化打洞策略。你也可以在模组内启用陶瓦来提升成功率。
-
-特别感谢 XIOPNM，他独自参与了 200 多次异地测试，我们总共跑了 300 多次。
 
 ## 后备与中继
 
