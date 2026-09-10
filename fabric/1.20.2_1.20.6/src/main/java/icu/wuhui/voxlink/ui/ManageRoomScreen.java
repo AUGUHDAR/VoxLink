@@ -322,6 +322,10 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                mc.execute(() -> {
                   this.saving = false;
                   this.saveButton.active = true;
+                  // 保存失败必须恢复字段可编辑，否则玩家被永久锁在只读态只能重开屏
+                  this.nameField.setEditable(true);
+                  this.passwordField.setEditable(true);
+                  this.maxPlayersField.setEditable(true);
                   this.statusMessage = ChatFormatting.RED.toString() + finalMsg;
                   this.statusColor = VoxLinkColors.ERROR;
                   if (mc.player != null) {

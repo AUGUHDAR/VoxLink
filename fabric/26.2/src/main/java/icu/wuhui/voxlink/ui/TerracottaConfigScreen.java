@@ -386,6 +386,12 @@ public class TerracottaConfigScreen extends VoxLinkScreenBase {
 
    }
 
+   public void removed() {
+      // ESC/切屏撤销"再次点击确认删除"武装态：防止下次进屏按钮仍停留在确认文案
+      this.deleteConfirmArmed = false;
+      this.deleteConfirmArmTime = 0L;
+   }
+
    public void onClose() {
       Minecraft.getInstance().gui.setScreen(this.parent);
    }

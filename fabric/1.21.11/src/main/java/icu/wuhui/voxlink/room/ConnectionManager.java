@@ -137,6 +137,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 
 
@@ -292,6 +293,9 @@ public class ConnectionManager {
 
    private volatile long connectionStartTimeMs;
 
+   /** UI"使用中继"按钮计时基准：打洞首周期只设一次，持续重试轮/ICE重启不重置；0=本会话尚未开始打洞。 */
+   private volatile long punchUiStartMs;
+
    private volatile int connectionTimeoutSec;
 
    private volatile StunProbe.ProbeResult stunProbeResult;
@@ -371,6 +375,9 @@ public class ConnectionManager {
    private final AddressBlacklist addressBlacklist = AddressBlacklist.get();
    // punchAuthV1：当前连接周期的打洞认证密钥（applyPunchTemplate 注入每个 puncher）
    private volatile byte[] activePunchAuthKey;
+   // punch_info 信号去重(防打洞重试风暴撞服务器限流): 上次已发送的 mapped 地址与时间
+   private volatile String lastPunchInfoPayload = "";
+   private volatile long lastPunchInfoSendMs = 0L;
 
    private volatile ConnectionManager.UdpSocketArray cachedUdpArray;
 
@@ -912,7 +919,27 @@ public class ConnectionManager {
 
 
 
-   private volatile long lastProfileSwitchMs = 0L;
+   /**
+    * STUN 服务器列表按本会话探测阶段的实测可达结果重排（可达者前置）。
+    * 静态表前几位是境内服务器（miwifi/hitv），海外网络不可达时 quad/兜底探测
+    * 每轮先白烧 4×800ms（实测 FJXMKG 每轮拖慢约 10s）；用探测赢家前置可即答。
+    */
+
+   private List<String> stunUrlsProbedFirst() {
+      List<String> urls = new ArrayList<>(StunDetector.getAllStunUrls());
+      StunProbe.ProbeResult probe = this.stunProbeResult;
+      if (probe != null && probe.reachableStunUrls != null) {
+         for (String u : probe.reachableStunUrls) {
+            urls.remove(u);
+            urls.add(0, u);
+         }
+      }
+      return urls;
+   }
+
+
+
+private volatile long lastProfileSwitchMs = 0L;
 
 
 
@@ -1337,6 +1364,13 @@ public class ConnectionManager {
 
       }
 
+      // TURN 进行中/已建立时不再提供玩家中继入口：两条中继并行会互相干扰下方状态行与打洞调度
+      if (this.turnInProgress || this.turnSession != null) {
+
+         return false;
+
+      }
+
 
 
       if (this.isLegacyPeer()) {
@@ -1434,7 +1468,11 @@ public class ConnectionManager {
 
    private final java.util.concurrent.atomic.AtomicInteger relayBatchIndex = new java.util.concurrent.atomic.AtomicInteger(0);
 
+
+
    private final java.util.concurrent.atomic.AtomicInteger relayBatchSize = new java.util.concurrent.atomic.AtomicInteger(0);
+
+
 
    /** 阶段 Component：searching / trying_batch / null。render() 会读它显示在下方槽位。 */
 
@@ -2100,7 +2138,7 @@ public class ConnectionManager {
 
                try {
 
-                  List<String> allStun = StunDetector.getAllStunUrls();
+                  List<String> allStun = this.stunUrlsProbedFirst();
 
                   VoxLinkMod.LOGGER.info("[RoomManager] Host NAT: {} — 8 concurrent STUN ({} servers)", fNatType != null ? fNatType : "null", allStun.size());
 
@@ -2154,7 +2192,7 @@ public class ConnectionManager {
 
 
 
-                        StunProbe.PublicMappedAddress[] race = StunProbe.discoverMappedAddressRace(bp.getSocket(), StunDetector.getAllStunUrls(), 1);
+                        StunProbe.PublicMappedAddress[] race = StunProbe.discoverMappedAddressRace(bp.getSocket(), this.stunUrlsProbedFirst(), 1);
 
                         StunProbe.PublicMappedAddress addr = race[0];
 
@@ -2338,7 +2376,7 @@ public class ConnectionManager {
 
                      if (fHostPuncher != null && fHostPuncher.getSocket() != null) {
 
-                        List<Integer> samples = StunProbe.samplePortsSequential(fHostPuncher.getSocket(), StunDetector.getAllStunUrls(), 10, 100);
+                        List<Integer> samples = StunProbe.samplePortsSequential(fHostPuncher.getSocket(), this.stunUrlsProbedFirst(), 10, 100);
 
                         if (samples.size() >= 5) {
 
@@ -4112,7 +4150,7 @@ public class ConnectionManager {
 
                            StunProbe.PublicMappedAddress[] dual = StunProbe.discoverMappedAddressDual(
 
-                              fp.getSocket(), StunDetector.getAllStunUrls().get(0), StunDetector.getAllStunUrls().get(1)
+                              fp.getSocket(), this.stunUrlsProbedFirst().get(0), this.stunUrlsProbedFirst().get(1)
 
                            );
 
@@ -4713,6 +4751,8 @@ public class ConnectionManager {
 
                         boolean anyAlive = false;
 
+                        boolean anyPunchable = false;
+
                         List<CompletableFuture<?>> roundFutures = new ArrayList<>();
 
 
@@ -4727,15 +4767,28 @@ public class ConnectionManager {
 
                            }
 
-
-
                            anyAlive = true;
+
+                           // 热循环修复①: 目标已拉黑的 puncher 本轮不再发起——拉黑目标会立即快速失败,
+                           // 旧逻辑 300ms 后再来一轮, 单会话可空转数千次刷爆日志并白烧 CPU
+                           if (mp.isCurrentTargetBlacklisted()) {
+
+                              continue;
+
+                           }
+
+                           anyPunchable = true;
 
                            int idx = i;
 
+                           // 热循环修复②: 用 puncher 当前端口(updateTarget 漂移纠偏后的值)而非入组时冻结的
+                           // fJoinerMappedPort——punchWithPortPrediction 入口会把 remotePort 覆盖回传入值,
+                           // 冻结旧端口等于每轮都击穿端口漂移纠偏
+                           int roundTargetPort = mp.getRemotePort() > 0 ? mp.getRemotePort() : fJoinerMappedPort;
+
                            roundFutures.add(
 
-                              mp.punchWithPortPrediction(fJoinerMappedIp, fJoinerMappedPort, hostPortRange)
+                              mp.punchWithPortPrediction(fJoinerMappedIp, roundTargetPort, hostPortRange)
 
                                  .thenAccept(
 
@@ -4857,9 +4910,29 @@ public class ConnectionManager {
 
 
 
-                        if (!anyAlive) {
+                        if (!anyPunchable) {
 
-                           break;
+                           if (!anyAlive) {
+
+                              break;
+
+                           }
+
+                           // socket 还活着但目标全被拉黑: 降频轮询等 updateTarget 端口漂移纠偏
+                           // (新端口不在黑名单即可恢复真打洞), 不再每 300ms 空转刷日志
+                           try {
+
+                              Thread.sleep(2000L);
+
+                           } catch (InterruptedException ie) {
+
+                              Thread.currentThread().interrupt();
+
+                              break;
+
+                           }
+
+                           continue;
 
                         }
 
@@ -5197,7 +5270,7 @@ public class ConnectionManager {
 
                            try {
 
-                              m1 = fPuncher.discoverMappedAddress(List.of(StunDetector.getAllStunUrls().get(0)));
+                              m1 = fPuncher.discoverMappedAddress(List.of(this.stunUrlsProbedFirst().get(0)));
 
                               VoxLinkMod.LOGGER
 
@@ -5209,7 +5282,7 @@ public class ConnectionManager {
 
                                  );
 
-                              m2 = fPuncher.discoverMappedAddress(List.of(StunDetector.getAllStunUrls().get(1)));
+                              m2 = fPuncher.discoverMappedAddress(List.of(this.stunUrlsProbedFirst().get(1)));
 
                               VoxLinkMod.LOGGER
 
@@ -6534,6 +6607,12 @@ public class ConnectionManager {
 
                this.connectionStartTimeMs = System.currentTimeMillis();
 
+               if (this.punchUiStartMs == 0L) {
+
+                  this.punchUiStartMs = this.connectionStartTimeMs;
+
+               }
+
                int timeoutSec = this.punchProfile().connectionTimeoutSec;
 
                boolean joinerSym = this.stunProbeResult != null && this.stunProbeResult.natType.isSymmetric();
@@ -7408,7 +7487,7 @@ public class ConnectionManager {
 
          int joinerMappedPortDelta = 0;
 
-         List<String> quadStun = StunDetector.getAllStunUrls();
+         List<String> quadStun = this.stunUrlsProbedFirst();
 
          StunProbe.PublicMappedAddress[] quadResult = StunProbe.discoverMappedAddressQuad(
 
@@ -7475,7 +7554,7 @@ public class ConnectionManager {
 
          if (myMappedAddr == null) {
 
-            myMappedAddr = puncher.discoverMappedAddress(StunDetector.getAllStunUrls());
+            myMappedAddr = puncher.discoverMappedAddress(this.stunUrlsProbedFirst());
 
          }
 
@@ -7495,7 +7574,7 @@ public class ConnectionManager {
 
                tmp.setSoTimeout(1000);
 
-               myMappedAddr = StunProbe.discoverMappedAddress(tmp, StunDetector.getAllStunUrls());
+               myMappedAddr = StunProbe.discoverMappedAddress(tmp, this.stunUrlsProbedFirst());
 
             } catch (Exception e) {
 
@@ -7611,7 +7690,20 @@ public class ConnectionManager {
 
 
 
-            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "punch_info", punchData, "host");
+            // punch_info 信号去重: 打洞重试轮次里 mapped 地址未变时不再重发——
+            // 实测多socket×每cycle重发会撞服务器限流(RATE_LIMITED), 且连带把关键
+            // 的 relay/turn 注册一起限流死(日志实证: 打洞失败的同时 relay/register 连续被拒)
+            String punchInfoPayload = myMappedAddr.ip() + ":" + myMappedAddr.port();
+            long nowMs = System.currentTimeMillis();
+            boolean skipDuplicatePunchInfo = punchInfoPayload.equals(this.lastPunchInfoPayload)
+               && nowMs - this.lastPunchInfoSendMs < 3000L;
+            if (skipDuplicatePunchInfo) {
+               VoxLinkMod.LOGGER.debug("[Connection] punch_info unchanged ({}), skip duplicate send", punchInfoPayload);
+            } else {
+               this.lastPunchInfoPayload = punchInfoPayload;
+               this.lastPunchInfoSendMs = nowMs;
+               this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "punch_info", punchData, "host");
+            }
 
             if (this.connectionWon.get()) {
 
@@ -8233,9 +8325,7 @@ public class ConnectionManager {
 
                                           } catch (Exception e) {
 
-                                             VoxLinkMod.LOGGER.error("[Connection] Create UDP transport failed: {}", e.getMessage());
-
-
+                                             VoxLinkMod.LOGGER.error("[Connection] Create UDP transport failed: {}", e.getClass().getSimpleName() + ":" + e.getMessage());
 
                                              try {
 
@@ -8246,6 +8336,12 @@ public class ConnectionManager {
                                              }
 
 
+
+                                             // 僵尸连接修复：punch 成功回调已 CAS 置 connectionWon=true，showConnectFailed
+                                             // 的 !connectionWon 守卫会整体跳过→玩家卡"已连接"但无传输（MCZHTH 实锤：
+                                             // transport 建立失败后 1 分钟只剩 transport silent）。回滚已赢标记再走
+                                             // 标准失败路径（持续重试或终态），不留僵尸态
+                                             this.connectionWon.set(false);
 
                                              this.showConnectFailed(state, "voxlink.connection.transport_failed");
 
@@ -8671,9 +8767,7 @@ public class ConnectionManager {
 
                                           } catch (Exception e) {
 
-                                             VoxLinkMod.LOGGER.error("[Connection] Create UDP transport failed: {}", e.getMessage());
-
-
+                                             VoxLinkMod.LOGGER.error("[Connection] Create UDP transport failed: {}", e.getClass().getSimpleName() + ":" + e.getMessage());
 
                                              try {
 
@@ -8684,6 +8778,12 @@ public class ConnectionManager {
                                              }
 
 
+
+                                             // 僵尸连接修复：punch 成功回调已 CAS 置 connectionWon=true，showConnectFailed
+                                             // 的 !connectionWon 守卫会整体跳过→玩家卡"已连接"但无传输（MCZHTH 实锤：
+                                             // transport 建立失败后 1 分钟只剩 transport silent）。回滚已赢标记再走
+                                             // 标准失败路径（持续重试或终态），不留僵尸态
+                                             this.connectionWon.set(false);
 
                                              this.showConnectFailed(state, "voxlink.connection.transport_failed");
 
@@ -9197,7 +9297,7 @@ public class ConnectionManager {
 
          .info("[BirthdayPunch] Parallel STUN {} sockets (target={}:{}, easySym={})", new Object[]{socketCount, fHostMappedIp, fHostMappedPort, isEasySym});
 
-      CompletableFuture.<ConnectionManager.UdpSocketArray>supplyAsync(() -> this.getOrCreateUdpArray(socketCount, isEasySym, StunDetector.getAllStunUrls()))
+      CompletableFuture.<ConnectionManager.UdpSocketArray>supplyAsync(() -> this.getOrCreateUdpArray(socketCount, isEasySym, this.stunUrlsProbedFirst()))
 
          .thenAccept(
 
@@ -9401,7 +9501,7 @@ public class ConnectionManager {
 
       this.activeHolePunchers.put("joiner_reverse", puncher);
 
-      List<String> quadStun = StunDetector.getAllStunUrls();
+      List<String> quadStun = this.stunUrlsProbedFirst();
 
       StunProbe.PublicMappedAddress[] quadResult = StunProbe.discoverMappedAddressQuad(
 
@@ -9453,7 +9553,7 @@ public class ConnectionManager {
 
       if (myMappedAddr == null) {
 
-         myMappedAddr = puncher.discoverMappedAddress(StunDetector.getAllStunUrls());
+         myMappedAddr = puncher.discoverMappedAddress(this.stunUrlsProbedFirst());
 
       }
 
@@ -10476,7 +10576,6 @@ public class ConnectionManager {
             this.currentRelayPeer.set("joiner_requesting");
 
             // 房客发起 relay_request 后下方槽位: "正在寻找适合中继的玩家…"
-
             this.relayProgressText = Component.translatable("voxlink.relay.searching");
 
             JsonObject data = new JsonObject();
@@ -10557,9 +10656,6 @@ public class ConnectionManager {
 
             }
             // 阶段文本: 筛选到候选, 即将并行尝试 → "正在寻找适合中继的玩家…" 闪一瞬, 然后立刻被 trying_batch 覆盖。
-            this.relayProgressText = Component.translatable("voxlink.relay.searching");
-            // 阶段文本: 筛选到候选, 即将并行尝试 → "正在寻找适合中继的玩家…" 闪一瞬, 然后立刻被 trying_batch 覆盖。
-
             this.relayProgressText = Component.translatable("voxlink.relay.searching");
 
 
@@ -10644,14 +10740,13 @@ public class ConnectionManager {
 
 
 
-this.currentRelayPeer.set(relayCandidates.get(0).clientId);
+               this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
                int batchNo = this.relayBatchIndex.incrementAndGet();
 
                this.relayBatchSize.set(parallelN);
 
                // 阶段 Component: 房主分支每次开始新批次时显示「第 N 轮：M 个候选…」, 失败/成功时清空。
-
                this.relayProgressText = Component.translatable("voxlink.relay.trying_batch",
 
                   new Object[]{Integer.toString(batchNo), Integer.toString(parallelN)});
@@ -10776,15 +10871,10 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
                // 信令线程不可直调 GUI：包一层主线程调度
 
                // 节流: 多房客同时发 relay_request 时, 房主 toast 不再每请求一次弹一次, 改为 10s 一次。
-
                long nowMs = System.currentTimeMillis();
-
                boolean shouldShowNotice = (nowMs - this.lastHostNoticeAt) >= 10_000L;
-
                if (shouldShowNotice) {
-
                   this.lastHostNoticeAt = nowMs;
-
                }
 
                if (mc != null && shouldShowNotice) {
@@ -10855,7 +10945,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
                this.signalingClient
 
-                  .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), requestingClientId);
+                  .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
 
             }
 
@@ -10889,7 +10979,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
                   this.signalingClient
 
-                     .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), requestingClientId);
+                     .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
 
                   return;
 
@@ -10959,7 +11049,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
                   this.signalingClient
 
-                     .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), requestingClientId);
+                     .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
 
                } else {
 
@@ -10977,7 +11067,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
             this.signalingClient
 
-               .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), requestingClientId);
+               .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
 
             return null;
 
@@ -11066,7 +11156,6 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
             this.connectionWon.set(true);
 
             // 成功路径补: 不重置 manualRelayInProgress 会让 AttemptingJoinScreen 误闪 3s 失败文字。
-
             this.manualRelayInProgress = false;
 
             this.relayProgressText = null;
@@ -11417,7 +11506,6 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
          this.clearRelayTracking();
 
          // 成功路径补: 与 handleRelayNotify 同步, 避免 AttemptingJoinScreen 误闪失败文字。
-
          this.manualRelayInProgress = false;
 
          this.relayProgressText = null;
@@ -11455,9 +11543,40 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
       return this.turnP2pGivenUp;
    }
 
+   /** from 是否为本端当前 TURN 对端（guest 侧恒为 "host"，host 侧为 joiner clientId）。多房客时防误杀他人会话。 */
+   public boolean isTurnPeer(String from) {
+      return from != null && this.turnSession != null && from.equals(this.turnPeerId);
+   }
+
+   /**
+    * 加入屏下方状态行的 TURN 段：null=无 TURN 状态（行槽让给玩家中继/Terracotta）。
+    * 与打洞状态行（上方）分离，互不覆盖——中继有没有开始/到哪步/失败与否在此行全程可见。
+    */
+   public Component getTurnStatusText() {
+      if (this.turnInProgress) {
+         return Component.translatable("voxlink.turn.connecting");
+      } else if (this.turnSession == null) {
+         return null;
+      } else {
+         ReliableUdpTransport t = this.turnTransport;
+         if (t != null && t.isConnected() && !this.turnSwitchedToP2p) {
+            return Component.translatable("voxlink.relay.connected_via");
+         } else {
+            return this.turnSwitchedToP2p
+               ? Component.translatable("voxlink.turn.switched_p2p")
+               : Component.translatable("voxlink.turn.connecting");
+         }
+      }
+   }
+
    /** 打洞开始时刻（UI 的 20 秒"使用中继"按钮计时基准）。 */
    public long getConnectionStartTimeMs() {
       return this.connectionStartTimeMs;
+   }
+
+   /** UI 按钮专用打洞计时基准：会话首周期设一次、轮次/重启不复位；0=尚未开始（防 0/旧值误判成已超 20s）。 */
+   public long getPunchUiStartMs() {
+      return this.punchUiStartMs;
    }
 
    /**
@@ -11465,7 +11584,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
     * 发 turn_alloc 交 host 票据 → 等 host turn_ready。全程异步，失败走 teardownTurn。
     */
    public void triggerTurnRelay() {
-      if (this.turnInProgress || this.turnSession != null) {
+      if (this.turnInProgress || this.turnSession != null || this.manualRelayInProgress) {
          return;
       }
 
@@ -11491,10 +11610,17 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
             }
 
             List<TurnRelayClient.ProbeResult> probed = TurnRelayClient.probeNodes(nodes).join();
-            if (probed.isEmpty() || probed.get(0).rttMs < 0) {
+            if (probed.isEmpty()) {
                throw new IllegalStateException("UNREACHABLE");
             }
 
+            // 探测全超时不直接判死（弱网丢包下探测包全丢很常见）：照常 allocate+bind，
+            // bind 自带重试，网络缓过来即可成功；真不通会以 BIND_FAILED_* 落到同一失败分支
+            if (probed.get(0).rttMs < 0) {
+               VoxLinkMod.LOGGER.warn("[Turn] all {} node probes timed out, attempting bind anyway (lossy network?)", probed.size());
+            } else {
+               VoxLinkMod.LOGGER.info("[Turn] guest picked node {} rtt={}ms (nodes={})", probed.get(0).node.id, probed.get(0).rttMs, nodes.size());
+            }
             return probed.get(0).node;
          })
          .thenCompose(node -> TurnRelayClient.allocate(sc, state.roomInfo.getCode(), state.roomInfo.getClientId(), state.roomInfo.getToken(), node.id))
@@ -11527,10 +11653,19 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
             this.turnSession = session;
             this.startTurnKeepalive(session);
+            VoxLinkMod.LOGGER.info("[Turn] guest session {} bound via {}:{}, sending turn_alloc", alloc.sessionIdHex.substring(0, 8), alloc.host, alloc.port);
             UdpPath.Codec codec = new TurnRelayClient.TurnPathCodec(sid, TurnRelayClient.ROLE_GUEST, TurnRelayClient.ROLE_HOST);
             ReliableUdpTransport transport = new ReliableUdpTransport(session.socket, session.endpoint(), codec);
-            if (this.activePunchAuthKey != null) {
-               transport.setAuthKey(this.activePunchAuthKey);
+            // TURN 路径密钥现场重派生, 不沿用打洞阶段的 activePunchAuthKey:
+            // 打洞阶段密钥可能陈旧(重进房/join_request 被 defer), 沿用会与 host 互丢
+            // (实证 RBW6HX 1.1.4: TURN path up 后双方互丢 rudp-data, 30s 内链路死亡)
+            byte[] turnAuthKey = this.derivePunchAuthKey(state, null, true);
+            if (turnAuthKey != null) {
+               transport.setAuthKey(turnAuthKey);
+               this.activePunchAuthKey = turnAuthKey;
+               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (guest side)");
+            } else {
+               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (host caps missing)");
             }
 
             this.turnTransport = transport;
@@ -11543,6 +11678,9 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
             data.addProperty("ticket", alloc.hostTicket);
             data.addProperty("expire", alloc.expireSec);
             data.addProperty("clientId", state.roomInfo.getClientId());
+            // 显式声明本端 punchAuthV1 能力: host 侧 TURN 建链时据此直接派生密钥,
+            // 不再依赖 host 本地 peer 表(join_request 被 defer 时表项可能缺失/陈旧)
+            data.addProperty("punchAuth", ProtocolNegotiator.selfSupports(ProtocolNegotiator.CAP_PUNCH_AUTH_V1));
             return sc
                .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "turn_alloc", data, "host")
                .thenApply(r -> session);
@@ -11556,6 +11694,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
                // host 数据面就绪回执有 20s 兜底（handleTurnReady 到达即 start+桥接）
                this.scheduler.schedule(() -> {
                   if (this.turnTransport != null && !this.turnTransport.isConnected() && !this.turnSwitchedToP2p) {
+                     VoxLinkMod.LOGGER.warn("[Turn] guest got no turn_ready in 20s (host dead / signal lost), teardown");
                      this.teardownTurn(state, "voxlink.turn.failed");
                   }
                }, 20L, TimeUnit.SECONDS);
@@ -11600,7 +11739,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
          new TurnRelayClient.TurnSession(sessionIdHex, sid, host, port, TurnRelayClient.ROLE_HOST, ticket, expire);
       int code = TurnRelayClient.bind(session);
       if (code != TurnRelayClient.BIND_OK) {
-         VoxLinkMod.LOGGER.warn("[Turn] host bind failed code={}", code);
+         VoxLinkMod.LOGGER.warn("[Turn] host bind failed code={} sid={} endpoint={}:{}", code, sessionIdHex.substring(0, 8), host, port);
          session.unbind();
          return;
       }
@@ -11610,8 +11749,26 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
       this.startTurnKeepalive(session);
       UdpPath.Codec codec = new TurnRelayClient.TurnPathCodec(sid, TurnRelayClient.ROLE_HOST, TurnRelayClient.ROLE_GUEST);
       ReliableUdpTransport transport = new ReliableUdpTransport(session.socket, session.endpoint(), codec);
-      if (this.activePunchAuthKey != null) {
-         transport.setAuthKey(this.activePunchAuthKey);
+      // TURN 路径密钥现场重派生, 不沿用 activePunchAuthKey:
+      // ①打洞阶段密钥可能陈旧(重进房/join_request 被 defer 未重派);
+      // ②turn_alloc 携带 joiner 当前权威 clientId 与显式 punchAuth 声明,
+      //   据此派生与 guest 侧对称一致(实证互丢 bug: RBW6HX 1.1.4)
+      String turnPeerId = data.has("clientId") ? data.get("clientId").getAsString() : null;
+      byte[] turnAuthKey;
+      if (data.has("punchAuth") && !data.get("punchAuth").isJsonNull() && data.get("punchAuth").getAsBoolean()) {
+         turnAuthKey = turnPeerId != null && !turnPeerId.isEmpty() && state.roomInfo.getCode() != null
+            ? PunchAuth.deriveDirectKey(state.roomInfo.getCode(), turnPeerId)
+            : null;
+      } else {
+         // 旧版 guest 未声明: 回退 peer 表判定(保持旧行为)
+         turnAuthKey = this.derivePunchAuthKey(state, turnPeerId, false);
+      }
+      if (turnAuthKey != null) {
+         transport.setAuthKey(turnAuthKey);
+         this.activePunchAuthKey = turnAuthKey;
+         VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (host side, peer {})", turnPeerId);
+      } else {
+         VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (peer {} legacy/caps missing)", turnPeerId);
       }
 
       this.turnTransport = transport;
@@ -11624,7 +11781,8 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
       this.signalingClient
          .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_ready", ready, from)
          .exceptionally(e -> {
-            VoxLinkMod.LOGGER.debug("[Turn] turn_ready send failed: {}", e.getMessage());
+            // turn_ready 发不出去 guest 必然 20s 兜底 teardown：必须 WARN 可见（曾因白名单缺失被 debug 吞掉）
+            VoxLinkMod.LOGGER.warn("[Turn] turn_ready send failed: {}", e.getMessage());
             return null;
          });
       this.startTurnBgMonitor(state);
@@ -11983,6 +12141,8 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
    /** TURN 失败/超时清理：unbind + release + 状态复位；TURN 断开时热备转正（程序化重连自愈）。 */
    private void teardownTurn(RoomManager.RoomState state, String failKey) {
+      VoxLinkMod.LOGGER
+         .info("[Turn] teardown: session={}, carrying={}, failKey={}", this.turnSession != null, this.turnTransport != null && this.turnTransport.isConnected(), failKey);
       this.turnInProgress = false;
       this.cancelTurnBgMonitor();
       this.cancelTurnSwitchWatch();
@@ -12104,6 +12264,9 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
          this.turnInProgress = false;
          this.turnPeerId = null;
+         // 会话终结即复位"本周期放弃 P2P 升级"标记（"退出重进重置"的实际落点）
+         this.turnP2pGivenUp = false;
+         this.turnSwitchedToP2p = false;
       } catch (Exception e) {
       }
    }
@@ -12463,6 +12626,9 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
          this.connectionWon.set(false);
 
          ConnectionState.transitionTo(ConnectionState.FAILED, "所有连接方式失败");
+
+         // 日志上传加强: 到达真终态即触发失败样本快传(5s), 不再硬等 90s 定时器
+         LogUploadManager.onTerminalFailure();
 
          if (this.connectionTimeoutFuture != null) {
 
@@ -13334,6 +13500,9 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
       this.resetContinuousRetryState();
 
+      // 新连接会话：清 UI 按钮计时基准，防止上一会话残留值让"使用中继"按钮立即闪现
+      this.punchUiStartMs = 0L;
+
       this.connectionWon.set(false);
 
       this.connectionWon.set(false);
@@ -13830,6 +13999,16 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
             LogUploadManager.onDisconnected();
 
+            // 断的是 TURN 桥：立即释放 TURN 会话。否则 turnSession 残留会静默吞掉
+            // 该房客后续重试的 turn_alloc，中继在本房间内永久失效
+            if (this.turnSession != null && clientId.equals(this.turnPeerId)) {
+
+               VoxLinkMod.LOGGER.info("[Turn] host bridge down for {}, releasing TURN session", clientId);
+
+               this.teardownTurn(state, null);
+
+            }
+
             this.connectionWon.set(false);
             this.connectionCycleActive.set(false);
             this.hostPunchContexts.remove(clientId);
@@ -14207,8 +14386,8 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
       VoxLinkMod.LOGGER.warn("[ConnState] Host MC version incompatible: host={} you={} / 与房主版本不匹配", hostVer, myVer);
 
-      String mismatchMsg = "[VoxLink] 与房主 Minecraft 版本不匹配 (host=" + hostVer + ", you=" + myVer
-         + ")，请换用相同版本 / MC version mismatch with host, please use the same MC version";
+      MutableComponent mismatchMsg = Component.translatable("voxlink.chat.error_prefix")
+         .append(Component.translatable("voxlink.connection.mc_mismatch", hostVer, myVer));
 
       Minecraft mc = Minecraft.getInstance();
 
@@ -14220,7 +14399,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
             if (mc1 != null && mc1.player != null) {
 
-               mc1.player.displayClientMessage(Component.literal(mismatchMsg).withStyle(ChatFormatting.RED), false);
+               mc1.player.displayClientMessage(mismatchMsg.withStyle(ChatFormatting.RED), false);
 
             }
 
@@ -14232,7 +14411,7 @@ this.currentRelayPeer.set(relayCandidates.get(0).clientId);
 
       if (state != null && state != RoomManager.PENDING && !state.roomInfo.isHost()) {
 
-         state.roomInfo.setConnectionMode(Component.literal("MC 版本不匹配 / MC version mismatch"), true);
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.mc_mismatch_mode"), true);
 
          ConnectionState.transitionTo(ConnectionState.FAILED, "与房主MC版本不兼容 host=" + hostVer);
 

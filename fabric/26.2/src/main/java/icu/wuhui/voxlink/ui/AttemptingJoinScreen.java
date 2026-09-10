@@ -51,11 +51,13 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       "voxlink.tip.knowledge_terracotta",
       "voxlink.tip.knowledge_network",
       "voxlink.tip.knowledge_fallback",
-      "voxlink.tip.turn_future",
+      "voxlink.tip.credit_bilibili",
       "voxlink.tip.edge_terracotta",
       "voxlink.tip.reverse_relay",
       "voxlink.tip.auto_collapse_create",
-      "voxlink.tip.disable_join_check"
+      "voxlink.tip.disable_join_check",
+      "voxlink.tip.app",
+      "voxlink.tip.kamu_launcher"
    };
    private final List<String> tipQueue = new ArrayList<>();
    private String currentTipKey = "";
@@ -84,6 +86,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private volatile boolean relayButtonVisible = false;
    private volatile long relayFailedMsgTime = 0L;
    private volatile boolean lastManualRelayInProgress = false;
+   /** TURN 由忙转闲且未连接成功：显示 3 秒"中继不可用"瞬态提示（与玩家中继失败提示同机制）。 */
+   private volatile long turnFailedMsgTime = 0L;
+   private volatile boolean lastTurnBusy = false;
    /** TURN"使用中继"按钮当前显隐（monitor 线程计算，init 消费）。 */
    private volatile boolean turnButtonVisible = false;
    /** 服务端 TURN 开关缓存（打洞 ≥20s 时查询一次，30s 刷新）。 */
@@ -116,7 +121,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          this.active = false;
          room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
          this.voxlinkFinal = true;
-         this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
+         // 经中继建立时文案必须是"已通过中继连接"，不能谎报 P2P 已建立
+         this.voxlinkStatusText = Component.translatable(room.isUsingRelay() ? "voxlink.relay.connected_via" : "voxlink.dual.p2p_established").getString();
          this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
       } else if (room != null && room.isConnectionFailed()) {
          this.active = false;
@@ -175,10 +181,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       }
 
       // TURN"使用中继"：右上角小按钮。显隐由 monitor 线程按 20s 计时 + 服务端开关计算。
+      // y=26 避开标题（标题文字在 y=15..24，y=4 会与标题同一高度带重叠）
       if (!bridgeReady && this.active && this.turnButtonVisible) {
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.turn.use"), button -> this.onTurnButtonClicked())
-               .bounds(this.width - 104, 4, 100, 20)
+               .bounds(this.width - 104, 26, 100, 20)
                .build()
          );
       }
@@ -226,17 +233,25 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    private void onRelayButtonClicked() {
       if (VoxLinkMod.getConfig().isRelayEnabled()) {
+         // 先触发再重建：triggerManualRelay 同步置 manualRelayInProgress=true，
+         // init() 里 canShowRelayButton() 立即为 false，按钮不会被重新加回（原先有 500ms 幽灵按钮窗口）
+         VoxLinkMod.getRoomManager().getConnectionManager().triggerManualRelay();
          this.relayButtonVisible = false;
          this.lastManualRelayInProgress = true;
+         // 即时反馈：不等 monitor + 2s 抑制窗口，点击当场切换状态文本
+         this.voxlinkStatusText = Component.translatable("voxlink.relay.trying").getString();
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
+         this.voxlinkStatusLastUpdate = System.currentTimeMillis();
          this.clearOurWidgets();
          this.init();
-         VoxLinkMod.getRoomManager().getConnectionManager().triggerManualRelay();
       }
    }
 
    /** "取消中继"按钮: 调用 ConnectionManager.cancelManualRelay(), 然后刷新布局回到直连态。 */
    private void onCancelRelayClicked() {
       VoxLinkMod.getRoomManager().getConnectionManager().cancelManualRelay();
+      // 手动取消不是失败：同步复位沿检测，否则下一个 monitor tick 会弹出"中继失败"误报
+      this.lastManualRelayInProgress = false;
       // 让 AttemptingJoinScreen 重新走 init: manualRelayInProgress=false 后, canShowRelayButton 会重新判定。
       this.clearOurWidgets();
       this.init();
@@ -245,6 +260,10 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    /** TURN"使用中继"：交由 ConnectionManager 完成测延迟/选节点/BIND 全流程；置 inProgress 后按钮自动消失。 */
    private void onTurnButtonClicked() {
       VoxLinkMod.getRoomManager().getConnectionManager().triggerTurnRelay();
+      // 即时反馈：不等 500ms monitor + 2s 抑制窗口，点击当场切换状态文本
+      this.voxlinkStatusText = Component.translatable("voxlink.turn.connecting").getString();
+      this.voxlinkStatusColor = VoxLinkColors.WARNING;
+      this.voxlinkStatusLastUpdate = System.currentTimeMillis();
       this.clearOurWidgets();
       this.init();
    }
@@ -372,6 +391,10 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    public void onRoomLost() {
       this.stopConnectionMonitor();
       this.active = false;
+      // 房间丢失必须给终态文案：否则状态行残留旧的打洞进度（如"UDP打洞…"），玩家不知道发生了什么
+      this.voxlinkFinal = true;
+      this.voxlinkStatusText = Component.translatable("voxlink.room_lost").getString();
+      this.voxlinkStatusColor = VoxLinkColors.ERROR;
       // 房间丢失时需要重建按钮布局：onFailed 路径也是同样的处理。
       // onRoomLost 可能被非主线程调用，必须走 mc.execute 并加 mc.gui.screen() 守卫避免误重建已关闭的界面。
       Minecraft mc = Minecraft.getInstance();
@@ -492,7 +515,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                         mc.execute(() -> {
                            if (mc.gui.screen() == AttemptingJoinScreen.this) {
                               AttemptingJoinScreen.this.voxlinkFinal = true;
-                              AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.dual.p2p_established").getString();
+                              AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable(
+                                 roomInfo.isUsingRelay() ? "voxlink.relay.connected_via" : "voxlink.dual.p2p_established"
+                              ).getString();
                               AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
                               AttemptingJoinScreen.this.active = false;
                            }
@@ -596,9 +621,12 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                   }
 
                   // TURN"使用中继"显隐：打洞 ≥20s 先查一次服务端开关（30s 缓存），开启且未在使用/未放弃才显示。
+                  // 计时用 punchUiStartMs（会话首周期只设一次）：connectionStartTimeMs 在首周期前为 0/残留旧值
+                  // 会让 now-0 天文数字被误判成"已超20s"→按钮刚进屏就闪现又消失；持续重试每轮还会复位再消失20s。
                   // TURN 中途失败 teardown 后 turnInProgress/turnActive 复位，本条件自然重新成立（按钮重现）。
                   icu.wuhui.voxlink.room.ConnectionManager cmTurn = VoxLinkMod.getRoomManager().getConnectionManager();
-                  long punchMs = System.currentTimeMillis() - cmTurn.getConnectionStartTimeMs();
+                  long punchStartMs = cmTurn.getPunchUiStartMs();
+                  long punchMs = punchStartMs > 0L ? System.currentTimeMillis() - punchStartMs : 0L;
                   if (punchMs >= 20000L
                      && (!AttemptingJoinScreen.this.turnStatusChecked
                         || System.currentTimeMillis() - AttemptingJoinScreen.this.turnStatusCheckedAt > 30000L)) {
@@ -634,6 +662,13 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                   }
 
                   AttemptingJoinScreen.this.lastManualRelayInProgress = currentRelayInProgress;
+                  // TURN 失败瞬态：进行中→空闲且未连上 = 失败，给 3 秒可见反馈（否则只有静默 teardown）
+                  boolean turnBusyNow = cmTurn.isTurnInProgress() || cmTurn.isTurnActive();
+                  if (AttemptingJoinScreen.this.lastTurnBusy && !turnBusyNow) {
+                     AttemptingJoinScreen.this.turnFailedMsgTime = System.currentTimeMillis();
+                  }
+
+                  AttemptingJoinScreen.this.lastTurnBusy = turnBusyNow;
                   if (AttemptingJoinScreen.this.connectionFuture != null) {
                      AttemptingJoinScreen.this.connectionFuture.cancel(false);
                   }
@@ -680,6 +715,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          }
       }
 
+      if (this.turnFailedMsgTime > 0L) {
+         long elapsedTurn = System.currentTimeMillis() - this.turnFailedMsgTime;
+         if (elapsedTurn < 3000L) {
+            this.drawCenteredString(graphics, Component.translatable("voxlink.turn.failed").getString(), centerX, this.height / 2 - 30 - 12, VoxLinkColors.WARNING);
+         } else {
+            this.turnFailedMsgTime = 0L;
+         }
+      }
+
       if (!this.voxlinkStatusText.isEmpty()) {
          String label = Component.translatable("voxlink.dual.voxlink_label").getString();
          String clipped = this.voxlinkStatusText;
@@ -695,39 +739,35 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          this.drawCenteredString(graphics, label + ": " + clipped, centerX, this.height / 2 + 0, this.voxlinkStatusColor);
       }
 
-      if (!this.terracottaStatusText.isEmpty()) {
-         // 中继进行中时下方槽位优先显示进度文本（搜索 / 第 N 轮…）,
-         // 没在进行中才走原有的 terracottaStatusText。
-         ConnectionManager cm = VoxLinkMod.getRoomManager().getConnectionManager();
-         Component relayProgress = cm != null ? cm.getRelayProgressText() : null;
-         if (relayProgress != null) {
-            String progressText = relayProgress.getString();
-            String clipped = progressText;
-            int maxWidth = this.width - 20;
-            if (this.fontWidth(clipped) > maxWidth) {
-               while (this.fontWidth(clipped + "...") > maxWidth && clipped.length() > 0) {
-                  clipped = clipped.substring(0, clipped.length() - 1);
-               }
+      // 下方状态行 = 专用中继槽位：TURN 状态 > 玩家中继进度 > Terracotta 通道状态。
+      // 三者互斥占用；绝不能嵌套在 terracotta 非空分支里——Terracotta 未启用时中继进度会整场不可见。
+      ConnectionManager cm = VoxLinkMod.getRoomManager().getConnectionManager();
+      Component turnStatus = cm != null ? cm.getTurnStatusText() : null;
+      Component relayProgress = cm != null ? cm.getRelayProgressText() : null;
+      String line2 = null;
+      int line2Color = VoxLinkColors.WARNING;
+      if (turnStatus != null) {
+         line2 = turnStatus.getString();
+         line2Color = cm.isTurnActive() ? VoxLinkColors.SUCCESS : VoxLinkColors.WARNING;
+      } else if (relayProgress != null) {
+         line2 = relayProgress.getString();
+      } else if (!this.terracottaStatusText.isEmpty()) {
+         line2 = Component.translatable("voxlink.dual.terracotta_label").getString() + ": " + this.terracottaStatusText;
+         line2Color = this.terracottaStatusColor;
+      }
 
-               clipped = clipped + "...";
-            }
-
-            this.drawCenteredString(graphics, clipped, centerX, this.height / 2 + 14, VoxLinkColors.WARNING);
-         } else {
-         String label = Component.translatable("voxlink.dual.terracotta_label").getString();
-         String clipped = this.terracottaStatusText;
+      if (line2 != null && !line2.isEmpty()) {
+         String clipped = line2;
          int maxWidth = this.width - 20;
-         if (this.fontWidth(label + ": " + clipped) > maxWidth) {
-            while (this.fontWidth(label + ": " + clipped + "...") > maxWidth && clipped.length() > 0) {
+         if (this.fontWidth(clipped) > maxWidth) {
+            while (this.fontWidth(clipped + "...") > maxWidth && clipped.length() > 0) {
                clipped = clipped.substring(0, clipped.length() - 1);
             }
 
             clipped = clipped + "...";
          }
 
-         this.drawCenteredString(graphics, label + ": " + clipped, centerX, this.height / 2 + 14, this.terracottaStatusColor);
-         }
-
+         this.drawCenteredString(graphics, clipped, centerX, this.height / 2 + 14, line2Color);
       }
 
       long now = System.currentTimeMillis();

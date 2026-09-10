@@ -72,6 +72,8 @@ public class RoomManager {
    private int hostAloneCount = 0;
    private volatile long currentHeartbeatInterval;
    private volatile long currentSignalPollInterval;
+   // updateRoom 限流冷却: 记录最近一次 RATE_LIMITED 时刻, 10s 内本地快速失败不再打服务器
+   private volatile long lastUpdateRateLimitedMs = 0L;
    private final AtomicLong signalPollTimestamp = new AtomicLong(0L);
    private final AtomicInteger heartbeatSeq = new AtomicInteger(0);
    private final AtomicInteger heartbeatGeneration = new AtomicInteger(0);
@@ -555,12 +557,24 @@ public class RoomManager {
       String code, String token, String name, String password, int maxPlayers, boolean visible, String authType, String category
    ) {
       RoomManager.RoomState state = this.currentRoom.get();
-      return state != null && state != PENDING && state.roomInfo != null
-         ? this.signalingClient
-            .updateRoom(code, token, name, password, maxPlayers, visible, authType, category)
-            .thenApply(
+      if (state == null || state == PENDING || state.roomInfo == null) {
+         return CompletableFuture.failedFuture(new RuntimeException("not in room"));
+      }
+      // 限流冷却: 上次撞 RATE_LIMITED 后 10s 内本地快速失败, 不再打服务器
+      // (实测 CU9NCC: UI 保存重试 5s 内连打 3 次, 每次都完整打服务器并刷 ERROR 堆栈)
+      long sinceLimited = System.currentTimeMillis() - this.lastUpdateRateLimitedMs;
+      if (sinceLimited < 10000L) {
+         VoxLinkMod.LOGGER.info("[RoomManager] updateRoom in rate-limit cooldown ({}ms left), skip", 10000L - sinceLimited);
+         return CompletableFuture.failedFuture(new RuntimeException("RATE_LIMITED: local cooldown"));
+      }
+      return this.signalingClient
+         .updateRoom(code, token, name, password, maxPlayers, visible, authType, category)
+         .thenApply(
                response -> {
                   if (!response.success) {
+                     if ("RATE_LIMITED".equals(response.error)) {
+                        this.lastUpdateRateLimitedMs = System.currentTimeMillis();
+                     }
                      String errMsg = response.error != null
                         ? response.error
                         : (response.message != null ? response.message : Component.translatable("voxlink.error.unknown").getString());
@@ -608,8 +622,7 @@ public class RoomManager {
                } else {
                   throw new RuntimeException(e);
                }
-            })
-         : CompletableFuture.failedFuture(new IllegalStateException(Component.translatable("voxlink.error.not_in_room").getString()));
+            });
    }
 
    public CompletableFuture<RoomInfo> joinRoom(String code, String password) {
@@ -869,6 +882,13 @@ public class RoomManager {
          this.connectionManager.clearActiveUdpTransports();
       } catch (Exception e) {
          VoxLinkMod.LOGGER.debug("cleanup udp transports error: {}", e.getMessage());
+      }
+
+      try {
+         // 正常退房也要释放 TURN 会话（此前只在收到对端 disconnect 信令时清理，keepalive 会泄漏）
+         this.connectionManager.cleanupTurnQuietly();
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.debug("cleanup turn error: {}", e.getMessage());
       }
 
       try {
@@ -1565,6 +1585,8 @@ public class RoomManager {
 
       // 注册 WS 推送消费：推送 data 与轮询响应 data 同构，直接复用 handleSignalPollResponse 路径
       this.registerSignalPushHandler();
+      // 预热 WS：首批心跳/信号请求直接走 WS，不必等第一次 HTTP 兜底触发建连
+      this.signalingClient.preconnectWebSocket();
       this.scheduleSignalPoll();
    }
 
@@ -1727,9 +1749,11 @@ public class RoomManager {
       RoomManager.RoomState state = this.currentRoom.get();
       boolean isJoiner = state != null && state != PENDING && !state.roomInfo.isHost();
       // 加入方在 WS 健康时放宽到 1000ms，断开恢复 250ms；房主不变
-      long normalInterval = isJoiner
-         ? (this.signalingClient.isWsConnected() ? 1000L : 250L)
-         : VoxLinkMod.getConfig().getSignalPollInterval();
+      // WS 健康时信号由推送实时到达，轮询只是安全网：双方统一放宽到 5s；
+      // WS 断开时恢复高频兜底（加入方 250ms，房主用配置值），最多一个旧间隔内完成切换
+      long normalInterval = this.signalingClient.isWsConnected()
+         ? 5000L
+         : (isJoiner ? 250L : VoxLinkMod.getConfig().getSignalPollInterval());
       if (this.currentSignalPollInterval != normalInterval) {
          this.currentSignalPollInterval = normalInterval;
          this.rescheduleSignalPoll(normalInterval);
@@ -1982,7 +2006,10 @@ public class RoomManager {
 
    private void handleDisconnect(String from, JsonObject data) {
       VoxLinkMod.LOGGER.info("Peer disconnected: {}", from);
-      this.connectionManager.cleanupTurnQuietly();
+      // 仅当断线者恰是本端 TURN 对端才清理；多房客时其他房客断线不能杀掉存活的 TURN 会话
+      if (this.connectionManager.isTurnPeer(from)) {
+         this.connectionManager.cleanupTurnQuietly();
+      }
       RoomManager.RoomState state = this.currentRoom.get();
       if (state != null && state != PENDING && state.roomInfo.isHost() && from != null) {
          this.connectionManager.clearHostPunchingState();

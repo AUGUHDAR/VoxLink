@@ -362,6 +362,11 @@ public final class SignalingWsTransport {
       }
    }
 
+   /** 预热：进房即建立 WS 连接，让首批心跳/信号就走 WS 而不是 HTTP 兜底。结果不阻塞调用方。 */
+   public void preconnect() {
+      this.ensureConnected();
+   }
+
    public void close() {
       if (this.closed.compareAndSet(false, true)) {
          this.connected.set(false);

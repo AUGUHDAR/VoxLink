@@ -110,6 +110,11 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             // 头部文字与第一行按钮至少留 4px 间距，避免极端矮屏时头部文字与按钮粘连
             this.lyTopStart = Math.max(headerFloor + 4, ideal);
             this.lyWebsite = this.lyTopStart + sectionH - L_ROW;
+            // 极矮屏强制提交时官网行会与下载行同位叠合（240 高实测同 y=116）：
+            // 裁掉官网行保下载行——下载是更关键的 CTA（与"装饰先裁"同一准则）
+            if (showDownloadRow && this.lyDownloadRow != Integer.MIN_VALUE && this.lyWebsite >= this.lyDownloadRow - L_ROW) {
+               this.lyWebsite = Integer.MIN_VALUE;
+            }
             if (decor) {
                this.lySloganText = uploadLog - 14;
                this.lyHintText = uploadLog - 26;
@@ -216,9 +221,11 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
          );
       }
 
-      this.addRenderableWidget(
-         Button.builder(Component.translatable("voxlink.website"), button -> this.openWebsite()).bounds(centerX - 100, this.lyWebsite, 200, 20).build()
-      );
+      if (this.lyWebsite != Integer.MIN_VALUE) {
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("voxlink.website"), button -> this.openWebsite()).bounds(centerX - 100, this.lyWebsite, 200, 20).build()
+         );
+      }
       if (showDownload && this.lyDownloadRow != Integer.MIN_VALUE) {
          if (isDownloading) {
             this.terracottaDownloadBtn = null;

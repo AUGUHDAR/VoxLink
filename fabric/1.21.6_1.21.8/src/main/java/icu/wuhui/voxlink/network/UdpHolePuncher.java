@@ -22,6 +22,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -36,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 public class UdpHolePuncher {
    private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-punch");
+   private static final ConcurrentHashMap<String, Long> BLACKLIST_WARN_AT = new ConcurrentHashMap<>();
    private static final byte[] MAGIC = new byte[]{86, 76};
    private static final byte TYPE_PUNCH = 1;
    private static final byte TYPE_PUNCH_ACK = 2;
@@ -221,10 +223,32 @@ public class UdpHolePuncher {
 
       boolean blocked = AddressBlacklist.get().isBlacklisted(new InetSocketAddress(addr, port));
       if (blocked) {
-         LOGGER.warn("[UdpHolePuncher] Target {}:{} blacklisted by repeated failures, skip punch", addr.getHostAddress(), port);
+         warnBlacklistedOnce(addr, port);
       }
 
       return blocked;
+   }
+
+   /** 黑名单告警限频：同一目标 30s 最多一条。热循环场景下曾单会话刷 7000 条。 */
+   private static void warnBlacklistedOnce(InetAddress addr, int port) {
+      String key = addr.getHostAddress() + ":" + port;
+      long now = System.currentTimeMillis();
+      Long last = BLACKLIST_WARN_AT.put(key, now);
+      if (last == null || now - last >= 30000L) {
+         LOGGER.warn("[UdpHolePuncher] Target {} blacklisted by repeated failures, skip punch", key);
+      }
+   }
+
+   /** 当前目标（含 updateTarget 漂移纠偏后的端口）是否已被拉黑：上层组循环据此跳过本轮。 */
+   public boolean isCurrentTargetBlacklisted() {
+      InetAddress addr = this.remoteAddress;
+      int port = this.remotePort;
+      return addr != null && port > 0 && AddressBlacklist.get().isBlacklisted(new InetSocketAddress(addr, port));
+   }
+
+   /** 当前目标端口（updateTarget 漂移纠偏后的最新值；未发起过打洞时为 -1）。 */
+   public int getRemotePort() {
+      return this.remotePort;
    }
 
    private static CompletableFuture<PunchResult> blacklistedFuture() {
@@ -1490,7 +1514,9 @@ public class UdpHolePuncher {
       try {
          this.remoteAddress = InetAddress.getByName(newIp);
          this.remotePort = newPort;
-         LOGGER.info("[UdpHolePuncher] Target updated to {}:{}", newIp, newPort);
+         // 降为 debug: 组循环里几十个 puncher 每条 punch_info 都打一遍, INFO 会刷屏;
+         // 上层 ConnectionManager 已有逐信号的漂移 INFO 汇总
+         LOGGER.debug("[UdpHolePuncher] Target updated to {}:{}", newIp, newPort);
       } catch (Exception e) {
          LOGGER.warn("[UdpHolePuncher] Target update failed: {}", e.getMessage());
       }

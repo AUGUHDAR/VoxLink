@@ -30,6 +30,11 @@ public final class LogUploadManager
    private static final long STABLE_WINDOW_MS = 120L * 1000L;
    private static final long ACTIVITY_TIMEOUT_MS = 15L * 1000L;
    private static final long HOST_WAIT_TIMEOUT_MS = 5L * 60L * 1000L;
+   // 终局失败快传: 失败现场定格后等 5s 收尾(自动退房/断开信令的日志落盘)即上传, 不再硬等 90s
+   private static final long FAILURE_UPLOAD_DELAY_MS = 5L * 1000L;
+   // 关游戏兜底: 打洞中途直接退游戏且会话满此时长才视为"放弃型失败样本"补传(秒进秒出不算)
+   private static final long MIN_AGE_FOR_QUIT_UPLOAD_MS = 30L * 1000L;
+   private static final long SHUTDOWN_UPLOAD_TIMEOUT_MS = 6L * 1000L;
    private static final int MAX_LOG_BYTES = 4 * 1024 * 1024;
    private static final int MAX_ATTEMPTS = 3;
    private static final long RETRY_DELAY_MS = 15_000L;
@@ -46,6 +51,8 @@ public final class LogUploadManager
    private static final AtomicBoolean UPLOADED = new AtomicBoolean(false);
    // 上传单飞: 并发双runUpload时只允许一个真正post, 杜绝重复上传/重复toast
    private static final AtomicBoolean UPLOAD_IN_FLIGHT = new AtomicBoolean(false);
+   // 终局失败标志: showConnectFailedFinal 真终态时置位, 触发快传/退房补传/关游戏兜底三条加强路径
+   private static volatile boolean failureUploadArmed = false;
    private static volatile ScheduledFuture<?> uploadFuture;
    private static volatile ScheduledFuture<?> pollFuture;
    private static volatile Runnable onUploaded;
@@ -57,6 +64,16 @@ public final class LogUploadManager
    private static volatile long lastActivityReportMs = 0L;
    private static volatile String role;
    private static volatile HttpClient httpClient;
+
+   static {
+      // 关游戏兜底: 失败后玩家直接关游戏(90s 定时器随 JVM 蒸发)是最大丢样本源。
+      // 钩子里只对"终局失败"或"满 30s 未连上即退游戏"的会话做一次限时同步上传;
+      // 成功会话/已连接会话/主动取消(disarm 已清 code)一律不传, 不占用服务器资源
+      try {
+         Runtime.getRuntime().addShutdownHook(new Thread(LogUploadManager::uploadOnJvmShutdown, "VoxLink-LogUpload-Shutdown"));
+      } catch (Throwable ignored) {
+      }
+   }
 
    private LogUploadManager() {}
 
@@ -80,6 +97,9 @@ public final class LogUploadManager
       punchStartMs = System.currentTimeMillis();
       role = isHost ? "host" : "joiner";
       UPLOADED.set(false);
+      failureUploadArmed = false;
+      connectedAtMs = 0L;
+      lastTransportActivityMs = 0L;
       VoxLinkMod.LOGGER.info("[LogUpload] armed code={} role={}", activeCode, role);
       reportStatus();
       if (uploadFuture != null) {
@@ -147,6 +167,24 @@ public final class LogUploadManager
       connectedAtMs = 0L;
    }
 
+   // 终局失败事件(showConnectFailedFinal 真终态): 失败样本 5s 后快传, 不再硬等 90s。
+   // 现有 runUpload 判定全保留: 万一失败后反而连上(兜底竞速赢), 稳定窗口逻辑仍会拦住误传
+   public static void onTerminalFailure()
+   {
+      if (activeCode == null || UPLOADED.get() || failureUploadArmed) {
+         return;
+      }
+      if (connectedAtMs > 0L && System.currentTimeMillis() - connectedAtMs >= STABLE_WINDOW_MS) {
+         return;
+      }
+      failureUploadArmed = true;
+      if (uploadFuture != null) {
+         uploadFuture.cancel(false);
+      }
+      uploadFuture = SCHEDULER.schedule(LogUploadManager::runUpload, FAILURE_UPLOAD_DELAY_MS, TimeUnit.MILLISECONDS);
+      VoxLinkMod.LOGGER.info("[LogUpload] terminal failure captured, upload in {}ms", FAILURE_UPLOAD_DELAY_MS);
+   }
+
    private static void pollOpponentUploaded()
    {
       if (pollFuture == null) {
@@ -203,6 +241,9 @@ public final class LogUploadManager
 
    public static void disarm()
    {
+      // 终局失败后玩家退出加入界面: 失败样本已经完整, 立即补传而不是随 disarm 丢弃
+      // (主动取消未失败时 failureUploadArmed=false, 行为不变: 纯取消不上传)
+      boolean flushFailure = failureUploadArmed && !UPLOADED.get() && ACTIVE_CODE.get() != null;
       if (uploadFuture != null) {
          uploadFuture.cancel(false);
          uploadFuture = null;
@@ -212,6 +253,11 @@ public final class LogUploadManager
          pollFuture = null;
       }
       ACTIVE_CODE.set(null);
+      if (flushFailure && LogUploadState.isLogUploadEnabled()) {
+         ACTIVE_CODE.set(activeCode);
+         uploadFuture = SCHEDULER.schedule(LogUploadManager::runUpload, 200L, TimeUnit.MILLISECONDS);
+         VoxLinkMod.LOGGER.info("[LogUpload] left room after terminal failure, flush log now");
+      }
    }
 
    public static void setOnUploaded(Runnable callback)
@@ -334,6 +380,82 @@ public final class LogUploadManager
             VoxLinkMod.LOGGER.warn("[LogUpload] upload gave up, error={}", response.error);
          }
       });
+   }
+
+   // JVM 退出兜底上传: 限时同步, 任何异常都必须吞掉(不能阻断关游戏)
+   private static void uploadOnJvmShutdown()
+   {
+      try {
+         String code = ACTIVE_CODE.get();
+         if (code == null || code.isEmpty() || UPLOADED.get() || UPLOAD_IN_FLIGHT.get()) {
+            return;
+         }
+         if (!LogUploadState.isLogUploadEnabled()) {
+            return;
+         }
+         // 已连接的会话(无论是否过稳定窗口)视为正常使用, 关游戏不传
+         if (connectedAtMs > 0L) {
+            return;
+         }
+         long now = System.currentTimeMillis();
+         boolean failed = failureUploadArmed;
+         boolean abandoned = now - punchStartMs >= MIN_AGE_FOR_QUIT_UPLOAD_MS;
+         if (!failed && !abandoned) {
+            return;
+         }
+         byte[] payload = buildPayload();
+         if (payload == null) {
+            return;
+         }
+         UPLOAD_IN_FLIGHT.set(true);
+         uploadSyncBeforeExit(code, payload, failed ? "failed" : "unfinished");
+      } catch (Throwable ignored) {
+      }
+   }
+
+   private static void uploadSyncBeforeExit(String code, byte[] payload, String cause)
+   {
+      try {
+         String url = buildUrl(ROUTE_UPLOAD);
+         String playerName = "";
+         try {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc != null && mc.getUser() != null && mc.getUser().getName() != null) {
+               playerName = mc.getUser().getName();
+            }
+         } catch (Throwable ignored) {
+         }
+         long durationMs = Math.max(0L, System.currentTimeMillis() - punchStartMs);
+         HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .header("Content-Type", "application/octet-stream")
+            .header("Accept", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Java) VoxLink/" + VoxLinkMod.MOD_VERSION)
+            .header("X-VoxLink-Version", VoxLinkMod.MOD_VERSION)
+            .header("X-Log-Sha256", sha256(payload))
+            .header("X-Log-Role", role == null ? "" : role)
+            .header("X-Log-Code", code)
+            .header("X-Log-Name", playerName)
+            .header("X-Log-Version", VoxLinkMod.MOD_VERSION)
+            .header("X-Log-Duration-Ms", String.valueOf(durationMs))
+            .timeout(Duration.ofMillis(SHUTDOWN_UPLOAD_TIMEOUT_MS))
+            .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+            .build();
+         HttpClient shutdownClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofMillis(Math.min(SHUTDOWN_UPLOAD_TIMEOUT_MS, 4000L)))
+            .version(HttpClient.Version.HTTP_1_1)
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
+         HttpResponse<String> response = shutdownClient.send(request, HttpResponse.BodyHandlers.ofString());
+         if (response.statusCode() == 200) {
+            UPLOADED.set(true);
+            VoxLinkMod.LOGGER.info("[LogUpload] shutdown upload ok ({} session, {} bytes)", cause, payload.length);
+         } else {
+            VoxLinkMod.LOGGER.warn("[LogUpload] shutdown upload rejected: HTTP {}", response.statusCode());
+         }
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.warn("[LogUpload] shutdown upload failed: {}", e.getMessage());
+      }
    }
 
    private static byte[] buildPayload()

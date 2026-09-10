@@ -43,9 +43,9 @@ public class TurnRelayClient {
    public static final int BIND_SESSION_FULL = 3;
    public static final int BIND_ROLE_CONFLICT = 4;
    public static final int BIND_SERVER_BUSY = 5;
-   private static final int PING_PROBE_COUNT = 3;
+   private static final int PING_PROBE_COUNT = 6;
    private static final int PING_TIMEOUT_MS = 800;
-   private static final int PROBE_TOTAL_BUDGET_MS = 2500;
+   private static final int PROBE_TOTAL_BUDGET_MS = 4000;
    private static final int BIND_TIMEOUT_MS = 2000;
    private static final int KEEPALIVE_INTERVAL_SEC = 15;
 
@@ -327,21 +327,33 @@ public class TurnRelayClient {
       writeUint16(p, 21, ticketBytes.length);
       System.arraycopy(ticketBytes, 0, p, 23, ticketBytes.length);
 
-      try {
-         session.socket.send(new DatagramPacket(p, p.length, session.endpoint()));
-      } catch (IOException e) {
-         return BIND_SERVER_BUSY;
-      }
-
-      long deadline = System.currentTimeMillis() + (long)BIND_TIMEOUT_MS;
+      // UDP 单发丢包即败（2026-08-31 生产：移动→节点首包丢失，host bind 超时中继失败）。
+      // 0/900/1800/2700/3600ms 五次重发，总窗口 4.6s；发送失败（DNS 解析等）记 WARN 后继续重试。
+      // 2026-09-06 加固：弱网 3 发全丢率高，加到 5 发给丢包余量（guest 流程 20s 总超时内仍够用）。
+      long deadline = System.currentTimeMillis() + 4600L;
       byte[] buf = new byte[64];
       DatagramPacket resp = new DatagramPacket(buf, buf.length);
+      int sent = 0;
+      long nextSendAt = 0L;
 
       while (System.currentTimeMillis() < deadline) {
+         long now = System.currentTimeMillis();
+         if (sent < 5 && now >= nextSendAt) {
+            try {
+               session.socket.send(new DatagramPacket(p, p.length, session.endpoint()));
+               sent++;
+            } catch (IOException e) {
+               LOGGER.warn("[TurnRelay] bind send fail #{} to {}:{}: {}", sent + 1, session.host, session.port, e.getMessage());
+            }
+
+            nextSendAt = now + 900L;
+         }
+
+         resp.setLength(buf.length);
          try {
             session.socket.receive(resp);
          } catch (SocketTimeoutException e) {
-            break;
+            continue;
          } catch (IOException e) {
             break;
          }
@@ -352,6 +364,9 @@ public class TurnRelayClient {
             if (java.util.Arrays.equals(sid, session.sessionId) && buf[20] == session.role) {
                int code = buf[21] & 0xFF;
                session.bound = code == BIND_OK;
+               if (sent > 1) {
+                  LOGGER.info("[TurnRelay] bind ok after {} sends (role={})", sent, session.role);
+               }
                return code;
             }
          }

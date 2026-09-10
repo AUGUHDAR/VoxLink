@@ -742,6 +742,13 @@ public class SignalingClient {
       return this.wsTransport != null && this.wsTransport.isConnected();
    }
 
+   /** 进房预热 WS 连接：让首批心跳/轮询请求直接走 WS，避免先打一段 HTTP。 */
+   public void preconnectWebSocket() {
+      if (this.config.isUseWebSocket()) {
+         this.getWsTransport().preconnect();
+      }
+   }
+
    /** 透传信号推送监听器（data 为 {"s":[...],"ts":N}）；传 null 取消。useWebSocket 关闭时不注册。 */
    public void setSignalPushHandler(Consumer<JsonObject> handler) {
       if (!this.config.isUseWebSocket()) {

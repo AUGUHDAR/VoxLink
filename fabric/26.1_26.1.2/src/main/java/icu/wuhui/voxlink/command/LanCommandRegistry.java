@@ -53,14 +53,34 @@ public final class LanCommandRegistry {
          }
 
          Predicate<CommandSourceStack> original = child.getRequirement();
-         CommandNodeAccessor accessor = (CommandNodeAccessor)child;
-         accessor.voxlink$setRequirement(src -> {
-            CommandSourceStack s = (CommandSourceStack)src;
-            return original != null && original.test(s) ? true : isLanHost(s);
-         });
-         VoxLinkMod.LOGGER.info("[LanCmd] Native command {} requires bypassed for LAN host", name);
+         setRequirementBypass(child, original, name);
       } catch (Exception e) {
          VoxLinkMod.LOGGER.warn("[LanCmd] Failed to modify native command {} requires: {}", name, e.getMessage());
+      }
+   }
+
+   /**
+    * 写入放宽后的 requirement。首选 mixin accessor（Fabric 下已应用零成本）；
+    * 原生 NeoForge 上 brigadier 位于 MC-BOOTSTRAP 层、未被本模组 mixin 覆盖，
+    * accessor 强转必败（线上实证：28 个会话 LAN 权限 bypass 全部失效），
+    * 此时退回反射——brigadier 是无混淆库且 jar 为自动模块（全开放），反射跨加载器可用。
+    */
+   @SuppressWarnings({"unchecked", "rawtypes"})
+   private static void setRequirementBypass(CommandNode<CommandSourceStack> node, Predicate<CommandSourceStack> original, String name) {
+      Predicate bypass = src -> original != null && original.test((CommandSourceStack)src) ? true : isLanHost((CommandSourceStack)src);
+      try {
+         CommandNodeAccessor accessor = (CommandNodeAccessor)node;
+         accessor.voxlink$setRequirement(bypass);
+         VoxLinkMod.LOGGER.info("[LanCmd] Native command {} requires bypassed for LAN host", name);
+      } catch (ClassCastException mixinNotApplied) {
+         try {
+            java.lang.reflect.Field requirementField = CommandNode.class.getDeclaredField("requirement");
+            requirementField.setAccessible(true);
+            requirementField.set(node, bypass);
+            VoxLinkMod.LOGGER.info("[LanCmd] Native command {} requires bypassed for LAN host (reflection)", name);
+         } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[LanCmd] Failed to modify native command {} requires: {}", name, e.getMessage());
+         }
       }
    }
 
