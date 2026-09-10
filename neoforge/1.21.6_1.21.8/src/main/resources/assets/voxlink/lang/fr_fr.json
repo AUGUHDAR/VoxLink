@@ -67,7 +67,7 @@
     "voxlink.connection.await_peer_ready": "Tunnel ouvert, en attente de la confirmation de l'autre côté...",
     "voxlink.connection.zero_recv_failed": "Punch échoué définitivement : zéro paquet dans les deux sens, ce réseau ne peut pas se connecter directement, essaie le relais ou un autre réseau",
     "voxlink.connection.retry_round": "Tentative %s, changement de stratégie...",
-    "voxlink.connection.bridge_setup": "Tunnel ouvert, établissement de la connexion...",
+    "voxlink.connection.auto_turn": "Connexion directe échouée à plusieurs reprises, passage automatique au relais (retour automatique une fois la connexion directe rétablie)...",    "voxlink.connection.bridge_setup": "Tunnel ouvert, établissement de la connexion...",
     "voxlink.connection.connected": "Connecté :D",
     "voxlink.connection.all_failed": "Échec de connexion :(",
     "voxlink.connection.peer_cancelled": "L'autre joueur a annulé la connexion",

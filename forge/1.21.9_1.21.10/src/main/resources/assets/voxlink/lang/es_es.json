@@ -67,7 +67,7 @@
     "voxlink.connection.await_peer_ready": "Túnel abierto, esperando confirmación del otro lado...",
     "voxlink.connection.zero_recv_failed": "Punch falló definitivamente: cero paquetes en ambos sentidos, esta red no puede conectar directamente, prueba relay u otra red",
     "voxlink.connection.retry_round": "Ronda %s, cambiando estrategia...",
-    "voxlink.connection.bridge_setup": "Túnel abierto, estableciendo conexión...",
+    "voxlink.connection.auto_turn": "La conexion directa fallo repetidamente, cambiando al rele automaticamente (volvera automaticamente cuando funcione la conexion directa)...",    "voxlink.connection.bridge_setup": "Túnel abierto, estableciendo conexión...",
     "voxlink.connection.connected": "Conectado :D",
     "voxlink.connection.all_failed": "Conexión fallida :(",
     "voxlink.connection.peer_cancelled": "El otro usuario canceló la conexión",

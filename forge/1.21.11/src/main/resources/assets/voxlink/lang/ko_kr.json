@@ -67,7 +67,7 @@
     "voxlink.connection.await_peer_ready": "터널 개설됨, 상대 확인 대기 중...",
     "voxlink.connection.zero_recv_failed": "펀치 최종 실패: 양방향 패킷 0개, 이 네트워크는 직접 연결할 수 없습니다. 릴레이 또는 다른 네트워크를 시도하세요",
     "voxlink.connection.retry_round": "제%s 라운드 재시도, 전략 변경...",
-    "voxlink.connection.bridge_setup": "터널 개통, 연결 설정 중...",
+    "voxlink.connection.auto_turn": "직접 연결이 반복 실패하여 자동으로 릴레이로 전환합니다(직접 연결되면 자동 복귀)...",    "voxlink.connection.bridge_setup": "터널 개통, 연결 설정 중...",
     "voxlink.connection.connected": "연결됨 :D",
     "voxlink.connection.all_failed": "연결 실패 :(",
     "voxlink.connection.peer_cancelled": "상대방이 연결을 취소했어요",

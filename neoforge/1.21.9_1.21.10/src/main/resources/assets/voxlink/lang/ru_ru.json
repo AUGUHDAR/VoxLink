@@ -67,7 +67,7 @@
     "voxlink.connection.await_peer_ready": "Туннель открыт, ждём подтверждения второй стороны...",
     "voxlink.connection.zero_recv_failed": "Панч окончательно не удался: ноль пакетов в обоих направлениях, эта сеть не может подключиться напрямую, попробуйте ретранслятор или другую сеть",
     "voxlink.connection.retry_round": "Раунд %s, смена стратегии...",
-    "voxlink.connection.bridge_setup": "Туннель открыт, установка соединения...",
+    "voxlink.connection.auto_turn": "Прямое подключение неоднократно не удалось, автоматический переход на ретранслятор (автовозврат при восстановлении прямого)...",    "voxlink.connection.bridge_setup": "Туннель открыт, установка соединения...",
     "voxlink.connection.connected": "Подключено :D",
     "voxlink.connection.all_failed": "Ошибка подключения :(",
     "voxlink.connection.peer_cancelled": "Другой игрок отменил подключение",

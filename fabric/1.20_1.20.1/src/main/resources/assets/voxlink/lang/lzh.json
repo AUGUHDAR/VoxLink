@@ -67,7 +67,7 @@
     "voxlink.connection.await_peer_ready": "通道已通，待對方確認...",
     "voxlink.connection.zero_recv_failed": "打洞終敗：雙向零收包，此網絡不可直連，可試中繼或換網",
     "voxlink.connection.retry_round": "第%s輪重試，易策再試...",
-    "voxlink.connection.bridge_setup": "隧通，立接續...",
+    "voxlink.connection.auto_turn": "徑連數試未合，已自試中繼，既通則自返...",    "voxlink.connection.bridge_setup": "隧通，立接續...",
     "voxlink.connection.connected": "已連接 :D",
     "voxlink.connection.all_failed": "連接失敗，嗚呼",
     "voxlink.connection.peer_cancelled": "彼方息連，奈何",

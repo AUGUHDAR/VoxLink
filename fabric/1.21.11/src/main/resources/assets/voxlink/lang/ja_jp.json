@@ -67,7 +67,7 @@
     "voxlink.connection.await_peer_ready": "トンネルを確立、相手確認待ち...",
     "voxlink.connection.zero_recv_failed": "パンチ失敗：双方向パケットゼロ、このネットワークは直接接続できません、中継または別ネットワークを試してください",
     "voxlink.connection.retry_round": "第%sラウンド再試行、戦略を変更...",
-    "voxlink.connection.bridge_setup": "トンネル開通、接続を確立中...",
+    "voxlink.connection.auto_turn": "直接接続が何度も失敗したため、自動で中継に切り替えます（直通したら自動で戻ります）...",    "voxlink.connection.bridge_setup": "トンネル開通、接続を確立中...",
     "voxlink.connection.connected": "接続済み :D",
     "voxlink.connection.all_failed": "接続失敗 :(",
     "voxlink.connection.peer_cancelled": "相手が接続をキャンセルしました",
