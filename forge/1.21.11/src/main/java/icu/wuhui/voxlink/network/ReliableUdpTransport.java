@@ -162,6 +162,31 @@ public class ReliableUdpTransport implements AutoCloseable {
       return this.authMac != null;
    }
 
+   // TURN 互操作降级（1.1.5）：对端为旧引擎（桌面 App 1.1.4-beta / 旧版 mod）时其 TURN
+   // transport 可能未武装密钥——本端 armed 后会把对端明文帧全部丢弃, 中继建得起通不了
+   // (实证 09-11 23:03: path up 同秒即互丢, 19s 后桥死)。仅 TURN 路径开启: 连续 3 帧
+   // 认证失败即降级为双方明文(旧线上格式); 直连 P2P 路径保持严格认证不受影响。
+   private volatile boolean allowAuthDowngrade = false;
+   private int consecutiveAuthDrops = 0;
+
+   public void allowAuthDowngradeForInterop() {
+      this.allowAuthDowngrade = true;
+   }
+
+   /** 认证失败丢弃时调用：达到阈值且允许降级 → 关闭本 transport 认证（收发均回明文旧格式）。 */
+   private void handleAuthDrop(String where) {
+      PunchAuth.logDrop(where);
+      if (!this.allowAuthDowngrade || this.authMac == null) {
+         return;
+      }
+      if (++this.consecutiveAuthDrops < 3) {
+         return;
+      }
+      LOGGER.warn("[ReliableUdp] peer sends unauthenticated frames x{}, TURN interop downgrade to plaintext", this.consecutiveAuthDrops);
+      this.authKeyBytes = null;
+      this.authMac = null;
+   }
+
    /** 出帧统一出口：认证模式追加 MAC，否则原样返回（旧线上格式）。 */
    private byte[] finalizeFrame(byte[] frame) {
       Mac mac = this.authMac;
@@ -394,9 +419,10 @@ public class ReliableUdpTransport implements AutoCloseable {
          if (rxMac != null) {
             boolean macOk = packetLen >= 9 && PunchAuth.verifyTrailer4(rxMac, buf, packetLen);
             if (!macOk) {
-               PunchAuth.logDrop("rudp-data");
+               this.handleAuthDrop("rudp-data");
                return;
             }
+            this.consecutiveAuthDrops = 0;
          }
 
          byte type = buf[2];

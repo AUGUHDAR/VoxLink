@@ -4774,12 +4774,17 @@ private volatile long lastProfileSwitchMs = 0L;
 
                            // 热循环修复①: 目标已拉黑的 puncher 本轮不再发起——拉黑目标会立即快速失败,
                            // 旧逻辑 300ms 后再来一轮, 单会话可空转数千次刷爆日志并白烧 CPU
-                           if (mp.isCurrentTargetBlacklisted()) {
-
+                           if (mp.isCurrentTargetBlacklisted()) {
+
+                              continue;
+
+                           }
+
+                           // PREDICTION_OFF 会话级封顶: 停止无意义直连(配合 1.1.5 的
+                           // round=3 自动 TURN, 此处静默让位中继; 降频轮询保留漂移恢复可能)
+                           if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP) {
                               continue;
-
                            }
-
                            anyPunchable = true;
 
                            int idx = i;
@@ -6704,10 +6709,12 @@ private volatile long lastProfileSwitchMs = 0L;
          new Object[]{reason, recvPunch, recvAck}
       );
       if (reason == PunchFailureClassifier.FailureReason.PREDICTION_OFF) {
-         int count = this.sessionPredictionOffCount.incrementAndGet();
-         if (count >= PREDICTION_OFF_CAP) {
+                  int count = this.sessionPredictionOffCount.incrementAndGet();
+
+                  // 只在跨阈值瞬间打一条(此前 count>=CAP 每次都打, 实测单会话刷 350 条 50→400)
+         if (count == PREDICTION_OFF_CAP) {
             VoxLinkMod.LOGGER.warn(
-               "[UdpHolePuncher] PREDICTION_OFF cap reached ({}), abort punch",
+               "[UdpHolePuncher] PREDICTION_OFF cap reached ({}), stop direct punching this session (relay/TURN takes over)",
                count
             );
          }
@@ -11680,9 +11687,10 @@ private volatile long lastProfileSwitchMs = 0L;
 
             TurnRelayClient.TurnSession session =
                new TurnRelayClient.TurnSession(alloc.sessionIdHex, sid, alloc.host, alloc.port, TurnRelayClient.ROLE_GUEST, alloc.guestTicket, alloc.expireSec);
-            int code = TurnRelayClient.bind(session);
-            if (code != TurnRelayClient.BIND_OK) {
-               session.unbind();
+                        // 3 轮重试(每轮5发): 弱网单轮全丢很常见(实证 09-11 22:42 guest 5发全丢)
+            int code = TurnRelayClient.bindWithRetry(session, 3);
+            if (code != TurnRelayClient.BIND_OK) {
+               session.unbind();
                throw new IllegalStateException("BIND_FAILED_" + code);
             }
 
@@ -11700,8 +11708,10 @@ private volatile long lastProfileSwitchMs = 0L;
                this.activePunchAuthKey = turnAuthKey;
                VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (guest side)");
             } else {
-               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (host caps missing)");
+               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (host caps missing)");
             }
+            // 互操作降级开关: 对端为旧引擎(未武装密钥)时连续认证失败自动回明文, 不再互丢致死
+            transport.allowAuthDowngradeForInterop();
 
             this.turnTransport = transport;
             this.turnPeerId = "host";
@@ -11720,7 +11730,8 @@ private volatile long lastProfileSwitchMs = 0L;
                .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "turn_alloc", data, "host")
                .thenApply(r -> session);
          })
-         .orTimeout(20L, TimeUnit.SECONDS)
+                  // 35s: bind 升级为 3 轮重试后最长 ~16s, 加上列表/探测/allocate 需要更大总预算
+         .orTimeout(35L, TimeUnit.SECONDS)
          .whenComplete((session, ex) -> {
             if (ex != null || session == null) {
                VoxLinkMod.LOGGER.warn("[Turn] guest flow failed: {}", ex != null ? ex.getMessage() : "null");
@@ -11772,8 +11783,10 @@ private volatile long lastProfileSwitchMs = 0L;
 
       TurnRelayClient.TurnSession session =
          new TurnRelayClient.TurnSession(sessionIdHex, sid, host, port, TurnRelayClient.ROLE_HOST, ticket, expire);
-      int code = TurnRelayClient.bind(session);
-      if (code != TurnRelayClient.BIND_OK) {
+            // 3 轮重试(每轮5发, 总预算~16s < guest 的 20s turn_ready 等待):
+      // 实证 09-11 23:28 host 单轮 5 发无一到达 turn01, guest 同会话一次即中——纯弱网丢包
+      int code = TurnRelayClient.bindWithRetry(session, 3);
+      if (code != TurnRelayClient.BIND_OK) {
          VoxLinkMod.LOGGER.warn("[Turn] host bind failed code={} sid={} endpoint={}:{}", code, sessionIdHex.substring(0, 8), host, port);
          session.unbind();
          return;
@@ -11803,8 +11816,11 @@ private volatile long lastProfileSwitchMs = 0L;
          this.activePunchAuthKey = turnAuthKey;
          VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (host side, peer {})", turnPeerId);
       } else {
-         VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (peer {} legacy/caps missing)", turnPeerId);
+         VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (peer {} legacy/caps missing)", turnPeerId);
       }
+      // 互操作降级开关: 旧引擎 guest(桌面 App/旧版 mod)无密钥时连续认证失败自动回明文
+      // (实证 09-11 23:03: host armed 而对端明文, path up 同秒互丢, 19s 后桥死)
+      transport.allowAuthDowngradeForInterop();
 
       this.turnTransport = transport;
       transport.start();

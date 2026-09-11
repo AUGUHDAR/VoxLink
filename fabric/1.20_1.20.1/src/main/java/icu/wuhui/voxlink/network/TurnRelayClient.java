@@ -315,6 +315,39 @@ public class TurnRelayClient {
     * 返回 code（0=ok）；session.bound 置位由调用方根据返回值处理。
     */
    public static int bind(TurnRelayClient.TurnSession session) {
+      return bindWithRetry(session, 1);
+   }
+
+   /**
+    * 带外层重试的 BIND（1.1.5）：单轮 5 发共 4.6s 全丢在移动弱网很常见
+    * （实证 09-11 23:28: host 5 发无一到达 turn01, 同会话 guest 一次即中）。
+    * 整轮失败后隔 1s 再来一轮, rounds 轮内任一成功即返回; 非超时类失败码
+    * （票据/角色/满员）重试无意义, 原样返回。
+    */
+   public static int bindWithRetry(TurnRelayClient.TurnSession session, int rounds) {
+      if (session.socket == null || session.socket.isClosed()) {
+         return BIND_SERVER_BUSY;
+      }
+      int code = BIND_SERVER_BUSY;
+      for (int attempt = 1; attempt <= Math.max(1, rounds); attempt++) {
+         code = bindOnce(session);
+         if (code == BIND_OK || code != BIND_SERVER_BUSY) {
+            return code;
+         }
+         if (attempt < rounds) {
+            LOGGER.warn("[TurnRelay] bind all sends lost (round {}/{}), retry in 1s", attempt, rounds);
+            try {
+               Thread.sleep(1000L);
+            } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               return code;
+            }
+         }
+      }
+      return code;
+   }
+
+   private static int bindOnce(TurnRelayClient.TurnSession session) {
       if (session.socket == null || session.socket.isClosed()) {
          return BIND_SERVER_BUSY;
       }
