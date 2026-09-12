@@ -221,8 +221,12 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       }
 
       if (this.lyWebsite != Integer.MIN_VALUE) {
+         // 官网 + 反馈 同行两半宽按钮（反馈进入 选择界面 → GitHub Issues / 站内反馈表单）
          this.addRenderableWidget(
-            Button.builder(Component.translatable("voxlink.website"), button -> this.openWebsite()).bounds(centerX - 100, this.lyWebsite, 200, 20).build()
+            Button.builder(Component.translatable("voxlink.website"), button -> this.openWebsite()).bounds(centerX - 100, this.lyWebsite, HALF_BTN_W, 20).build()
+         );
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("voxlink.feedback"), button -> Minecraft.getInstance().setScreen(new FeedbackScreen(this))).bounds(centerX + L_GAP, this.lyWebsite, HALF_BTN_W, 20).build()
          );
       }
       if (showDownload && this.lyDownloadRow != Integer.MIN_VALUE) {

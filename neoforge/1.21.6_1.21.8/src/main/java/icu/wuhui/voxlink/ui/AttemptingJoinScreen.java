@@ -60,6 +60,14 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       "voxlink.tip.kamu_launcher"
    };
    private final List<String> tipQueue = new ArrayList<>();
+   // ===== 日志面板（1.1.5 UI 重构）=====
+   private final java.util.ArrayList<String> logLines = new java.util.ArrayList<>();
+   private final java.util.ArrayList<Integer> logLevels = new java.util.ArrayList<>();
+   /** 距底部的行数（0=贴底）。 */
+   private int logScrollRows = 0;
+   /** 贴底跟随：玩家滚回底自动恢复 true。跟随中日志新增时视图贴底——不滚动玩家正在看的历史。 */
+   private boolean logFollowTail = true;
+   private long logSeenVersion = -1L;
    private String currentTipKey = "";
    private long tipLastSwitchTime = 0L;
    private final Screen parent;
@@ -115,6 +123,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    @Override
    protected void init() {
       super.init();
+      icu.wuhui.voxlink.ui.UiLogBus.attach();
       RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
       boolean bridgeReady = room != null && room.getLocalBridgePort() > 0 && ConnectionHelper.isMcTrulyConnected();
       if (bridgeReady) {
@@ -161,9 +170,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
             );
             if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton()) {
                this.relayButtonVisible = true;
+               // 玩家中继按钮: 右上角第一行 (15s 出现); TURN 20s 出现在其下方一行。
+               // 集中右上角不霸占中间区域, 中间留给状态与日志面板
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.use_player_relay"), button -> this.onRelayButtonClicked())
-                     .bounds(centerX - 100, btnY + 20 + 4, 200, 20)
+                     .bounds(this.width - 104, 26, 100, 20)
                      .build()
                );
             } else if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress()) {
@@ -171,7 +182,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                this.relayButtonVisible = true;
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.cancel"), button -> this.onCancelRelayClicked())
-                     .bounds(centerX - 100, btnY + 20 + 4, 200, 20)
+                     .bounds(this.width - 104, 26, 100, 20)
                      .build()
                );
             } else {
@@ -180,12 +191,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          }
       }
 
-      // TURN"使用中继"：右上角小按钮。显隐由 monitor 线程按 20s 计时 + 服务端开关计算。
-      // TURN"使用中继"：右上角小按钮。y=26 避开标题（标题文字在 y=15..24，y=4 会与标题同一高度带重叠）
+      // TURN"使用中继"：右上角第二行（玩家中继按钮下方）。显隐由 monitor 线程按 20s 计时 + 服务端开关计算。
       if (!bridgeReady && this.active && this.turnButtonVisible) {
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.turn.use"), button -> this.onTurnButtonClicked())
-               .bounds(this.width - 104, 26, 100, 20)
+               .bounds(this.width - 104, 48, 100, 20)
                .build()
          );
       }
@@ -201,6 +211,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    }
 
    public void onClose() {
+      icu.wuhui.voxlink.ui.UiLogBus.detach();
       if (this.active) {
          this.cancelJoin();
       } else {
@@ -698,6 +709,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
+      this.drawLogPanel(graphics);
       this.renderNatOverlay(graphics);
       int centerX = this.width / 2;
       this.drawCenteredString(graphics, this.title.getString(), centerX, 15, VoxLinkColors.WHITE);
@@ -803,6 +815,85 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          int uploadWidth = this.fontWidth(uploadText);
          this.drawString(graphics, uploadText, this.width - uploadWidth - 6, this.height - 12, VoxLinkColors.SUCCESS);
       }
+   }
+
+   // ===== 日志面板：滚轮只在悬停面板内生效；玩家滚离底部即暂停跟随，绝不抢视图 =====
+
+   private int logPanelX() {
+      return 4;
+   }
+
+   private int logPanelY() {
+      return 52;
+   }
+
+   private int logPanelWidth() {
+      return Math.min(280, this.width / 2 - 120);
+   }
+
+   private int logPanelHeight() {
+      return Math.max(60, this.height / 2 + 45 - 8 - 52);
+   }
+
+   private boolean logPanelHovered(double mouseX, double mouseY) {
+      return mouseX >= this.logPanelX() && mouseX < this.logPanelX() + this.logPanelWidth()
+         && mouseY >= this.logPanelY() && mouseY < this.logPanelY() + this.logPanelHeight();
+   }
+
+   @Override
+   public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+      if (this.logPanelHovered(mouseX, mouseY)) {
+         int visible = Math.max(1, (this.logPanelHeight() - 6) / 10);
+         int total = this.logLines.size();
+         if (scrollY > 0) {
+            // 向上翻历史：离开底部, 暂停贴底跟随
+            this.logScrollRows = Math.min(Math.max(0, total - visible), this.logScrollRows + 3);
+            this.logFollowTail = this.logScrollRows <= 0;
+            return true;
+         } else if (scrollY < 0) {
+            // 向下回到最新：贴底时恢复跟随
+            this.logScrollRows = Math.max(0, this.logScrollRows - 3);
+            this.logFollowTail = this.logScrollRows == 0;
+            return true;
+         }
+      }
+      return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+   }
+
+   private void drawLogPanel(GuiGraphics graphics) {
+      icu.wuhui.voxlink.ui.UiLogBus.snapshot(this.logLines, this.logLevels);
+      long ver = icu.wuhui.voxlink.ui.UiLogBus.version();
+      if (ver != this.logSeenVersion) {
+         this.logSeenVersion = ver;
+         if (this.logFollowTail) {
+            this.logScrollRows = 0; // 贴底跟随: 只在玩家本来就停在底部时刷新视图
+         }
+      }
+      int x = this.logPanelX();
+      int y = this.logPanelY();
+      int w = this.logPanelWidth();
+      int h = this.logPanelHeight();
+      int visible = Math.max(1, (h - 6) / 10);
+      int total = this.logLines.size();
+      int start = Math.max(0, total - visible - this.logScrollRows);
+      int end = Math.min(total, start + visible);
+      graphics.fill(x, y, x + w, y + h, 0x90101018);
+      graphics.fill(x, y, x + w, y + 1, 0xFF3A3A55);
+      graphics.fill(x, y + h - 1, x + w, y + h, 0xFF3A3A55);
+      graphics.fill(x, y, x + 1, y + h, 0xFF3A3A55);
+      graphics.fill(x + w - 1, y, x + w, y + h, 0xFF3A3A55);
+      graphics.enableScissor(x + 1, y + 1, x + w - 1, y + h - 1);
+      int row = y + 3;
+      for (int i = start; i < end; i++) {
+         String line = this.logLines.get(i);
+         int color = this.logLevels.get(i) == 2 ? 0xFFFF7B72 : this.logLevels.get(i) == 1 ? 0xFFFFD37F : 0xFFB8BCC8;
+         while (this.font.width(line) > w - 8 && line.length() > 1) {
+            line = line.substring(0, line.length() - 1);
+         }
+         graphics.drawString(this.font, line, x + 4, row, color);
+         row += 10;
+      }
+      graphics.disableScissor();
    }
 
    private void renderNatOverlay(GuiGraphics graphics) {

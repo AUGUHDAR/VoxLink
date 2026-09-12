@@ -260,9 +260,6 @@ public class ConnectionManager {
    private final AtomicBoolean continuousRetryCancelled = new AtomicBoolean(false);
 
    private final AtomicInteger continuousRetryRound = new AtomicInteger(0);
-   // 自动中继: 持续重试第几轮拉起 TURN + 上次自动尝试时刻(60s 节流)
-   private static final int AUTO_TURN_ROUND = 3;
-   private volatile long lastAutoTurnAttemptMs = 0L;
 
    private volatile PunchFailureClassifier.FailureReason lastFailureReason;
 
@@ -10350,27 +10347,6 @@ private volatile long lastProfileSwitchMs = 0L;
     * 前置：中继开关开启、未在 TURN/手动中继中、未连上；60s 节流。
     * 失败无害：teardownTurn 后继续走重试循环。
     */
-   private void autoTurnRelayIfEligible(RoomManager.RoomState state, int round) {
-      if (round < AUTO_TURN_ROUND || state == null || state == RoomManager.PENDING) {
-         return;
-      }
-      if (this.connectionWon.get() || this.turnInProgress || this.turnSession != null || this.manualRelayInProgress) {
-         return;
-      }
-      if (!VoxLinkMod.getConfig().isRelayEnabled()) {
-         return;
-      }
-      long now = System.currentTimeMillis();
-      if (this.lastAutoTurnAttemptMs != 0L && now - this.lastAutoTurnAttemptMs < 60000L) {
-         return;
-      }
-      this.lastAutoTurnAttemptMs = now;
-      VoxLinkMod.LOGGER.info("[Turn] persistent retry round={}, auto-starting relay (direct looks hopeless)", round);
-      if (state.roomInfo != null) {
-         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.auto_turn"), true);
-      }
-      this.triggerTurnRelay();
-   }
 
    private boolean enterContinuousRetryRound(RoomManager.RoomState state) {
 
@@ -10414,11 +10390,6 @@ private volatile long lastProfileSwitchMs = 0L;
 
       this.escalateProfileForRound(round);
 
-      // 自动 TURN: 持续重试到第 3 轮仍连不上, 大概率是双对称/硬 NAT, 直连希望渺茫。
-      // 自动拉起 TURN 中继承载数据面(打洞继续后台跑, 直连通了会平滑切回);
-      // 60s 节流防止 TURN 失败后每轮重试轰节点。之前 TURN 只挂在终态失败路径上,
-      // 而持续重试永远到不了终态 → 玩家实测打洞 3 分半全程无一次中继尝试(1.1.4 实锤)
-      this.autoTurnRelayIfEligible(state, round);
       VoxLinkMod.LOGGER.info("[Connection] Enter persistent retry round={}, level={}, reset cycle from 0", round, this.punchProfile().describeInstance());
 
       ConnectionState.transitionTo(ConnectionState.STUN_PROBE, "持续重试 round " + round);
