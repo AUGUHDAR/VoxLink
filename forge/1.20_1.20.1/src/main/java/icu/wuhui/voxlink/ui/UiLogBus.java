@@ -47,15 +47,19 @@ public final class UiLogBus {
    private UiLogBus() {
    }
 
-   /** 进入界面时调用：appender 只挂一次；collecting 置 true 开始收集并清空旧内容。 */
+   /** 进入界面时调用：appender 只挂一次；仅首次挂载清空旧内容，re-init（分辨率变化/控件重建）不清空——
+    * 面板内容跨 init 保留，否则分辨率切换/按钮显隐重建会把日志清空（1.1.5 实测 bug）。 */
    public static void attach() {
-      synchronized (LOCK) {
-         LINES.clear();
-         LEVELS.clear();
-         lastText = "";
-         lastTextRepeat = 0;
-         collecting = true;
+      boolean firstAttach = !attached;
+      if (firstAttach) {
+         synchronized (LOCK) {
+            LINES.clear();
+            LEVELS.clear();
+            lastText = "";
+            lastTextRepeat = 0;
+         }
       }
+      collecting = true;
       if (attached) {
          return;
       }

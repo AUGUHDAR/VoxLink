@@ -1349,70 +1349,28 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
    public boolean canShowRelayButton() {
-
       if (!VoxLinkMod.getConfig().isRelayEnabled()) {
-
          return false;
-
       }
 
-
-
       if (this.manualRelayInProgress) {
-
          return false;
-
       }
 
       // TURN 进行中/已建立时不再提供玩家中继入口：两条中继并行会互相干扰下方状态行与打洞调度
       if (this.turnInProgress || this.turnSession != null) {
-
          return false;
-
       }
-
-
 
       if (this.isLegacyPeer()) {
-
          return false;
-
       }
 
-
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING) {
-
-         int round = this.continuousRetryRound.get();
-
-         if (round < 2) {
-
-            return false;
-
-         }
-
-
-
-         if (this.nextRelayEligibleRound == 0) {
-
-            boolean isSymmetric = this.stunProbeResult != null && this.stunProbeResult.natType.isSymmetric();
-
-            this.nextRelayEligibleRound = isSymmetric ? 2 : 3;
-
-         }
-
-
-
-         return round >= this.nextRelayEligibleRound;
-
-      } else {
-
-         return false;
-
-      }
-
+      // 玩家中继按钮改为纯时间基准（1.1.5）：打洞开始 15s 后恒定可选。
+      // 原按持续重试轮次(round>=2/3)判定——一轮 20~50s 不等, 玩家实测"计时严重不准";
+      // 与 TURN 按钮(20s)同一基准 punchUiStartMs, 只是阈值不同(15s 先出, 20s TURN 跟上)
+      long punchStartMs = this.getPunchUiStartMs();
+      return punchStartMs > 0L && System.currentTimeMillis() - punchStartMs >= 15000L;
    }
 
 

@@ -749,6 +749,12 @@ public class RoomManager {
                         roomInfo.setAuthType(roomData.get("authType").getAsString());
                      }
 
+                     if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
+                        roomInfo.setHostGameVersion(roomData.get("gameVersion").getAsString().trim());
+                     }
+                     if (roomData.has("modVersion") && !roomData.get("modVersion").isJsonNull()) {
+                        roomInfo.setHostModVersion(roomData.get("modVersion").getAsString().trim());
+                     }
                      if (roomData.has("peerPort") && !roomData.get("peerPort").isJsonNull()) {
                         roomInfo.setPeerPort(roomData.get("peerPort").getAsInt());
                      }

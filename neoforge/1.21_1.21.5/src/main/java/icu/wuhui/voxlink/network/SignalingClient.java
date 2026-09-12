@@ -186,6 +186,7 @@ public class SignalingClient {
       if (gameVersion != null && !gameVersion.isEmpty()) {
          body.addProperty("gameVersion", gameVersion);
       }
+      body.addProperty("modVersion", VoxLinkMod.MOD_VERSION);
 
       if (hostIpv6 != null && !hostIpv6.isEmpty()) {
          body.addProperty("hostIpv6", hostIpv6);
@@ -279,6 +280,7 @@ public class SignalingClient {
       body.addProperty("idempotencyKey", this.joinIdempotencyNonce);
       body.addProperty("clientProtocolVersion", 7);
       body.addProperty("gameVersion", VoxLinkConstants.GAME_VERSION);
+      body.addProperty("modVersion", VoxLinkMod.MOD_VERSION);
       JsonArray capsArr = new JsonArray();
 
       for (String cap : ProtocolNegotiator.CURRENT_CAPABILITIES) {

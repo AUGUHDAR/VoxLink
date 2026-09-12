@@ -38,6 +38,9 @@ public class RoomInfo {
    private volatile int peerPort;
    private volatile String clientType = "mod";
    private volatile String loader = "unknown";
+   // 房主版本展示（1.1.5）：MC 版本 + VoxLink 模组版本（加入页显示）
+   private volatile String hostGameVersion = "";
+   private volatile String hostModVersion = "";
    private volatile Component connectionMode = Component.empty();
    private volatile boolean usingRelay = false;
    private volatile boolean connectionFailed = false;
@@ -414,6 +417,22 @@ public class RoomInfo {
 
    public void setLoader(String loader) {
       this.loader = loader;
+   }
+
+   public void setHostGameVersion(String v) {
+      this.hostGameVersion = v == null ? "" : v;
+   }
+
+   public String getHostGameVersion() {
+      return this.hostGameVersion;
+   }
+
+   public void setHostModVersion(String v) {
+      this.hostModVersion = v == null ? "" : v;
+   }
+
+   public String getHostModVersion() {
+      return this.hostModVersion;
    }
 
    public Component getConnectionMode() {

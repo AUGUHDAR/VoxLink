@@ -68,6 +68,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    /** 贴底跟随：玩家滚回底自动恢复 true。跟随中日志新增时视图贴底——不滚动玩家正在看的历史。 */
    private boolean logFollowTail = true;
    private long logSeenVersion = -1L;
+   /** 面板默认收起（玩家主动展开），避免常驻占地/常动视图。 */
+   private boolean logPanelOpen = false;
    private String currentTipKey = "";
    private long tipLastSwitchTime = 0L;
    private final Screen parent;
@@ -172,7 +174,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                this.relayButtonVisible = true;
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.use_player_relay"), button -> this.onRelayButtonClicked())
-                     .bounds(centerX - 100, btnY + 20 + 4, 200, 20)
+                     .bounds(this.width - 104, 26, 100, 20)
                      .build()
                );
             } else if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress()) {
@@ -180,7 +182,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                this.relayButtonVisible = true;
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.cancel"), button -> this.onCancelRelayClicked())
-                     .bounds(centerX - 100, btnY + 20 + 4, 200, 20)
+                     .bounds(this.width - 104, 26, 100, 20)
                      .build()
                );
             } else {
@@ -194,7 +196,18 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       if (!bridgeReady && this.active && this.turnButtonVisible) {
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.turn.use"), button -> this.onTurnButtonClicked())
-               .bounds(this.width - 104, 26, 100, 20)
+               .bounds(this.width - 104, 48, 100, 20)
+               .build()
+         );
+      }
+
+      // 日志面板展开/收起: 右下角, 在上传日志提示上方预留空间(提示在 y=height-12)
+      if (!bridgeReady && this.active) {
+         this.addRenderableWidget(
+            Button.builder(
+                  Component.translatable(this.logPanelOpen ? "voxlink.log.panel_hide" : "voxlink.log.panel_show"),
+                  button -> this.toggleLogPanel())
+               .bounds(this.width - 88, this.height - 32, 82, 18)
                .build()
          );
       }
@@ -203,6 +216,17 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          this.joinApiDone = true;
          this.startJoin();
       }
+   }
+
+   private void toggleLogPanel() {
+      this.logPanelOpen = !this.logPanelOpen;
+      // 展开瞬间贴底一次; 之后由滚轮决定跟随与否(新日志不强行拉动视图)
+      if (this.logPanelOpen) {
+         this.logScrollRows = 0;
+         this.logFollowTail = true;
+      }
+      this.clearOurWidgets();
+      this.init();
    }
 
    public boolean shouldCloseOnEsc() {
@@ -818,6 +842,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    @Override
    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+      if (!this.logPanelOpen) {
+         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+      }
       if (this.logPanelHovered(mouseX, mouseY)) {
          int visible = Math.max(1, (this.logPanelHeight() - 6) / 10);
          int total = this.logLines.size();
@@ -835,6 +862,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    }
 
    private void drawLogPanel(GuiGraphicsExtractor graphics) {
+      if (!this.logPanelOpen) {
+         return;
+      }
       icu.wuhui.voxlink.ui.UiLogBus.snapshot(this.logLines, this.logLevels);
       long ver = icu.wuhui.voxlink.ui.UiLogBus.version();
       if (ver != this.logSeenVersion) {
@@ -869,19 +899,19 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    }
 
    private int logPanelX() {
-      return 4;
+      return Math.max(4, this.width - this.logPanelWidth() - 6);
    }
 
    private int logPanelY() {
-      return 52;
+      return Math.max(40, this.height - 32 - this.logPanelHeight());
    }
 
    private int logPanelWidth() {
-      return Math.min(280, this.width / 2 - 120);
+      return Math.min(320, this.width - 12);
    }
 
    private int logPanelHeight() {
-      return Math.max(60, this.height / 2 + 45 - 8 - 52);
+      return Math.min(220, Math.max(80, this.height - 90));
    }
 
    private boolean logPanelHovered(double mouseX, double mouseY) {
@@ -915,6 +945,25 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, VoxLinkColors.MUTED);
       this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, VoxLinkColors.MUTED);
       this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, VoxLinkColors.WARNING);
+      // 房主版本行（1.1.5，玩家推荐）：对方 MC 版本 + VoxLink 模组版本；无数据时整行隐藏
+      RoomInfo ri = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
+      if (ri != null) {
+         String hv = ri.getHostGameVersion();
+         String hm = ri.getHostModVersion();
+         if (!hv.isEmpty() || !hm.isEmpty()) {
+            StringBuilder sb = new StringBuilder(Component.translatable("voxlink.host_version_label").getString() + ": ");
+            if (!hv.isEmpty()) {
+               sb.append("MC ").append(hv);
+            }
+            if (!hm.isEmpty()) {
+               if (sb.length() > 0 && !sb.toString().endsWith(": ")) {
+                  sb.append(" · ");
+               }
+               sb.append("VoxLink ").append(hm);
+            }
+            this.drawString(graphics, sb.toString(), x, y + line * 3, VoxLinkColors.MUTED);
+         }
+      }
    }
 
    private String natCnName(NatClass nat) {
