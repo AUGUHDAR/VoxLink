@@ -11773,6 +11773,7 @@ private volatile long lastProfileSwitchMs = 0L;
          });
       this.startTurnBgMonitor(state);
       VoxLinkMod.LOGGER.info("[Turn] host path up via {}:{} (peer={})", host, port, from);
+      icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
    }
 
    /** guest 收 turn_ready：host 数据面就绪 → start 自己的 TURN transport → 桥接进 MC。 */
@@ -11798,6 +11799,7 @@ private volatile long lastProfileSwitchMs = 0L;
       this.startUdpPunchBridge(state, transport);
       this.startTurnBgMonitor(state);
       VoxLinkMod.LOGGER.info("[Turn] guest path up, bridge starting");
+      icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
    }
 
    /** TURN 会话保活：15s 一次 KEEPALIVE（节点 90s 无包踢角色）。句柄存字段，teardown 取消。 */
@@ -12612,7 +12614,7 @@ private volatile long lastProfileSwitchMs = 0L;
          this.connectionWon.set(false);
 
          ConnectionState.transitionTo(ConnectionState.FAILED, "所有连接方式失败");
-         icu.wuhui.voxlink.ui.UiLogBus.push(3, "voxlink.logui.failed");
+         icu.wuhui.voxlink.ui.UiLogBus.push(3, reasonKey);
 
          // 日志上传加强: 到达真终态即触发失败样本快传(5s), 不再硬等 90s 定时器
          LogUploadManager.onTerminalFailure();
@@ -14345,7 +14347,7 @@ private volatile long lastProfileSwitchMs = 0L;
       this.connectionCycleActive.set(false);
 
       ConnectionState.transitionTo(ConnectionState.FAILED, "持续重试耗尽且双向零收包");
-      icu.wuhui.voxlink.ui.UiLogBus.push(3, "voxlink.logui.failed");
+      icu.wuhui.voxlink.ui.UiLogBus.push(3, "voxlink.connection.zero_recv_failed");
 
       ConnectionHelper.resetConnecting();
 
