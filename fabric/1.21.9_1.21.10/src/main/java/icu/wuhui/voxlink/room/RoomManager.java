@@ -2007,6 +2007,7 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
 
    private void handleDisconnect(String from, JsonObject data) {
       VoxLinkMod.LOGGER.info("Peer disconnected: {}", from);
+      icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.peer_left");
       // 仅当断线者恰是本端 TURN 对端才清理；多房客时其他房客断线不能杀掉存活的 TURN 会话
       if (this.connectionManager.isTurnPeer(from)) {
          this.connectionManager.cleanupTurnQuietly();

@@ -203,7 +203,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       }
 
       // 日志面板展开/收起: 右下角, 在上传日志提示上方预留空间(提示在 y=height-12)
-      if (!bridgeReady && this.active) {
+      if (!bridgeReady) {
          this.addRenderableWidget(
             Button.builder(
                   Component.translatable(this.logPanelOpen ? "voxlink.log.panel_hide" : "voxlink.log.panel_show"),
@@ -762,7 +762,24 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          }
       }
 
-      if (!this.voxlinkStatusText.isEmpty()) {
+      // 中央状态行 = 日志总线最新一条（玩家语言进行时叙述, 如"正在尝试直连…"）;
+      // 右下角面板才是完整历史。总线为空时回落到原连接模式文本
+      UiLogBus.snapshot(this.logLines, this.logLevels);
+      if (!this.logLines.isEmpty()) {
+         String latest = this.logLines.get(this.logLines.size() - 1);
+         int lv = this.logLevels.get(this.logLevels.size() - 1);
+         int lvColor = lv == 3 ? VoxLinkColors.ERROR : lv == 1 ? VoxLinkColors.SUCCESS : lv == 2 ? VoxLinkColors.WARNING : this.voxlinkStatusColor;
+         int maxWidth = this.width - 20;
+         if (this.fontWidth(latest) > maxWidth) {
+            while (this.fontWidth(latest + "...") > maxWidth && latest.length() > 0) {
+               latest = latest.substring(0, latest.length() - 1);
+            }
+
+            latest = latest + "...";
+         }
+
+         this.drawCenteredString(graphics, latest, centerX, this.height / 2 + 0, lvColor);
+      } else if (!this.voxlinkStatusText.isEmpty()) {
          String label = Component.translatable("voxlink.dual.voxlink_label").getString();
          String clipped = this.voxlinkStatusText;
          int maxWidth = this.width - 20;
@@ -844,19 +861,21 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    // ===== 日志面板：滚轮只在悬停面板内生效；玩家滚离底部即暂停跟随，绝不抢视图 =====
 
    private int logPanelX() {
-      return Math.max(4, this.width - this.logPanelWidth() - 6);
+      return this.width - this.logPanelWidth() - 6;
    }
 
    private int logPanelY() {
-      return Math.max(40, this.height - 32 - this.logPanelHeight());
+      return 44;
    }
 
+   // 右侧竖条: 左缘=中央按钮右缘+18, 永不与中央标题/房间码/状态/取消按钮重叠(小屏自动收窄)
    private int logPanelWidth() {
-      return Math.min(320, this.width - 12);
+      int w = this.width - (this.width / 2 + 118) - 6;
+      return Math.max(110, Math.min(340, w));
    }
 
    private int logPanelHeight() {
-      return Math.min(220, Math.max(80, this.height - 90));
+      return Math.max(60, this.height - 44 - 40);
    }
 
    private boolean logPanelHovered(double mouseX, double mouseY) {
@@ -949,24 +968,12 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, VoxLinkColors.MUTED);
       this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, VoxLinkColors.MUTED);
       this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, VoxLinkColors.WARNING);
-      // 房主版本行（1.1.5，玩家推荐）：对方 MC 版本 + VoxLink 模组版本；无数据时整行隐藏
+      // 对方 VoxLink 版本行（1.1.5，玩家推荐）：只展示模组版本（玩家明确不要 MC 版本）；未上报显示"未知"
       RoomInfo ri = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
       if (ri != null) {
-         String hv = ri.getHostGameVersion();
          String hm = ri.getHostModVersion();
-         if (!hv.isEmpty() || !hm.isEmpty()) {
-            StringBuilder sb = new StringBuilder(Component.translatable("voxlink.host_version_label").getString() + ": ");
-            if (!hv.isEmpty()) {
-               sb.append("MC ").append(hv);
-            }
-            if (!hm.isEmpty()) {
-               if (sb.length() > 0 && !sb.toString().endsWith(": ")) {
-                  sb.append(" · ");
-               }
-               sb.append("VoxLink ").append(hm);
-            }
-            this.drawString(graphics, sb.toString(), x, y + line * 3, VoxLinkColors.MUTED);
-         }
+         String shown = hm.isEmpty() ? Component.translatable("voxlink.host_version_unknown").getString() : hm;
+         this.drawString(graphics, Component.translatable("voxlink.host_version_label").getString() + ": " + shown, x, y + line * 3, VoxLinkColors.MUTED);
       }
    }
 

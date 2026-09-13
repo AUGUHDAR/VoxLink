@@ -251,6 +251,7 @@ public final class SignalingWsTransport {
          CompletableFuture<Boolean> p = new CompletableFuture<>();
          this.connectPromise = p;
          try {
+icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.signaling_connecting");
             WebSocket.Builder builder = wsHttpClient().newWebSocketBuilder()
                .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS));
             builder.buildAsync(URI.create(this.wsUrl), new WsListener())
@@ -286,6 +287,7 @@ public final class SignalingWsTransport {
    }
 
    private void onConnected(WebSocket ws) {
+      icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.signaling_connected");
       this.webSocket = ws;
       this.connected.set(true);
       this.lastFrameAt.set(System.currentTimeMillis());
@@ -306,6 +308,7 @@ public final class SignalingWsTransport {
       }
       this.pending.clear();
       if (wasConnected) {
+         icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.signaling_lost");
          VoxLinkMod.LOGGER.debug("[WS] 连接断开，等待下次请求触发重连");
       }
    }

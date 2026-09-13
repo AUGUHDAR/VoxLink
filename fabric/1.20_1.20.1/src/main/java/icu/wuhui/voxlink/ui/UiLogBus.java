@@ -5,145 +5,71 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.core.LogEvent;
-import org.apache.logging.log4j.core.LoggerContext;
-import org.apache.logging.log4j.core.appender.AbstractAppender;
 
 /**
- * UiLogBus（1.1.5 UI 重构）：把本模组的日志流接到加入界面的日志面板。
+ * UiLogBus（1.1.5）：加入界面日志面板的内容总线。
  *
- * 实现：log4j2 核心挂一个 appender 到 root logger，按 logger 名前缀 "voxlink" 过滤，
- * 零侵入（不用改几百个调用点）；存入固定容量环形缓冲，UI 每帧只读快照。
+ * 设计原则（玩家向）：面板是给玩家看的进行时叙述（"正在尝试直连…""正在使用 TURN 中继…"），
+ * 不是开发者日志——内容一律由流程节点通过 {@link #push} 打点注入（translatable 键，随玩家语言），
+ * 绝不直接转发原始 log4j 日志。
  *
- * 面板降噪（加入等待页要的是"发生了什么"不是逐包转储）：
- *   - DEBUG/TRACE 不收（打洞 Send #/Received # 等 INFO 逐包日志按前缀黑名单丢弃）
- *   - 同文本 1 秒内重复折叠为 "×N"
- *
- * 线程：append 可能来自任意线程，读写在 LOCK 内；UI 线程只做快照拷贝。
- * 生命周期：attach() 在进入加入界面时调用，detach() 离开时调用（appender 只挂一次，detach 只停收集）。
+ * 环形缓冲 + 版本号供 UI 贴底跟随判断；线程安全（打点可能来自任意线程）。
  */
 public final class UiLogBus {
-   private static final int CAPACITY = 300;
+   private static final int CAPACITY = 120;
    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
    private static final Object LOCK = new Object();
    private static final ArrayDeque<String> LINES = new ArrayDeque<>(CAPACITY);
-   private static final ArrayDeque<Integer> LEVELS = new ArrayDeque<>(CAPACITY); // 0=info 1=warn 2=error
-   /** 逐包噪音黑名单：这些前缀的 INFO 日志不进面板（log4j 层仍在，latest.log 不受影响）。 */
-   private static final String[] NOISE_PREFIXES = new String[]{
-      "[UdpHolePuncher] Send #", "[UdpHolePuncher] Received #",
-      "sendControlMultiPort", "[PunchTuner]", "[RoomManager] Signal poll #",
-      "[ReliableUdp] Retransmit seq"
-   };
-
-   private static volatile boolean attached = false;
-   private static volatile boolean collecting = false;
+   private static final ArrayDeque<Integer> LEVELS = new ArrayDeque<>(CAPACITY); // 0=normal 1=success 2=warn 3=error
    private static volatile long version = 0L;
-   private static String lastText = "";
-   private static long lastTextAt = 0L;
-   private static int lastTextRepeat = 0;
 
    private UiLogBus() {
    }
 
-   /** 进入界面时调用：appender 只挂一次；仅首次挂载清空旧内容，re-init（分辨率变化/控件重建）不清空——
-    * 面板内容跨 init 保留，否则分辨率切换/按钮显隐重建会把日志清空（1.1.5 实测 bug）。 */
-   public static void attach() {
-      boolean firstAttach = !attached;
-      if (firstAttach) {
-         synchronized (LOCK) {
-            LINES.clear();
-            LEVELS.clear();
-            lastText = "";
-            lastTextRepeat = 0;
-         }
-      }
-      collecting = true;
-      if (attached) {
-         return;
-      }
+   /** 流程打点入口：key 为 voxlink.logui.* 翻译键，args 为占位参数。level: 0=普通 1=成功 2=警告 3=失败 */
+   public static void push(int level, String key, Object... args) {
+      String msg;
       try {
-         LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
-         // 4 参构造器全版本可用(新 log4j 标 deprecated 但仍保留); Property[] 版 1.20.1 NeoForge 的 log4j 没有
-         AbstractAppender appender = new AbstractAppender("VoxLinkUiBus", null, null, true) {
-            @Override
-            public void append(LogEvent event) {
-               if (!collecting) {
-                  return;
-               }
-               String loggerName = event.getLoggerName();
-               if (loggerName == null || !loggerName.startsWith("voxlink")) {
-                  return;
-               }
-               // DEBUG/TRACE 不进面板
-               if (event.getLevel().intLevel() > Level.INFO.intLevel()) {
-                  return;
-               }
-               String msg = event.getMessage() != null ? event.getMessage().getFormattedMessage() : "";
-               if (msg == null || msg.isEmpty()) {
-                  return;
-               }
-               for (String p : NOISE_PREFIXES) {
-                  if (msg.startsWith(p)) {
-                     return;
-                  }
-               }
-               long now = System.currentTimeMillis();
-               int level = event.getLevel() == Level.WARN ? 1 : event.getLevel() == Level.ERROR ? 2 : 0;
-               synchronized (LOCK) {
-                  if (msg.equals(lastText) && now - lastTextAt < 1000L) {
-                     lastTextRepeat++;
-                     lastTextAt = now;
-                     if (!LINES.isEmpty()) {
-                        LINES.pollLast();
-                        LEVELS.pollLast();
-                     }
-                     LINES.addLast(msg + " ×" + (lastTextRepeat + 1));
-                     LEVELS.addLast(level);
-                     trim();
-                     version++;
-                     return;
-                  }
-                  lastText = msg;
-                  lastTextAt = now;
-                  lastTextRepeat = 1;
-                  String time = LocalTime.now().format(TIME_FMT);
-                  LINES.addLast("[" + time + "] " + msg);
-                  LEVELS.addLast(level);
-                  trim();
-                  version++;
-               }
-            }
-
-            private void trim() {
-               while (LINES.size() > CAPACITY) {
-                  LINES.pollFirst();
-                  LEVELS.pollFirst();
-               }
-            }
-         };
-         appender.start();
-         ctx.getConfiguration().addAppender(appender);
-         ctx.getConfiguration().getRootLogger().addAppender(appender, Level.DEBUG, null);
-         ctx.updateLoggers();
-         attached = true;
+         msg = net.minecraft.client.Minecraft.getInstance() != null
+            ? net.minecraft.network.chat.Component.translatable(key, args).getString()
+            : key;
       } catch (Throwable t) {
-         // 任何 log4j 环境差异都不允许影响连接流程：面板静默降级为空
-         attached = false;
+         msg = key;
+      }
+      String time = LocalTime.now().format(TIME_FMT);
+      synchronized (LOCK) {
+         // 相邻重复去重：同一句话连打只记一条（打洞轮次等周期打点的噪音防线）
+         if (!LINES.isEmpty() && LINES.peekLast().endsWith(msg)) {
+            return;
+         }
+         LINES.addLast("[" + time + "] " + msg);
+         LEVELS.addLast(level);
+         while (LINES.size() > CAPACITY) {
+            LINES.pollFirst();
+            LEVELS.pollFirst();
+         }
+         version++;
       }
    }
 
-   /** 离开界面时调用：停止收集（appender 留着，重进界面直接复用）。 */
+   /** 进入界面时调用：清空上一局内容。 */
+   public static void attach() {
+      synchronized (LOCK) {
+         LINES.clear();
+         LEVELS.clear();
+         version++;
+      }
+   }
+
+   /** 离开界面时调用。 */
    public static void detach() {
-      collecting = false;
    }
 
    public static long version() {
       return version;
    }
 
-   /** UI 快照：levels[i] 与 lines[i] 对应（0=info 1=warn 2=error）。 */
+   /** UI 快照：levels[i] 与 lines[i] 对应（0=普通 1=成功 2=警告 3=失败）。 */
    public static void snapshot(List<String> lines, List<Integer> levels) {
       lines.clear();
       levels.clear();

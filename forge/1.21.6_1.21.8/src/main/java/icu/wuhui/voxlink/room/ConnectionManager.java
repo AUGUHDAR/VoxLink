@@ -1386,6 +1386,7 @@ private volatile long lastProfileSwitchMs = 0L;
             if (!this.manualRelayInProgress) {
 
                this.manualRelayInProgress = true;
+               icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.player_relay");
 
                // 启动 90s 总超时：tryRelay 递归批次(8s/批) 多了会无限循环, 必须有兜底。
                this.manualRelayDeadline = System.currentTimeMillis() + 90_000L;
@@ -6544,6 +6545,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                this.switchPunchProfile(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass);
 
+               icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.probing");
                VoxLinkMod.LOGGER
 
                   .info(
@@ -6576,6 +6578,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                }
 
+               icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.punching", cycle + 1);
                int timeoutSec = this.punchProfile().connectionTimeoutSec;
 
                boolean joinerSym = this.stunProbeResult != null && this.stunProbeResult.natType.isSymmetric();
@@ -7085,6 +7088,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                case 1:
 
+                  icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.tcp_fallback");
                   VoxLinkMod.LOGGER.info("[Connection] Wave 2: TCP fallback parallel (cycle{}/{})", displayCycle, maxCycles);
 
                   ConnectionState.transitionTo(ConnectionState.TCP_FALLBACK, "Wave 2 TCP兜底");
@@ -10348,6 +10352,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
       this.escalateProfileForRound(round);
 
+      icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
       VoxLinkMod.LOGGER.info("[Connection] Enter persistent retry round={}, level={}, reset cycle from 0", round, this.punchProfile().describeInstance());
 
       ConnectionState.transitionTo(ConnectionState.STUN_PROBE, "持续重试 round " + round);
@@ -11571,6 +11576,7 @@ private volatile long lastProfileSwitchMs = 0L;
       }
 
       this.turnInProgress = true;
+      icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.turn_relay");
       state.roomInfo.setConnectionMode(Component.translatable("voxlink.turn.connecting"));
       SignalingClient sc = this.signalingClient;
       CompletableFuture
@@ -12606,6 +12612,7 @@ private volatile long lastProfileSwitchMs = 0L;
          this.connectionWon.set(false);
 
          ConnectionState.transitionTo(ConnectionState.FAILED, "所有连接方式失败");
+         icu.wuhui.voxlink.ui.UiLogBus.push(3, "voxlink.logui.failed");
 
          // 日志上传加强: 到达真终态即触发失败样本快传(5s), 不再硬等 90s 定时器
          LogUploadManager.onTerminalFailure();
@@ -13475,6 +13482,7 @@ private volatile long lastProfileSwitchMs = 0L;
    public CompletableFuture<Void> startDualP2P(String roomCode, String playerName, String password, BiConsumer<String, String> statusCallback) {
 
       this.resetConnectionStateForNextP2P();
+      icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.preparing");
 
       this.resetDualRaceState();
 
@@ -14336,6 +14344,7 @@ private volatile long lastProfileSwitchMs = 0L;
       this.connectionCycleActive.set(false);
 
       ConnectionState.transitionTo(ConnectionState.FAILED, "持续重试耗尽且双向零收包");
+      icu.wuhui.voxlink.ui.UiLogBus.push(3, "voxlink.logui.failed");
 
       ConnectionHelper.resetConnecting();
 
@@ -14598,6 +14607,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
       // 连接成功事件: 稳定(2分钟)后不上传; 窗口内掉线仍会上传(失败诊断)
 
+      icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
       LogUploadManager.onConnected();
 
       if (!isHost) {
