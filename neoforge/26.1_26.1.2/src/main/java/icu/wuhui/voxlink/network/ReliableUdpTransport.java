@@ -241,7 +241,12 @@ public class ReliableUdpTransport implements AutoCloseable {
    }
 
    public void sendVoice(byte[] payload) {
-      if (payload == null || this.socket == null || this.socket.isClosed()) return;
+      // 构造 socket 检查放宽: TURN->直连平滑切换后旧 TURN socket 已关闭,
+      // 但 primaryPath 已 promote 到直连 socket——只看 this.socket 会让语音永久哑掉(审计 P2-4)
+      UdpPath primary = this.primaryPath;
+      boolean anySendable = (this.socket != null && !this.socket.isClosed())
+         || (primary != null && primary.socket != null && !primary.socket.isClosed());
+      if (payload == null || !anySendable) return;
       if (payload.length > 1400) {
          LOGGER.debug("[ReliableUdp] Voice payload too large ({}), dropped", payload.length);
          return;

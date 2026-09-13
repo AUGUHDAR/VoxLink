@@ -11563,6 +11563,9 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
       if (this.turnInProgress || this.turnSession != null || this.manualRelayInProgress) {
          return;
       }
+      // 新 TURN 会话复位旧标记: turnSwitchedToP2p=true 会短路 20s turn_ready 兜底、
+      // 自cancel 后台升级监视器、让按钮永久失效(1.1.5 TURN 审计 P1-3)
+      this.turnSwitchedToP2p = false;
 
       RoomManager.RoomState state = this.roomManager.currentRoom.get();
       if (state == null || state == RoomManager.PENDING || state.roomInfo.isHost()) {
@@ -11623,13 +11626,21 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
                sid[i] = (byte)Integer.parseInt(alloc.sessionIdHex.substring(i * 2, i * 2 + 2), 16);
             }
 
-            TurnRelayClient.TurnSession session =
-               new TurnRelayClient.TurnSession(alloc.sessionIdHex, sid, alloc.host, alloc.port, TurnRelayClient.ROLE_GUEST, alloc.guestTicket, alloc.expireSec);
-            // 3 轮重试(每轮5发): 弱网单轮全丢很常见(实证 09-11 22:42 guest 5发全丢)
-            int code = TurnRelayClient.bindWithRetry(session, 3);
-            if (code != TurnRelayClient.BIND_OK) {
+            TurnRelayClient.TurnSession session =
+               new TurnRelayClient.TurnSession(alloc.sessionIdHex, sid, alloc.host, alloc.port, TurnRelayClient.ROLE_GUEST, alloc.guestTicket, alloc.expireSec);
+            // 3 轮重试(每轮5发): 弱网单轮全丢很常见(实证 09-11 22:42 guest 5发全丢)
+            int code = TurnRelayClient.bindWithRetry(session, 3);
+            if (code != TurnRelayClient.BIND_OK) {
+               session.unbind();
+               throw new IllegalStateException("BIND_FAILED_" + code);
+            }
+
+            // 1.1.5 写回屏障: 35s 总超时触发的 teardown 已把 turnInProgress 置 false 时,
+            // 异步链在此中止写回(否则"复活"出无看门狗的孤儿会话, 审计 P1-1)
+            if (!this.turnInProgress) {
                session.unbind();
-               throw new IllegalStateException("BIND_FAILED_" + code);
+               VoxLinkMod.LOGGER.warn("[Turn] guest flow cancelled during bind (timeout teardown won), discard session");
+               throw new IllegalStateException("TURN_CANCELLED");
             }
 
             this.turnSession = session;
@@ -11715,69 +11726,88 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
 
       byte[] sid = new byte[16];
 
-      for (int i = 0; i < 16; i++) {
-         sid[i] = (byte)Integer.parseInt(sessionIdHex.substring(i * 2, i * 2 + 2), 16);
-      }
+      // 1.1.5 TURN 可靠性: bind(3轮×5发, 弱网最长~16s)移出信令分发线程——
+      // 单线程 scheduler 被阻塞期间房主收不到任何信令(其他房客 join/disconnect 全排队, 审计 P1-2)
+      this.scheduler.execute(() -> {
+          for (int i = 0; i < 16; i++) {
+             sid[i] = (byte)Integer.parseInt(sessionIdHex.substring(i * 2, i * 2 + 2), 16);
+          }
 
-      TurnRelayClient.TurnSession session =
-         new TurnRelayClient.TurnSession(sessionIdHex, sid, host, port, TurnRelayClient.ROLE_HOST, ticket, expire);
-      // 3 轮重试(每轮5发, 总预算~16s < guest 的 20s turn_ready 等待):
-      // 实证 09-11 23:28 host 单轮 5 发无一到达 turn01, guest 同会话一次即中——纯弱网丢包
-      int code = TurnRelayClient.bindWithRetry(session, 3);
-      if (code != TurnRelayClient.BIND_OK) {
-         VoxLinkMod.LOGGER.warn("[Turn] host bind failed code={} sid={} endpoint={}:{}", code, sessionIdHex.substring(0, 8), host, port);
-         session.unbind();
-         return;
-      }
+          TurnRelayClient.TurnSession session =
+             new TurnRelayClient.TurnSession(sessionIdHex, sid, host, port, TurnRelayClient.ROLE_HOST, ticket, expire);
+          // 3 轮重试(每轮5发, 总预算~16s < guest 的 20s turn_ready 等待):
+          // 实证 09-11 23:28 host 单轮 5 发无一到达 turn01, guest 同会话一次即中——纯弱网丢包
+          int code = TurnRelayClient.bindWithRetry(session, 3);
+          if (code != TurnRelayClient.BIND_OK) {
+             VoxLinkMod.LOGGER.warn("[Turn] host bind failed code={} sid={} endpoint={}:{}", code, sessionIdHex.substring(0, 8), host, port);
+             session.unbind();
+             return;
+          }
 
-      this.turnSession = session;
-      this.turnPeerId = from;
-      this.startTurnKeepalive(session);
-      UdpPath.Codec codec = new TurnRelayClient.TurnPathCodec(sid, TurnRelayClient.ROLE_HOST, TurnRelayClient.ROLE_GUEST);
-      ReliableUdpTransport transport = new ReliableUdpTransport(session.socket, session.endpoint(), codec);
-      // TURN 路径密钥现场重派生, 不沿用 activePunchAuthKey:
-      // ①打洞阶段密钥可能陈旧(重进房/join_request 被 defer 未重派);
-      // ②turn_alloc 携带 joiner 当前权威 clientId 与显式 punchAuth 声明,
-      //   据此派生与 guest 侧对称一致(实证互丢 bug: RBW6HX 1.1.4)
-      String turnPeerId = data.has("clientId") ? data.get("clientId").getAsString() : null;
-      byte[] turnAuthKey;
-      if (data.has("punchAuth") && !data.get("punchAuth").isJsonNull() && data.get("punchAuth").getAsBoolean()) {
-         turnAuthKey = turnPeerId != null && !turnPeerId.isEmpty() && state.roomInfo.getCode() != null
-            ? PunchAuth.deriveDirectKey(state.roomInfo.getCode(), turnPeerId)
-            : null;
-      } else {
-         // 旧版 guest 未声明: 回退 peer 表判定(保持旧行为)
-         turnAuthKey = this.derivePunchAuthKey(state, turnPeerId, false);
-      }
-      if (turnAuthKey != null) {
-         transport.setAuthKey(turnAuthKey);
-         this.activePunchAuthKey = turnAuthKey;
-         VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (host side, peer {})", turnPeerId);
-      } else {
-         VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (peer {} legacy/caps missing)", turnPeerId);
-      }
-      // 互操作降级开关: 旧引擎 guest(桌面 App/旧版 mod)无密钥时连续认证失败自动回明文
-      // (实证 09-11 23:03: host armed 而对端明文, path up 同秒互丢, 19s 后桥死)
-      transport.allowAuthDowngradeForInterop();
+          this.turnSession = session;
+          this.turnPeerId = from;
+          this.startTurnKeepalive(session);
+          UdpPath.Codec codec = new TurnRelayClient.TurnPathCodec(sid, TurnRelayClient.ROLE_HOST, TurnRelayClient.ROLE_GUEST);
+          ReliableUdpTransport transport = new ReliableUdpTransport(session.socket, session.endpoint(), codec);
+          // TURN 路径密钥现场重派生, 不沿用 activePunchAuthKey:
+          // ①打洞阶段密钥可能陈旧(重进房/join_request 被 defer 未重派);
+          // ②turn_alloc 携带 joiner 当前权威 clientId 与显式 punchAuth 声明,
+          //   据此派生与 guest 侧对称一致(实证互丢 bug: RBW6HX 1.1.4)
+          String turnPeerId = data.has("clientId") ? data.get("clientId").getAsString() : null;
+          byte[] turnAuthKey;
+          if (data.has("punchAuth") && !data.get("punchAuth").isJsonNull() && data.get("punchAuth").getAsBoolean()) {
+             turnAuthKey = turnPeerId != null && !turnPeerId.isEmpty() && state.roomInfo.getCode() != null
+                ? PunchAuth.deriveDirectKey(state.roomInfo.getCode(), turnPeerId)
+                : null;
+          } else {
+             // 旧版 guest 未声明: 回退 peer 表判定(保持旧行为)
+             turnAuthKey = this.derivePunchAuthKey(state, turnPeerId, false);
+          }
+          if (turnAuthKey != null) {
+             transport.setAuthKey(turnAuthKey);
+             this.activePunchAuthKey = turnAuthKey;
+             VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (host side, peer {})", turnPeerId);
+          } else {
+             VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (peer {} legacy/caps missing)", turnPeerId);
+          }
+          // 互操作降级开关: 旧引擎 guest(桌面 App/旧版 mod)无密钥时连续认证失败自动回明文
+          // (实证 09-11 23:03: host armed 而对端明文, path up 同秒互丢, 19s 后桥死)
+          transport.allowAuthDowngradeForInterop();
 
-      this.turnTransport = transport;
-      transport.start();
-      this.activeUdpTransports.put(from, transport);
-      this.startHostUdpPunchBridge(state, from, transport);
+          this.turnTransport = transport;
+          transport.start();
+          this.activeUdpTransports.put(from, transport);
+          this.startHostUdpPunchBridge(state, from, transport);
 
-      JsonObject ready = new JsonObject();
-      ready.addProperty("clientId", state.roomInfo.getClientId());
-      this.signalingClient
-         .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_ready", ready, from)
-         .exceptionally(e -> {
-            // turn_ready 发不出去 guest 必然 20s 兜底 teardown：必须 WARN 可见（曾因白名单缺失被 debug 吞掉）
-            VoxLinkMod.LOGGER.warn("[Turn] turn_ready send failed: {}", e.getMessage());
-            return null;
-         });
-      this.startTurnBgMonitor(state);
-      VoxLinkMod.LOGGER.info("[Turn] host path up via {}:{} (peer={})", host, port, from);
-      icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
+          JsonObject ready = new JsonObject();
+          ready.addProperty("clientId", state.roomInfo.getClientId());
+          this.signalingClient
+             .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_ready", ready, from)
+             .exceptionally(e -> {
+                // turn_ready 发不出去 guest 必然 20s 兜底 teardown：必须 WARN 可见（曾因白名单缺失被 debug 吞掉）
+                VoxLinkMod.LOGGER.warn("[Turn] turn_ready send failed: {}", e.getMessage());
+                return null;
+             });
+          // 1.1.5: turn_ready 单发无重试是硬伤(信令一次 HTTP 失败 guest 就整场重来);
+          // 4s 后补发一次, 守卫: 会话仍在且对端未换
+          JsonObject readyResend = ready;
+          this.scheduler.schedule(() -> {
+             if (this.turnSession == session && this.turnPeerId == from) {
+                this.signalingClient
+                   .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_ready", readyResend, from)
+                   .exceptionally(e -> {
+                      VoxLinkMod.LOGGER.debug("[Turn] turn_ready resend failed: {}", e.getMessage());
+                      return null;
+                   });
+                VoxLinkMod.LOGGER.info("[Turn] turn_ready resent (delivery insurance)");
+             }
+          }, 4L, java.util.concurrent.TimeUnit.SECONDS);
+          this.startTurnBgMonitor(state);
+          VoxLinkMod.LOGGER.info("[Turn] host path up via {}:{} (peer={})", host, port, from);
+          icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
+      });
    }
+
 
    /** guest 收 turn_ready：host 数据面就绪 → start 自己的 TURN transport → 桥接进 MC。 */
    public void handleTurnReady(String from, JsonObject data) {
@@ -11859,7 +11889,9 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
 
             int tick = this.turnBgTicks.incrementAndGet();
             // 玩家中继热备相位：60s 一次（奇数 tick），与 30s 直连打洞错开
-            if (tick % 2 == 1 && this.turnHotstandbyTransport == null) {
+            // 热备探测门: TURN 数据面活着才值得做玩家中继热备(会话已死时空转打洞+刷日志, 实测30s一次)
+            boolean turnCarrying = this.turnTransport != null && this.turnTransport.isConnected();
+            if (tick % 2 == 1 && turnCarrying && this.turnHotstandbyTransport == null) {
                this.attemptBgPlayerRelay(state);
             }
 
@@ -12258,6 +12290,8 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
          // 会话终结即复位"本周期放弃 P2P 升级"标记（"退出重进重置"的实际落点）
          this.turnP2pGivenUp = false;
          this.turnSwitchedToP2p = false;
+         // 漏复位会让下一会话的后台 P2P 升级 CAS 恒失败, 直连升级永久失效(审计 P1-4)
+         this.turnBgPunchWon.set(false);
       } catch (Exception e) {
       }
    }
