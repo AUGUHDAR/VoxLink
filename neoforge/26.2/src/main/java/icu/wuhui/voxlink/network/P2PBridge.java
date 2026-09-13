@@ -788,6 +788,7 @@ public class P2PBridge {
          activeUdpTransports.add(transport);
          transport.start();
          getOrCreateExecutor().execute(() -> acceptUdpJoinerConnections(joinerServer, transport));
+         icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.bridge_connecting");
          LOGGER.info("UDP joiner bridge started on port {}", joinerPort);
          return joinerPort;
       } catch (IOException e) {

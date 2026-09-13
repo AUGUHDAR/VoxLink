@@ -764,10 +764,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
       // 中央状态行 = 日志总线最新一条（玩家语言进行时叙述, 如"正在尝试直连…"）;
       // 右下角面板才是完整历史。总线为空时回落到原连接模式文本
-      UiLogBus.snapshot(this.logLines, this.logLevels);
-      if (!this.logLines.isEmpty()) {
-         String latest = this.logLines.get(this.logLines.size() - 1);
-         int lv = this.logLevels.get(this.logLevels.size() - 1);
+      String latest = UiLogBus.latestMessage();
+      int lv = UiLogBus.latestLevel();
+      if (!latest.isEmpty()) {
          int lvColor = lv == 3 ? VoxLinkColors.ERROR : lv == 1 ? VoxLinkColors.SUCCESS : lv == 2 ? VoxLinkColors.WARNING : this.voxlinkStatusColor;
          int maxWidth = this.width - 20;
          if (this.fontWidth(latest) > maxWidth) {

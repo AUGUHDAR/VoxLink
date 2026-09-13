@@ -74,6 +74,22 @@ public final class UiLogBus {
       return version;
    }
 
+   /** 中央状态行用：最新一条的正文（无时间戳前缀）；空总线返回 ""。 */
+   public static String latestMessage() {
+      synchronized (LOCK) {
+         String s = LINES.isEmpty() ? "" : LINES.peekLast();
+         int i = s.indexOf("] ");
+         return i >= 0 ? s.substring(i + 2) : s;
+      }
+   }
+
+   /** 最新一条的级别（0=普通 1=成功 2=警告 3=失败）；空总线返回 -1。 */
+   public static int latestLevel() {
+      synchronized (LOCK) {
+         return LEVELS.isEmpty() ? -1 : LEVELS.peekLast();
+      }
+   }
+
    /** UI 快照：levels[i] 与 lines[i] 对应（0=普通 1=成功 2=警告 3=失败）。 */
    public static void snapshot(List<String> lines, List<Integer> levels) {
       lines.clear();

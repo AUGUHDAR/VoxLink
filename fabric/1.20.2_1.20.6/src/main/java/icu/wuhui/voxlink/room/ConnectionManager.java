@@ -6795,6 +6795,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.probing");
 
                case 0:
 
+icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.lan");
                   VoxLinkMod.LOGGER.info("[Connection] Wave 1: LAN+IPv6+UDP parallel (cycle {}/{})", displayCycle, maxCycles);
 
                   state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.punching"));
@@ -9197,6 +9198,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.tcp_fallback");
 
    public void startReversePunch(RoomManager.RoomState state) {
 
+icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.reverse");
       VoxLinkMod.LOGGER.info("[ReversePunch] Parallel start reverse punch");
 
       state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.punching"));
@@ -11598,7 +11600,10 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
             }
             return probed.get(0).node;
          })
-         .thenCompose(node -> TurnRelayClient.allocate(sc, state.roomInfo.getCode(), state.roomInfo.getClientId(), state.roomInfo.getToken(), node.id))
+         .thenCompose(node -> {
+            icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.turn_allocating");
+            return TurnRelayClient.allocate(sc, state.roomInfo.getCode(), state.roomInfo.getClientId(), state.roomInfo.getToken(), node.id);
+         })
          .thenCompose(alloc -> {
             if (alloc == null) {
                throw new IllegalStateException("ALLOC_FAILED");
