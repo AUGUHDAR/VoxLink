@@ -13480,6 +13480,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
    public CompletableFuture<Void> startDualP2P(String roomCode, String playerName, String password, BiConsumer<String, String> statusCallback) {
 
       this.resetConnectionStateForNextP2P();
+      icu.wuhui.voxlink.ui.UiLogBus.reset();
       icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.preparing");
 
       this.resetDualRaceState();

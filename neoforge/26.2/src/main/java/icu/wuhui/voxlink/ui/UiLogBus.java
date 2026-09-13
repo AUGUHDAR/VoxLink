@@ -52,8 +52,13 @@ public final class UiLogBus {
       }
    }
 
-   /** 进入界面时调用：清空上一局内容。 */
+   /** 进入界面时调用：不清空内容——界面重建(按钮显隐/分辨率变化)会反复走这里,
+    * 在此清空会导致日志"玩消失"(实测两轮教训)。清空时机唯一: 每次新连接开始的 reset()。 */
    public static void attach() {
+   }
+
+   /** 新连接会话开始时调用（startDualP2P）：唯一合法的清空时机。 */
+   public static void reset() {
       synchronized (LOCK) {
          LINES.clear();
          LEVELS.clear();

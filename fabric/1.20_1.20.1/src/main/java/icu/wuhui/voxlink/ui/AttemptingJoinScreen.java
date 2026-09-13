@@ -176,7 +176,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                // 集中右上角不霸占中间区域, 中间留给状态与日志面板
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.use_player_relay"), button -> this.onRelayButtonClicked())
-                     .bounds(this.width - 104, 26, 100, 20)
+                     .bounds(this.width - 104, 4, 100, 20)
                      .build()
                );
             } else if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress()) {
@@ -184,7 +184,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                this.relayButtonVisible = true;
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.cancel"), button -> this.onCancelRelayClicked())
-                     .bounds(this.width - 104, 26, 100, 20)
+                     .bounds(this.width - 104, 4, 100, 20)
                      .build()
                );
             } else {
@@ -197,7 +197,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       if (!bridgeReady && this.active && this.turnButtonVisible) {
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.turn.use"), button -> this.onTurnButtonClicked())
-               .bounds(this.width - 104, 48, 100, 20)
+               .bounds(this.width - 104, 26, 100, 20)
                .build()
          );
       }

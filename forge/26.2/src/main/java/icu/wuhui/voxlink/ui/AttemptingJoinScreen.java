@@ -174,7 +174,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                this.relayButtonVisible = true;
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.use_player_relay"), button -> this.onRelayButtonClicked())
-                     .bounds(this.width - 104, 26, 100, 20)
+                     .bounds(this.width - 104, 4, 100, 20)
                      .build()
                );
             } else if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress()) {
@@ -182,7 +182,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                this.relayButtonVisible = true;
                this.addRenderableWidget(
                   Button.builder(Component.translatable("voxlink.relay.cancel"), button -> this.onCancelRelayClicked())
-                     .bounds(this.width - 104, 26, 100, 20)
+                     .bounds(this.width - 104, 4, 100, 20)
                      .build()
                );
             } else {
@@ -196,7 +196,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       if (!bridgeReady && this.active && this.turnButtonVisible) {
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.turn.use"), button -> this.onTurnButtonClicked())
-               .bounds(this.width - 104, 48, 100, 20)
+               .bounds(this.width - 104, 26, 100, 20)
                .build()
          );
       }
