@@ -92,6 +92,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    protected int currentPage = 1;
    protected int totalRooms = 0;
    protected volatile boolean loadingMore = false;
+   /** 上次自动刷新时刻（5s 节流）。 */
+   private long lastAutoRefreshMs = System.currentTimeMillis();
    protected volatile boolean removed = false;
    protected Map<String, String> categoryMap = new LinkedHashMap<>();
    protected boolean categoriesFetched = false;
@@ -596,6 +598,12 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
 
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       this.updatePageInput();
+      // 房间列表自动刷新（1.1.5）：打开浏览器期间每 5s 拉一次第一页
+      long now = System.currentTimeMillis();
+      if (now - this.lastAutoRefreshMs >= 5000L && !this.loadingMore && this.currentPage <= 1) {
+         this.lastAutoRefreshMs = now;
+         this.fetchRooms();
+      }
       super.render(graphics, mouseX, mouseY, partialTick);
       int cols = this.getColumns();
       int cardW = this.getCardWidth(cols);

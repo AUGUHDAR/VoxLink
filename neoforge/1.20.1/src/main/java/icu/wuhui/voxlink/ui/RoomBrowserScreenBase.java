@@ -90,6 +90,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    protected int currentPage = 1;
    protected int totalRooms = 0;
    protected volatile boolean loadingMore = false;
+   /** 上次自动刷新时刻（打开浏览器期间 5s 节流）。 */
+   private long lastAutoRefreshMs = System.currentTimeMillis();
    protected volatile boolean removed = false;
    protected Map<String, String> categoryMap = new LinkedHashMap<>();
    protected boolean categoriesFetched = false;
@@ -593,6 +595,13 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    }
 
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+      // 房间列表自动刷新（1.1.5）：打开浏览器期间每 5s 拉一次第一页（人数/新房间实时），
+      // 拉取中/翻页浏览中(第2页起)不打断
+      long now = System.currentTimeMillis();
+      if (now - this.lastAutoRefreshMs >= 5000L && !this.loadingMore && this.currentPage <= 1) {
+         this.lastAutoRefreshMs = now;
+         this.fetchRooms();
+      }
       this.updatePageInput();
       super.render(graphics, mouseX, mouseY, partialTick);
       int cols = this.getColumns();
@@ -811,15 +820,15 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    }
 
    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-      return this.handleClick(mouseX, mouseY, button) ? true : super.mouseClicked(mouseX, mouseY, button);
+return this.handleClick(mouseX, mouseY, button) ? true : super.mouseClicked(mouseX, mouseY, button);
    }
 
    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
       return this.handleKeyPressed(keyCode, scanCode, modifiers) ? true : super.keyPressed(keyCode, scanCode, modifiers);
    }
 
-   public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-      return this.handleMouseScrolled(delta) ? true : super.mouseScrolled(mouseX, mouseY, delta);
+   public boolean mouseScrolled(double mouseX, double mouseY, double scrollY) {
+      return this.handleMouseScrolled(scrollY) ? true : super.mouseScrolled(mouseX, mouseY, scrollY);
    }
 
    public void removed() {
