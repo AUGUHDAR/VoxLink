@@ -1,0 +1,1004 @@
+package icu.wuhui.voxlink.ui;
+
+import icu.wuhui.voxlink.VoxLinkMod;
+import icu.wuhui.voxlink.network.ConnectionHelper;
+import icu.wuhui.voxlink.network.LogUploadManager;
+import icu.wuhui.voxlink.network.NatClass;
+import icu.wuhui.voxlink.room.ConnectionManager;
+import icu.wuhui.voxlink.room.RoomInfo;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+
+public class AttemptingJoinScreen extends VoxLinkScreenBase {
+   private static final int BTN_W = 200;
+   private static final int HALF_BTN_W = 100;
+   private static final int BTN_H = 20;
+   private static final int BTN_Y_OFFSET = 45;
+   private static final int TITLE_Y = 15;
+   private static final int ROOM_CODE_Y_OFFSET = 30;
+   private static final int STATUS_MARGIN = 20;
+   private static final int VOXLINK_STATUS_Y_OFFSET = 0;
+   private static final int TERRACOTTA_STATUS_Y_OFFSET = 14;
+   private static final int TICK_INTERVAL_MS = 500;
+   private static final int MAX_MONITOR_TICKS_DUAL = 260;
+   private static final int RELAY_BTN_GAP = 4;
+   private static final int RELAY_FAILED_MSG_MS = 3000;
+   private static final int TIP_SWITCH_MS = 5000;
+   private static final String[] TIP_KEYS = new String[]{
+      "voxlink.tip.wait",
+      "voxlink.tip.punch_luck",
+      "voxlink.tip.website",
+      "voxlink.tip.author_id",
+      "voxlink.tip.server",
+      "voxlink.tip.donate",
+      "voxlink.tip.issues",
+      "voxlink.tip.share",
+      "voxlink.tip.knowledge_restart",
+      "voxlink.tip.knowledge_terracotta",
+      "voxlink.tip.knowledge_network",
+      "voxlink.tip.knowledge_fallback",
+      "voxlink.tip.credit_bilibili",
+      "voxlink.tip.edge_terracotta",
+      "voxlink.tip.reverse_relay",
+      "voxlink.tip.auto_collapse_create",
+      "voxlink.tip.disable_join_check",
+      "voxlink.tip.app",
+      "voxlink.tip.kamu_launcher"
+   };
+   private final List<String> tipQueue = new ArrayList<>();
+   // ===== 日志面板（1.1.5 UI 重构）=====
+   private final java.util.ArrayList<String> logLines = new java.util.ArrayList<>();
+   private final java.util.ArrayList<Integer> logLevels = new java.util.ArrayList<>();
+   /** 距底部的行数（0=贴底）。 */
+   private int logScrollRows = 0;
+   /** 贴底跟随：玩家滚回底自动恢复 true。跟随中日志新增时视图贴底——不滚动玩家正在看的历史。 */
+   private boolean logFollowTail = true;
+   private long logSeenVersion = -1L;
+   /** 面板默认收起（玩家主动展开），避免常驻占地/常动视图。 */
+   private boolean logPanelOpen = false;
+   private String currentTipKey = "";
+   private long tipLastSwitchTime = 0L;
+   private final Screen parent;
+   private final String roomCode;
+   private final String password;
+   private String voxlinkStatusText = "";
+   private int voxlinkStatusColor = VoxLinkColors.MUTED;
+   private volatile boolean voxlinkFinal = false;
+   private volatile long voxlinkStatusLastUpdate = 0L;
+   private String terracottaStatusText = "";
+   private int terracottaStatusColor = VoxLinkColors.MUTED;
+   private volatile boolean terracottaFinal = false;
+   private volatile boolean active = false;
+   private boolean joinApiDone = false;
+   /** startJoin() 已正式进入：用于避免屏幕刚打开/startJoin 还没执行的间隙 getCurrentRoom()=null 被误判为房间丢失。 */
+   private volatile boolean joinInitiated = false;
+   private volatile boolean joinCompleted = false;
+   private volatile ScheduledExecutorService connectionScheduler;
+   private ScheduledFuture<?> connectionFuture;
+   private int monitorTicks = 0;
+   private static final int MAX_MONITOR_TICKS = 360;
+   private static final int BRIDGE_HANDSHAKE_TICKS = 60;
+   private int bridgeEstablishedAtTick = -1;
+   private volatile boolean relayButtonVisible = false;
+   private volatile long relayFailedMsgTime = 0L;
+   private volatile boolean lastManualRelayInProgress = false;
+   /** TURN 由忙转闲且未连接成功：显示 3 秒"中继不可用"瞬态提示（与玩家中继失败提示同机制）。 */
+   private volatile long turnFailedMsgTime = 0L;
+   private volatile boolean lastTurnBusy = false;
+   /** TURN"使用中继"按钮当前显隐（monitor 线程计算，init 消费）。 */
+   private volatile boolean turnButtonVisible = false;
+   /** 服务端 TURN 开关缓存（打洞 ≥20s 时查询一次，30s 刷新）。 */
+   private volatile boolean turnServerEnabled = false;
+   private volatile boolean turnStatusChecked = false;
+   private volatile long turnStatusCheckedAt = 0L;
+   /** ModSync 门控已放行（清单拉完/玩家直接加入或直接进入）：重建本屏时不再走门控。 */
+   private final boolean modSyncChecked;
+   /** 正处于"正在获取房主必装清单"阶段：展示"直接进入"出口。 */
+   private boolean modSyncChecking = false;
+
+   public AttemptingJoinScreen(Screen parent, String roomCode, String password) {
+      this(parent, roomCode, password, false);
+   }
+
+   public AttemptingJoinScreen(Screen parent, String roomCode, String password, boolean modSyncChecked) {
+      super(Component.translatable("voxlink.attempting_join"));
+      this.parent = parent;
+      this.roomCode = roomCode != null ? roomCode : "";
+      this.password = password;
+      this.modSyncChecked = modSyncChecked;
+   }
+
+   @Override
+   protected void init() {
+      icu.wuhui.voxlink.ui.UiLogBus.attach();
+      super.init();
+      RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
+      boolean bridgeReady = room != null && room.getLocalBridgePort() > 0 && ConnectionHelper.isMcTrulyConnected();
+      if (bridgeReady) {
+         this.active = false;
+         room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+         this.voxlinkFinal = true;
+         // 经中继建立时文案必须是"已通过中继连接"，不能谎报 P2P 已建立
+         this.voxlinkStatusText = Component.translatable(room.isUsingRelay() ? "voxlink.relay.connected_via" : "voxlink.dual.p2p_established").getString();
+         this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
+      } else if (room != null && room.isConnectionFailed()) {
+         this.active = false;
+         this.voxlinkFinal = true;
+         this.voxlinkStatusText = Component.translatable("voxlink.connection.all_failed").getString();
+         this.voxlinkStatusColor = VoxLinkColors.ERROR;
+      } else if (room != null && room.getLocalBridgePort() > 0) {
+         this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
+      }
+
+      int centerX = this.width / 2;
+      int btnY = this.height / 2 + 45;
+      // 首次 init 且即将走门控时，本屏就是"正在获取房主必装清单"页：给出不等清单的出口
+      boolean gatePending = !this.joinApiDone && !this.modSyncChecked
+         && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
+         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
+         && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode);
+      if (!bridgeReady) {
+         if (this.joinApiDone && !this.active) {
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.back"), button -> this.goBack()).bounds(centerX - 100, btnY, 200, 20).build()
+            );
+         } else if (gatePending) {
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.modsync.skip_check"), button -> this.onSkipCheckClicked())
+                  .bounds(centerX - 100, btnY, 200, 20)
+                  .build()
+            );
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY + 24, 200, 20).build()
+            );
+         } else {
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY, 200, 20).build()
+            );
+            if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton()) {
+               this.relayButtonVisible = true;
+               this.addRenderableWidget(
+                  Button.builder(Component.translatable("voxlink.relay.use_player_relay"), button -> this.onRelayButtonClicked())
+                     .bounds(this.width - 104, 4, 100, 20)
+                     .build()
+               );
+            } else if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress()) {
+               // 中继进行中: 把 "使用其他玩家进行中继" 按钮换成 "取消中继" 出口。
+               this.relayButtonVisible = true;
+               this.addRenderableWidget(
+                  Button.builder(Component.translatable("voxlink.relay.cancel"), button -> this.onCancelRelayClicked())
+                     .bounds(this.width - 104, 4, 100, 20)
+                     .build()
+               );
+            } else {
+               this.relayButtonVisible = false;
+            }
+         }
+      }
+
+      // TURN"使用中继"：右上角小按钮。显隐由 monitor 线程按 20s 计时 + 服务端开关计算。
+      // y=26 避开标题（标题文字在 y=15..24，y=4 会与标题同一高度带重叠）
+      if (!bridgeReady && this.active && this.turnButtonVisible) {
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("voxlink.turn.use"), button -> this.onTurnButtonClicked())
+               .bounds(this.width - 104, 26, 100, 20)
+               .build()
+         );
+      }
+
+      // 日志面板展开/收起: 右下角, 在上传日志提示上方预留空间(提示在 y=height-12)
+      if (!bridgeReady) {
+         this.addRenderableWidget(
+            Button.builder(
+                  Component.translatable(this.logPanelOpen ? "voxlink.log.panel_hide" : "voxlink.log.panel_show"),
+                  button -> this.toggleLogPanel())
+               .bounds(this.width - 88, this.height - 32, 82, 18)
+               .build()
+         );
+      }
+
+      if (!this.joinApiDone) {
+         this.joinApiDone = true;
+         this.startJoin();
+      }
+   }
+
+   private void toggleLogPanel() {
+      this.logPanelOpen = !this.logPanelOpen;
+      // 展开瞬间贴底一次; 之后由滚轮决定跟随与否(新日志不强行拉动视图)
+      if (this.logPanelOpen) {
+         this.logScrollRows = 0;
+         this.logFollowTail = true;
+      }
+      this.clearOurWidgets();
+      this.init();
+   }
+
+   public boolean shouldCloseOnEsc() {
+      return !this.active;
+   }
+
+   public void onClose() {
+      icu.wuhui.voxlink.ui.UiLogBus.detach();
+      if (this.active) {
+         this.cancelJoin();
+      } else {
+         this.goBack();
+      }
+   }
+
+   private void goBack() {
+      if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
+         VoxLinkMod.getRoomManager().leaveRoom();
+      }
+
+      Minecraft.getInstance().gui.setScreen(this.parent);
+   }
+
+   private void cancelJoin() {
+      if (this.modSyncChecking) {
+         // 取消时清单可能仍在拉取：标记跳过，防止稍后选择窗突然弹出打断玩家
+         icu.wuhui.voxlink.modsync.ModSyncGuestService.bypass(this.roomCode);
+         this.modSyncChecking = false;
+      }
+
+      // 取消加入必须撤销日志上传定时器：否则 90s 后 runUpload 照跑，
+      // 玩家"取消了还上传日志"
+      icu.wuhui.voxlink.network.LogUploadManager.disarm();
+      this.active = false;
+      VoxLinkMod.getRoomManager().leaveRoom();
+      Minecraft.getInstance().gui.setScreen(this.parent);
+   }
+
+   private void onRelayButtonClicked() {
+      if (VoxLinkMod.getConfig().isRelayEnabled()) {
+         // 先触发再重建：triggerManualRelay 同步置 manualRelayInProgress=true，
+         // init() 里 canShowRelayButton() 立即为 false，按钮不会被重新加回（原先有 500ms 幽灵按钮窗口）
+         VoxLinkMod.getRoomManager().getConnectionManager().triggerManualRelay();
+         this.relayButtonVisible = false;
+         this.lastManualRelayInProgress = true;
+         // 即时反馈：不等 monitor + 2s 抑制窗口，点击当场切换状态文本
+         this.voxlinkStatusText = Component.translatable("voxlink.relay.trying").getString();
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
+         this.voxlinkStatusLastUpdate = System.currentTimeMillis();
+         this.clearOurWidgets();
+         this.init();
+      }
+   }
+
+   /** "取消中继"按钮: 调用 ConnectionManager.cancelManualRelay(), 然后刷新布局回到直连态。 */
+   private void onCancelRelayClicked() {
+      VoxLinkMod.getRoomManager().getConnectionManager().cancelManualRelay();
+      // 手动取消不是失败：同步复位沿检测，否则下一个 monitor tick 会弹出"中继失败"误报
+      this.lastManualRelayInProgress = false;
+      // 让 AttemptingJoinScreen 重新走 init: manualRelayInProgress=false 后, canShowRelayButton 会重新判定。
+      this.clearOurWidgets();
+      this.init();
+   }
+
+   /** TURN"使用中继"：交由 ConnectionManager 完成测延迟/选节点/BIND 全流程；置 inProgress 后按钮自动消失。 */
+   private void onTurnButtonClicked() {
+      VoxLinkMod.getRoomManager().getConnectionManager().triggerTurnRelay();
+      // 即时反馈：不等 500ms monitor + 2s 抑制窗口，点击当场切换状态文本
+      this.voxlinkStatusText = Component.translatable("voxlink.turn.connecting").getString();
+      this.voxlinkStatusColor = VoxLinkColors.WARNING;
+      this.voxlinkStatusLastUpdate = System.currentTimeMillis();
+      this.clearOurWidgets();
+      this.init();
+   }
+
+   private void startJoin() {
+      this.active = true;
+      this.joinInitiated = true;
+      LogUploadManager.arm(this.roomCode, false);
+
+
+      // ModSync 门控：开关开启且为 VoxLink 房间号时，先拉必装清单再进入连接流程；
+      // 已门控过/已跳过的房间直接放行；放行回调一律以 modSyncChecked=true 重建本屏，
+      // 绝不再入 gate()——否则快速通道会在本屏上空转，卡死在"正在获取清单"
+      if (!this.modSyncChecked
+         && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
+         && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
+         && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode)) {
+         Minecraft mc0 = Minecraft.getInstance();
+         AttemptingJoinScreen self = this;
+         this.modSyncChecking = true;
+         this.voxlinkStatusText = Component.translatable("voxlink.modsync.checking").getString();
+         this.voxlinkStatusColor = VoxLinkColors.WARNING;
+         icu.wuhui.voxlink.modsync.ModSyncGuestService.gate(
+            this.roomCode,
+            () -> mc0.execute(() -> mc0.gui.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password, true))),
+            () -> mc0.execute(() -> {
+               if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
+                  VoxLinkMod.getRoomManager().leaveRoom();
+               }
+
+               mc0.gui.setScreen(self.parent);
+            })
+         );
+         return;
+      }
+
+      this.doStartDualP2P();
+   }
+
+   /** 获取清单页"直接进入"：跳过必装检查立刻开始连接；在途清单结果作废（bypass）。 */
+   private void onSkipCheckClicked() {
+      if (!this.modSyncChecking) {
+         return;
+      }
+
+      this.modSyncChecking = false;
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.bypass(this.roomCode);
+      this.voxlinkStatusText = "";
+      this.clearOurWidgets();
+      this.init();
+      this.doStartDualP2P();
+   }
+
+   private void doStartDualP2P() {
+      Minecraft mc = Minecraft.getInstance();
+      String playerName = mc.getUser().getName();
+      CompletableFuture<Void> joinFuture = VoxLinkMod.getRoomManager()
+         .getConnectionManager()
+         .startDualP2P(this.roomCode, playerName, this.password, (channel, statusKey) -> mc.execute(() -> {
+            if (mc.gui.screen() == this) {
+               int color = this.colorForStatus(statusKey);
+               String text = Component.translatable(statusKey).getString();
+               if ("voxlink".equals(channel)) {
+                  this.voxlinkStatusText = text;
+                  this.voxlinkStatusColor = color;
+                  if (statusKey.endsWith(".p2p_established") || statusKey.endsWith(".channel_failed") || statusKey.endsWith(".status_cancelled")) {
+                     this.voxlinkFinal = true;
+                  }
+               } else if ("terracotta".equals(channel)) {
+                  this.terracottaStatusText = text;
+                  this.terracottaStatusColor = color;
+                  if (statusKey.endsWith(".p2p_established") || statusKey.endsWith(".channel_failed") || statusKey.endsWith(".status_cancelled")) {
+                     this.terracottaFinal = true;
+                  }
+               }
+            }
+         }));
+      joinFuture.whenComplete((v, e) -> this.joinCompleted = true);
+      joinFuture.thenAccept(v -> mc.execute(() -> {
+         if (mc.gui.screen() == this) {
+            ;
+         }
+      })).exceptionally(e -> {
+         mc.execute(() -> {
+            if (mc.gui.screen() == this) {
+               Throwable cause = e;
+
+               while (cause.getCause() != null) {
+                  cause = cause.getCause();
+               }
+
+               this.onFailed(this.extractErrorMessage(cause.getMessage()));
+            }
+         });
+         return null;
+      });
+      this.startConnectionMonitor();
+   }
+
+   private int colorForStatus(String statusKey) {
+      if (statusKey == null) {
+         return VoxLinkColors.MUTED;
+      } else if (statusKey.endsWith(".connected") || statusKey.endsWith(".p2p_established")) {
+         return VoxLinkColors.SUCCESS;
+      } else if (statusKey.endsWith(".all_failed") || statusKey.endsWith(".channel_failed")) {
+         return VoxLinkColors.ERROR;
+      } else {
+         return statusKey.endsWith(".status_cancelled") ? VoxLinkColors.MUTED : VoxLinkColors.WARNING;
+      }
+   }
+
+   private void onFailed(String msg) {
+      // 加入失败后放行门控缓存：下次再加入可重新看到必装模组下载窗
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.clearGateFor(this.roomCode);
+      this.voxlinkFinal = true;
+      this.voxlinkStatusText = msg;
+      this.voxlinkStatusColor = VoxLinkColors.ERROR;
+      this.active = false;
+      this.stopConnectionMonitor();
+      VoxLinkMod.getRoomManager().getConnectionManager().killAllConnectionAttempts();
+      this.clearOurWidgets();
+      this.init();
+   }
+
+   public void onRoomLost() {
+      this.stopConnectionMonitor();
+      this.active = false;
+      // 房间丢失必须给终态文案：否则状态行残留旧的打洞进度（如"UDP打洞…"），玩家不知道发生了什么
+      this.voxlinkFinal = true;
+      this.voxlinkStatusText = Component.translatable("voxlink.room_lost").getString();
+      this.voxlinkStatusColor = VoxLinkColors.ERROR;
+      // 房间丢失时需要重建按钮布局：onFailed 路径也是同样的处理。
+      // onRoomLost 可能被非主线程调用，必须走 mc.execute 并加 mc.gui.screen() 守卫避免误重建已关闭的界面。
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(() -> {
+         if (mc.gui.screen() == this) {
+            this.clearOurWidgets();
+            this.init();
+         }
+      });
+   }
+
+   private void stopConnectionMonitor() {
+      if (this.connectionFuture != null) {
+         this.connectionFuture.cancel(false);
+         this.connectionFuture = null;
+      }
+
+      if (this.connectionScheduler != null && !this.connectionScheduler.isShutdown()) {
+         this.connectionScheduler.shutdownNow();
+         this.connectionScheduler = null;
+      }
+   }
+
+   private String extractErrorMessage(String msg) {
+      if (msg == null) {
+         return Component.translatable("voxlink.error.unknown").getString();
+      } else if (msg.contains("ROOM_NOT_FOUND") || msg.contains("SERVER_404")) {
+         return Component.translatable("voxlink.join_room.error.not_found").getString();
+      } else if (msg.contains("ROOM_FULL")) {
+         return Component.translatable("voxlink.error.room_full").getString();
+      } else if (msg.contains("WRONG_PASSWORD")) {
+         return Component.translatable("voxlink.error.wrong_password").getString();
+      } else if (msg.contains("RATE_LIMITED")) {
+         return Component.translatable("voxlink.join_room.error.rate_limited").getString();
+      } else if (msg.contains("NETWORK_ERROR")) {
+         return Component.translatable("voxlink.join_room.error.network").getString();
+      } else if (msg.contains("ALREADY_IN_ROOM")) {
+         return Component.translatable("voxlink.error.already_in_room").getString();
+      } else if (msg.contains("INVALID_ROOM_CODE")) {
+         return Component.translatable("voxlink.error.invalid_room_code").getString();
+      } else {
+         return msg.contains("QUEUED") ? Component.translatable("voxlink.join_room.error.server_busy").getString() : msg;
+      }
+   }
+
+   private void startConnectionMonitor() {
+      this.stopConnectionMonitor();
+      this.monitorTicks = 0;
+      final AtomicBoolean monitorActive = new AtomicBoolean(true);
+      this.connectionScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+         Thread t = new Thread(r, "VoxLink-JoinConnMonitor");
+         t.setDaemon(true);
+         return t;
+      });
+      Runnable monitor = new Runnable() {
+         @Override
+         public void run() {
+            if (monitorActive.get()) {
+               try {
+                  Minecraft mc = Minecraft.getInstance();
+                  AttemptingJoinScreen.this.monitorTicks++;
+                  RoomInfo roomInfo = VoxLinkMod.getRoomManager().getCurrentRoom();
+                  if (roomInfo == null) {
+                     // 屏幕刚打开/startJoin 还没执行的间隙 getCurrentRoom() 本来就为 null；
+                     // 仅在 startJoin() 已被调用后才视为房间丢失，未发起则本轮跳过检查
+                     if (!AttemptingJoinScreen.this.joinInitiated) {
+                        if (AttemptingJoinScreen.this.connectionFuture != null) {
+                           AttemptingJoinScreen.this.connectionFuture.cancel(false);
+                        }
+
+                        if (monitorActive.get()
+                           && AttemptingJoinScreen.this.connectionScheduler != null
+                           && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                           AttemptingJoinScreen.this.connectionFuture = AttemptingJoinScreen.this.connectionScheduler
+                              .schedule(() -> mc.execute(this), 500L, TimeUnit.MILLISECONDS);
+                        }
+
+                        return;
+                     }
+
+                     if (!AttemptingJoinScreen.this.joinCompleted) {
+                        if (AttemptingJoinScreen.this.connectionFuture != null) {
+                           AttemptingJoinScreen.this.connectionFuture.cancel(false);
+                        }
+
+                        if (monitorActive.get()
+                           && AttemptingJoinScreen.this.connectionScheduler != null
+                           && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                           AttemptingJoinScreen.this.connectionFuture = AttemptingJoinScreen.this.connectionScheduler
+                              .schedule(() -> mc.execute(this), 500L, TimeUnit.MILLISECONDS);
+                        }
+
+                        return;
+                     }
+
+                     monitorActive.set(false);
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           AttemptingJoinScreen.this.onFailed(Component.translatable("voxlink.room_lost").getString());
+                        }
+                     });
+                     if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                        AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                     }
+
+                     return;
+                  }
+
+                  if (roomInfo.getLocalBridgePort() > 0) {
+                     if (AttemptingJoinScreen.this.bridgeEstablishedAtTick < 0) {
+                        AttemptingJoinScreen.this.bridgeEstablishedAtTick = AttemptingJoinScreen.this.monitorTicks;
+                     }
+
+                     if (ConnectionHelper.isMcTrulyConnected()) {
+                        monitorActive.set(false);
+                        ConnectionHelper.clearConnectInitiated();
+                        roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+                        mc.execute(() -> {
+                           if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                              AttemptingJoinScreen.this.voxlinkFinal = true;
+                              AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable(
+                                 roomInfo.isUsingRelay() ? "voxlink.relay.connected_via" : "voxlink.dual.p2p_established"
+                              ).getString();
+                              AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.SUCCESS;
+                              AttemptingJoinScreen.this.active = false;
+                           }
+                        });
+                        if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                           AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                        }
+
+                        return;
+                     }
+
+                     if (ConnectionHelper.isConnectionRejected()) {
+                        monitorActive.set(false);
+                        ConnectionHelper.clearConnectInitiated();
+                        mc.execute(() -> {
+                           if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                              AttemptingJoinScreen.this.onFailed(Component.translatable("voxlink.connection.all_failed").getString());
+                           }
+                        });
+                        if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                           AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                        }
+
+                        return;
+                     }
+
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           if (!AttemptingJoinScreen.this.voxlinkFinal) {
+                              AttemptingJoinScreen.this.voxlinkStatusText = Component.translatable("voxlink.connection.bridge_setup").getString();
+                              AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.WARNING;
+                           }
+                        }
+                     });
+                  }
+
+                  boolean bridgeBuiltNow = roomInfo.getLocalBridgePort() > 0;
+                  int maxTicks = VoxLinkMod.getRoomManager().getConnectionManager().isDualRaceActive() ? 260 : 360;
+                  boolean handshakeTimeout = bridgeBuiltNow && AttemptingJoinScreen.this.bridgeEstablishedAtTick >= 0
+                     ? AttemptingJoinScreen.this.monitorTicks - AttemptingJoinScreen.this.bridgeEstablishedAtTick >= 120
+                     : AttemptingJoinScreen.this.monitorTicks >= maxTicks;
+                  boolean persistentRetrying = VoxLinkMod.getRoomManager().getConnectionManager().isPersistentRetrying();
+                  if ((roomInfo.isConnectionFailed() || handshakeTimeout) && !persistentRetrying) {
+                     monitorActive.set(false);
+                     if (handshakeTimeout) {
+                        ConnectionHelper.clearConnectInitiated();
+                     }
+
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           Component connModex = roomInfo.getConnectionMode();
+                           String failReason;
+                           if (roomInfo.isConnectionFailed() && connModex != null && !connModex.getString().isEmpty()) {
+                              failReason = connModex.getString();
+                           } else if (handshakeTimeout) {
+                              failReason = Component.translatable("voxlink.connection.timeout_retry").getString();
+                           } else {
+                              failReason = Component.translatable("voxlink.connection.all_failed").getString();
+                           }
+
+                           AttemptingJoinScreen.this.onFailed(failReason);
+                        }
+                     });
+                     if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                        AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                     }
+
+                     return;
+                  }
+
+                  Component connMode = roomInfo.getConnectionMode();
+                  if (connMode != null && !connMode.getString().isEmpty()) {
+                     mc.execute(
+                        () -> {
+                           if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                              if (!AttemptingJoinScreen.this.voxlinkFinal) {
+                                 long now = System.currentTimeMillis();
+                                 String newText = connMode.getString();
+                                 if (!newText.equals(AttemptingJoinScreen.this.voxlinkStatusText)
+                                    && now - AttemptingJoinScreen.this.voxlinkStatusLastUpdate < 2000L) {
+                                    return;
+                                 }
+
+                                 AttemptingJoinScreen.this.voxlinkStatusText = newText;
+                                 AttemptingJoinScreen.this.voxlinkStatusColor = VoxLinkColors.WARNING;
+                                 AttemptingJoinScreen.this.voxlinkStatusLastUpdate = now;
+                              }
+                           }
+                        }
+                     );
+                  }
+
+                  boolean shouldShowRelay = AttemptingJoinScreen.this.active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton();
+                  if (shouldShowRelay != AttemptingJoinScreen.this.relayButtonVisible) {
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           AttemptingJoinScreen.this.clearOurWidgets();
+                           AttemptingJoinScreen.this.init();
+                        }
+                     });
+                  }
+
+                  // TURN"使用中继"显隐：打洞 ≥20s 先查一次服务端开关（30s 缓存），开启且未在使用/未放弃才显示。
+                  // 计时用 punchUiStartMs（会话首周期只设一次）：connectionStartTimeMs 在首周期前为 0/残留旧值
+                  // 会让 now-0 天文数字被误判成"已超20s"→按钮刚进屏就闪现又消失；持续重试每轮还会复位再消失20s。
+                  // TURN 中途失败 teardown 后 turnInProgress/turnActive 复位，本条件自然重新成立（按钮重现）。
+                  icu.wuhui.voxlink.room.ConnectionManager cmTurn = VoxLinkMod.getRoomManager().getConnectionManager();
+                  long punchStartMs = cmTurn.getPunchUiStartMs();
+                  long punchMs = punchStartMs > 0L ? System.currentTimeMillis() - punchStartMs : 0L;
+                  if (punchMs >= 20000L
+                     && (!AttemptingJoinScreen.this.turnStatusChecked
+                        || System.currentTimeMillis() - AttemptingJoinScreen.this.turnStatusCheckedAt > 30000L)) {
+                     AttemptingJoinScreen.this.turnStatusChecked = true;
+                     AttemptingJoinScreen.this.turnStatusCheckedAt = System.currentTimeMillis();
+                     icu.wuhui.voxlink.network.TurnRelayClient
+                        .fetchStatus(VoxLinkMod.getRoomManager().getSignalingClient())
+                        .thenAccept(ok -> AttemptingJoinScreen.this.turnServerEnabled = ok);
+                  }
+
+                  boolean shouldShowTurn = AttemptingJoinScreen.this.active
+                     && roomInfo != null
+                     && !roomInfo.isHost()
+                     && punchMs >= 20000L
+                     && AttemptingJoinScreen.this.turnServerEnabled
+                     && !cmTurn.isTurnActive()
+                     && !cmTurn.isTurnInProgress()
+                     && !cmTurn.isTurnP2pGivenUp()
+                     && !cmTurn.isManualRelayInProgress();
+                  if (shouldShowTurn != AttemptingJoinScreen.this.turnButtonVisible) {
+                     AttemptingJoinScreen.this.turnButtonVisible = shouldShowTurn;
+                     mc.execute(() -> {
+                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                           AttemptingJoinScreen.this.clearOurWidgets();
+                           AttemptingJoinScreen.this.init();
+                        }
+                     });
+                  }
+
+                  boolean currentRelayInProgress = VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress();
+                  if (AttemptingJoinScreen.this.lastManualRelayInProgress && !currentRelayInProgress) {
+                     AttemptingJoinScreen.this.relayFailedMsgTime = System.currentTimeMillis();
+                  }
+
+                  AttemptingJoinScreen.this.lastManualRelayInProgress = currentRelayInProgress;
+                  // TURN 失败瞬态：进行中→空闲且未连上 = 失败，给 3 秒可见反馈（否则只有静默 teardown）
+                  boolean turnBusyNow = cmTurn.isTurnInProgress() || cmTurn.isTurnActive();
+                  if (AttemptingJoinScreen.this.lastTurnBusy && !turnBusyNow) {
+                     AttemptingJoinScreen.this.turnFailedMsgTime = System.currentTimeMillis();
+                  }
+
+                  AttemptingJoinScreen.this.lastTurnBusy = turnBusyNow;
+                  if (AttemptingJoinScreen.this.connectionFuture != null) {
+                     AttemptingJoinScreen.this.connectionFuture.cancel(false);
+                  }
+
+                  if (monitorActive.get()
+                     && AttemptingJoinScreen.this.connectionScheduler != null
+                     && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                     AttemptingJoinScreen.this.connectionFuture = AttemptingJoinScreen.this.connectionScheduler
+                        .schedule(() -> mc.execute(this), 500L, TimeUnit.MILLISECONDS);
+                  }
+               } catch (Exception e) {
+                  Minecraft mc = Minecraft.getInstance();
+                  monitorActive.set(false);
+                  mc.execute(() -> {
+                     if (mc.gui.screen() == AttemptingJoinScreen.this) {
+                        AttemptingJoinScreen.this.onFailed(Component.translatable("voxlink.connection.monitor_error").getString());
+                     }
+                  });
+               }
+            }
+         }
+      };
+      this.connectionFuture = this.connectionScheduler.schedule(() -> Minecraft.getInstance().execute(monitor), 500L, TimeUnit.MILLISECONDS);
+   }
+
+   public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+      super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+      this.drawLogPanel(graphics);
+      this.renderNatOverlay(graphics);
+      int centerX = this.width / 2;
+      this.drawCenteredString(graphics, this.title.getString(), centerX, 15, VoxLinkColors.WHITE);
+      this.drawCenteredString(
+         graphics,
+         ChatFormatting.YELLOW.toString() + ChatFormatting.BOLD.toString() + Component.translatable("voxlink.chat.room_code_label").getString().trim(),
+         centerX,
+         this.height / 2 - 30,
+         VoxLinkColors.WARNING
+      );
+      if (this.relayFailedMsgTime > 0L) {
+         long elapsed = System.currentTimeMillis() - this.relayFailedMsgTime;
+         if (elapsed < 3000L) {
+            this.drawCenteredString(graphics, Component.translatable("voxlink.relay.failed_retry_punch").getString(), centerX, this.height / 2 - 30 - 12, VoxLinkColors.WARNING);
+         } else {
+            this.relayFailedMsgTime = 0L;
+         }
+      }
+
+      if (this.turnFailedMsgTime > 0L) {
+         long elapsedTurn = System.currentTimeMillis() - this.turnFailedMsgTime;
+         if (elapsedTurn < 3000L) {
+            this.drawCenteredString(graphics, Component.translatable("voxlink.turn.failed").getString(), centerX, this.height / 2 - 30 - 12, VoxLinkColors.WARNING);
+         } else {
+            this.turnFailedMsgTime = 0L;
+         }
+      }
+
+      // 中央状态行 = 日志总线最新一条（玩家语言进行时叙述）; 右下角面板才是完整历史
+      String latest = UiLogBus.latestMessage();
+      int lv = UiLogBus.latestLevel();
+      if (!latest.isEmpty()) {
+         int lvColor = lv == 3 ? VoxLinkColors.ERROR : lv == 1 ? VoxLinkColors.SUCCESS : lv == 2 ? VoxLinkColors.WARNING : this.voxlinkStatusColor;
+         int maxWidth = this.width - 20;
+         if (this.fontWidth(latest) > maxWidth) {
+            while (this.fontWidth(latest + "...") > maxWidth && latest.length() > 0) {
+               latest = latest.substring(0, latest.length() - 1);
+            }
+
+            latest = latest + "...";
+         }
+
+         this.drawCenteredString(graphics, latest, centerX, this.height / 2 + 0, lvColor);
+      } else if (!this.voxlinkStatusText.isEmpty()) {
+         String label = Component.translatable("voxlink.dual.voxlink_label").getString();
+         String clipped = this.voxlinkStatusText;
+         int maxWidth = this.width - 20;
+         if (this.fontWidth(label + ": " + clipped) > maxWidth) {
+            while (this.fontWidth(label + ": " + clipped + "...") > maxWidth && clipped.length() > 0) {
+               clipped = clipped.substring(0, clipped.length() - 1);
+            }
+
+            clipped = clipped + "...";
+         }
+
+         this.drawCenteredString(graphics, label + ": " + clipped, centerX, this.height / 2 + 0, this.voxlinkStatusColor);
+      }
+
+      // 下方状态行 = 专用中继槽位：TURN 状态 > 玩家中继进度 > Terracotta 通道状态。
+      // 三者互斥占用；绝不能嵌套在 terracotta 非空分支里——Terracotta 未启用时中继进度会整场不可见。
+      ConnectionManager cm = VoxLinkMod.getRoomManager().getConnectionManager();
+      Component turnStatus = cm != null ? cm.getTurnStatusText() : null;
+      Component relayProgress = cm != null ? cm.getRelayProgressText() : null;
+      String line2 = null;
+      int line2Color = VoxLinkColors.WARNING;
+      if (turnStatus != null) {
+         line2 = turnStatus.getString();
+         line2Color = cm.isTurnActive() ? VoxLinkColors.SUCCESS : VoxLinkColors.WARNING;
+      } else if (relayProgress != null) {
+         line2 = relayProgress.getString();
+      } else if (!this.terracottaStatusText.isEmpty()) {
+         line2 = Component.translatable("voxlink.dual.terracotta_label").getString() + ": " + this.terracottaStatusText;
+         line2Color = this.terracottaStatusColor;
+      }
+
+      if (line2 != null && !line2.isEmpty()) {
+         String clipped = line2;
+         int maxWidth = this.width - 20;
+         if (this.fontWidth(clipped) > maxWidth) {
+            while (this.fontWidth(clipped + "...") > maxWidth && clipped.length() > 0) {
+               clipped = clipped.substring(0, clipped.length() - 1);
+            }
+
+            clipped = clipped + "...";
+         }
+
+         this.drawCenteredString(graphics, clipped, centerX, this.height / 2 + 14, line2Color);
+      }
+
+      long now = System.currentTimeMillis();
+      if (this.currentTipKey.isEmpty() || now - this.tipLastSwitchTime >= 5000L) {
+         if (this.tipQueue.isEmpty()) {
+            this.refillTipQueue();
+         }
+
+         this.currentTipKey = this.tipQueue.remove(0);
+         this.tipLastSwitchTime = now;
+      }
+
+      String tipText = Component.translatable("voxlink.tip.prefix").getString() + Component.translatable(this.currentTipKey).getString();
+      int tipMaxWidth = this.width - 8;
+      if (LogUploadManager.isUploadFinished()) {
+         int uploadTextWidth = this.fontWidth(Component.translatable("voxlink.log_upload.uploaded").getString());
+         tipMaxWidth = Math.max(80, this.width - uploadTextWidth - 16);
+      }
+      if (this.fontWidth(tipText) > tipMaxWidth) {
+         while (this.fontWidth(tipText + "...") > tipMaxWidth && tipText.length() > 0) {
+            tipText = tipText.substring(0, tipText.length() - 1);
+         }
+
+         tipText = tipText + "...";
+      }
+
+      this.drawString(graphics, tipText, 4, this.height - 12, VoxLinkColors.MUTED);
+
+      if (LogUploadManager.isUploadFinished()) {
+         String uploadText = Component.translatable("voxlink.log_upload.uploaded").getString();
+         int uploadWidth = this.fontWidth(uploadText);
+         this.drawString(graphics, uploadText, this.width - uploadWidth - 6, this.height - 12, VoxLinkColors.SUCCESS);
+      }
+   }
+
+   // ===== 日志面板：滚轮只在悬停面板内生效；玩家滚离底部即暂停跟随，绝不抢视图 =====
+
+   @Override
+   public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+      if (!this.logPanelOpen) {
+         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+      }
+      if (this.logPanelHovered(mouseX, mouseY)) {
+         int visible = Math.max(1, (this.logPanelHeight() - 6) / 10);
+         int total = this.logLines.size();
+         if (scrollY > 0) {
+            this.logScrollRows = Math.min(Math.max(0, total - visible), this.logScrollRows + 3);
+            this.logFollowTail = this.logScrollRows <= 0;
+            return true;
+         } else if (scrollY < 0) {
+            this.logScrollRows = Math.max(0, this.logScrollRows - 3);
+            this.logFollowTail = this.logScrollRows == 0;
+            return true;
+         }
+      }
+      return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+   }
+
+   private void drawLogPanel(GuiGraphicsExtractor graphics) {
+      if (!this.logPanelOpen) {
+         return;
+      }
+      icu.wuhui.voxlink.ui.UiLogBus.snapshot(this.logLines, this.logLevels);
+      long ver = icu.wuhui.voxlink.ui.UiLogBus.version();
+      if (ver != this.logSeenVersion) {
+         this.logSeenVersion = ver;
+         if (this.logFollowTail) {
+            this.logScrollRows = 0;
+         }
+      }
+      int x = this.logPanelX();
+      int y = this.logPanelY();
+      int w = this.logPanelWidth();
+      int h = this.logPanelHeight();
+      int visible = Math.max(1, (h - 6) / 10);
+      int total = this.logLines.size();
+      int start = Math.max(0, total - visible - this.logScrollRows);
+      int end = Math.min(total, start + visible);
+      graphics.fill(x, y, x + w, y + h, 0x90101018);
+      graphics.fill(x, y, x + w, y + 1, 0xFF3A3A55);
+      graphics.fill(x, y + h - 1, x + w, y + h, 0xFF3A3A55);
+      graphics.fill(x, y, x + 1, y + h, 0xFF3A3A55);
+      graphics.fill(x + w - 1, y, x + w, y + h, 0xFF3A3A55);
+      int row = y + 3;
+      for (int i = start; i < end; i++) {
+         String line = this.logLines.get(i);
+         int color = this.logLevels.get(i) == 2 ? 0xFFFF7B72 : this.logLevels.get(i) == 1 ? 0xFFFFD37F : 0xFFB8BCC8;
+         while (this.font.width(line) > w - 8 && line.length() > 1) {
+            line = line.substring(0, line.length() - 1);
+         }
+         graphics.text(this.font, line, x + 4, row, color);
+         row += 10;
+      }
+   }
+
+   private int logPanelX() {
+      return this.width - this.logPanelWidth() - 6;
+   }
+
+   private int logPanelY() {
+      return 44;
+   }
+
+   // 右侧竖条: 左缘=中央按钮右缘+18, 永不与中央标题/房间码/状态/取消按钮重叠(小屏自动收窄)
+   private int logPanelWidth() {
+      int w = this.width - (this.width / 2 + 118) - 6;
+      return Math.max(110, Math.min(340, w));
+   }
+
+   private int logPanelHeight() {
+      return Math.max(60, this.height - 44 - 40);
+   }
+
+   private boolean logPanelHovered(double mouseX, double mouseY) {
+      return mouseX >= this.logPanelX() && mouseX < this.logPanelX() + this.logPanelWidth()
+         && mouseY >= this.logPanelY() && mouseY < this.logPanelY() + this.logPanelHeight();
+   }
+
+   private void renderNatOverlay(GuiGraphicsExtractor graphics) {
+      ConnectionManager cm = VoxLinkMod.getRoomManager().getConnectionManager();
+      NatClass local = cm.getLocalNatClass();
+      NatClass remote = cm.getRemoteNatClass();
+      if (local == null) {
+         local = NatClass.UNKNOWN;
+      }
+
+      if (remote == null) {
+         remote = NatClass.UNKNOWN;
+      }
+
+      boolean anyUnknown = local == NatClass.UNKNOWN || remote == NatClass.UNKNOWN;
+      String opponentText = this.natCnName(remote);
+      String mineText = this.natCnName(local);
+      String difficultyText = Component.translatable(cm.getConnectionDifficultyKey()).getString();
+      if (anyUnknown) {
+         difficultyText = difficultyText + Component.translatable("voxlink.nat.doubt").getString();
+      }
+
+      int x = 4;
+      int y = 18;
+      int line = 10;
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_opponent").getString() + ": " + opponentText, x, y, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_mine").getString() + ": " + mineText, x, y + line, VoxLinkColors.MUTED);
+      this.drawString(graphics, Component.translatable("voxlink.nat.label_difficulty").getString() + ": " + difficultyText, x, y + line * 2, VoxLinkColors.WARNING);
+      // 对方 VoxLink 版本行（1.1.5，玩家推荐）：只展示模组版本（玩家明确不要 MC 版本）；未上报显示"未知"
+      RoomInfo ri = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
+      if (ri != null) {
+         String hm = ri.getHostModVersion();
+         String shown = hm.isEmpty() ? Component.translatable("voxlink.host_version_unknown").getString() : hm;
+         this.drawString(graphics, Component.translatable("voxlink.host_version_label").getString() + ": " + shown, x, y + line * 3, VoxLinkColors.MUTED);
+      }
+   }
+
+   private String natCnName(NatClass nat) {
+      switch (nat) {
+         case CONE:
+            return Component.translatable("voxlink.nat.cone").getString();
+         case EASY_SYM:
+            return Component.translatable("voxlink.nat.easy_sym").getString();
+         case HARD_SYM:
+            return Component.translatable("voxlink.nat.hard_sym").getString();
+         default:
+            return Component.translatable("voxlink.nat.unknown").getString();
+      }
+   }
+
+   private void refillTipQueue() {
+      this.tipQueue.addAll(Arrays.asList(TIP_KEYS));
+      Collections.shuffle(this.tipQueue);
+   }
+
+   public void removed() {
+      super.removed();
+      this.stopConnectionMonitor();
+      RoomInfo room = VoxLinkMod.getRoomManager().getCurrentRoom();
+      boolean bridgeBuilt = room != null && room.getLocalBridgePort() > 0;
+      if (this.active && !bridgeBuilt) {
+         this.active = false;
+         VoxLinkMod.getRoomManager().getConnectionManager().killAllConnectionAttempts();
+      } else {
+         this.active = false;
+      }
+   }
+}

@@ -222,7 +222,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
 
       if (this.lyWebsite != Integer.MIN_VALUE) {
          this.addRenderableWidget(
-            Button.builder(Component.translatable("voxlink.website"), button -> this.openWebsite()).bounds(centerX - 100, this.lyWebsite, HALF_BTN_W, 20).build()
+            Button.builder(Component.translatable("voxlink.website"), button -> Minecraft.getInstance().setScreen(new RelatedLinksScreen(this))).bounds(centerX - 100, this.lyWebsite, HALF_BTN_W, 20).build()
          );
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.feedback"), button -> Minecraft.getInstance().setScreen(new FeedbackScreen(this))).bounds(centerX + L_GAP, this.lyWebsite, HALF_BTN_W, 20).build()
@@ -340,46 +340,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       return Component.translatable("voxlink.terracotta.downloading", new Object[]{pct, speedStr});
    }
 
-   private void openWebsite() {
-      try {
-         String url = VoxLinkMod.getConfig().getServerUrl();
-         if (url == null || url.isEmpty()) {
-            url = "https://p2p.wuhui.icu";
-         }
 
-         if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            url = "https://" + url;
-         }
-
-         URI uri = URI.create(url);
-         if (Desktop.isDesktopSupported()) {
-            Desktop.getDesktop().browse(uri);
-            return;
-         }
-
-         String os = System.getProperty("os.name", "").toLowerCase();
-         String[] cmd;
-         if (os.contains("win")) {
-            cmd = new String[]{"rundll32", "url.dll,FileProtocolHandler", url};
-         } else if (!os.contains("mac") && !os.contains("darwin")) {
-            cmd = new String[]{"xdg-open", url};
-         } else {
-            cmd = new String[]{"open", url};
-         }
-
-         Runtime.getRuntime().exec(cmd);
-      } catch (Exception e) {
-         VoxLinkMod.LOGGER.warn("[VoxLinkScreen] Failed to open website: {}", e.getMessage());
-         // 失败时在聊天栏给玩家红色提示：仅在主线程且玩家在场时发，避免后台线程触碰 player
-         Minecraft mc = Minecraft.getInstance();
-         if (mc.player != null) {
-            mc.player.displayClientMessage(
-               Component.translatable("voxlink.website_open_failed")
-                  .withStyle(style -> style.withColor(ChatFormatting.RED))
-            , false);
-         }
-      }
-   }
 
    private void startTerracottaDownload() {
       if (!TerracottaManager.isDownloading()) {

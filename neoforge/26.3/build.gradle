@@ -1,0 +1,106 @@
+plugins {
+    id 'net.neoforged.moddev' version '2.0.143'
+}
+
+// NFRT 走 IPv4 避免 maven.neoforged.net IPv6 TLS 中断
+try {
+    def envClass = Class.forName('java.lang.ProcessEnvironment')
+    def envField = envClass.getDeclaredField('theEnvironment')
+    envField.setAccessible(true)
+    def envMap = (Map) envField.get(null)
+    envMap.put('JAVA_TOOL_OPTIONS', '-Djava.net.preferIPv4Stack=true')
+} catch (Exception e) {
+    logger.warn("Cannot set JAVA_TOOL_OPTIONS via reflection: {}", e.message)
+}
+
+version = project.mod_version + "-neoforge"
+group = project.mod_group_id
+
+base {
+    archivesName = project.mod_id
+}
+
+repositories {
+    maven {
+        name = 'Minecraft libraries'
+        url = 'https://libraries.minecraft.net'
+    }
+    mavenCentral()
+}
+
+//debounce Android stub 仅PC编译用 不打包进jar
+sourceSets {
+    stubs {
+        java {
+            srcDir 'src/stubs/java'
+        }
+    }
+    main {
+        compileClasspath += sourceSets.stubs.output
+    }
+}
+
+compileStubsJava {
+    options.release = Integer.parseInt(project.release_bytecode)
+}
+compileJava.dependsOn compileStubsJava
+jar {
+    exclude 'android/**'
+}
+
+neoForge {
+    enable {
+        version = project.neo_version
+        disableRecompilation = true
+    }
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    // NeoForge 自带 mixin 无需额外依赖
+}
+
+tasks.withType(ProcessResources).configureEach {
+    var replaceProperties = [
+        mod_id: project.mod_id,
+        mod_version: project.mod_version,
+        mod_license: project.mod_license,
+        minecraft_version: project.minecraft_version,
+        minecraft_version_range: project.minecraft_version_range,
+        neo_version_range: project.neo_version_range,
+        loader_version_range: project.loader_version_range,
+    ]
+    inputs.properties replaceProperties
+    filesMatching(['META-INF/neoforge.mods.toml']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = Integer.parseInt(project.release_bytecode)
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+    from("../../LICENSE") {}
+}

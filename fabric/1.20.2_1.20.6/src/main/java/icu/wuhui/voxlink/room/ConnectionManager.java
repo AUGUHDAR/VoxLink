@@ -11600,6 +11600,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
                VoxLinkMod.LOGGER.warn("[Turn] all {} node probes timed out, attempting bind anyway (lossy network?)", probed.size());
             } else {
                VoxLinkMod.LOGGER.info("[Turn] guest picked node {} rtt={}ms (nodes={})", probed.get(0).node.id, probed.get(0).rttMs, nodes.size());
+               icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.turn_node", probed.get(0).rttMs);
             }
             return probed.get(0).node;
          })
@@ -11690,6 +11691,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
                this.scheduler.schedule(() -> {
                   if (this.turnTransport != null && !this.turnTransport.isConnected() && !this.turnSwitchedToP2p) {
                      VoxLinkMod.LOGGER.warn("[Turn] guest got no turn_ready in 20s (host dead / signal lost), teardown");
+                     icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.turn_no_ready");
                      this.teardownTurn(state, "voxlink.turn.failed");
                   }
                }, 20L, TimeUnit.SECONDS);
@@ -11832,6 +11834,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
       this.startUdpPunchBridge(state, transport);
       this.startTurnBgMonitor(state);
       VoxLinkMod.LOGGER.info("[Turn] guest path up, bridge starting");
+      icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.turn_established");
       icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
    }
 
@@ -13523,6 +13526,9 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
       this.resetConnectionStateForNextP2P();
       icu.wuhui.voxlink.ui.UiLogBus.reset();
       icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.preparing");
+      if (this.signalingClient != null && this.signalingClient.isWsConnected()) {
+         icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.signaling_ready");
+      }
 
       this.resetDualRaceState();
 

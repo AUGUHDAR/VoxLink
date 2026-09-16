@@ -6,7 +6,10 @@ import icu.wuhui.voxlink.room.RoomInfo;
 import icu.wuhui.voxlink.terracotta.TerracottaManager;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.local.LocalServerChannel;
+import java.io.IOException;
 import java.lang.reflect.Field;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -587,7 +590,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
          CreateFlowState.markRegistering();
 
-         int effectivePort = server.getPort() > 0 ? server.getPort() : mcPort;
+         int effectivePort = resolveLanPort(server, mcPort);
          String categoryText = this.resolveCategory();
          VoxLinkMod.getRoomManager()
             .createRoom(roomName, password.isEmpty() ? null : password, maxPlayers, effectivePort, this.visible, this.authType.name(), categoryText)
@@ -726,6 +729,76 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
       if (!CreateFlowState.isActive() && this.createdRoom == null) {
          this.closeLan();
       }
+   }
+
+   private static boolean waitPortListening(int port, long timeoutMs) {
+      long deadline = System.currentTimeMillis() + timeoutMs;
+      while (System.currentTimeMillis() < deadline) {
+         try (Socket probe = new Socket()) {
+            probe.connect(new InetSocketAddress("127.0.0.1", port), 400);
+            return true;
+         } catch (IOException e) {
+            try {
+               Thread.sleep(250L);
+            } catch (InterruptedException ie) {
+               Thread.currentThread().interrupt();
+               return false;
+            }
+         }
+      }
+
+      return false;
+   }
+
+   private static int findBoundLanPort(IntegratedServer server) {
+      try {
+         ServerConnectionListener conn = server.getConnection();
+         if (conn == null) {
+            return -1;
+         }
+
+         Field channelsField = conn.getClass().getDeclaredField("channels");
+         channelsField.setAccessible(true);
+         List<?> channels = (List<?>)channelsField.get(conn);
+         if (channels == null) {
+            return -1;
+         }
+
+         synchronized (channels) {
+            for (Object entry : channels) {
+               if (entry instanceof ChannelFuture future
+                  && future.channel().localAddress() instanceof InetSocketAddress addr) {
+                  return addr.getPort();
+               }
+            }
+         }
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.debug("lan channels probe failed: {}", e.getMessage());
+      }
+
+      return -1;
+   }
+
+   // 部分版本忽略指定端口，实测为准
+   private static int resolveLanPort(IntegratedServer server, int requested) {
+      if (waitPortListening(requested, 3000L)) {
+         return requested;
+      }
+
+      int apiPort = server.getPort();
+      if (apiPort > 0 && apiPort != requested && waitPortListening(apiPort, 1200L)) {
+         VoxLinkMod.LOGGER.warn("[CreateRoom] MC port {} not listening, using {}", requested, apiPort);
+         return apiPort;
+      }
+
+      int bound = findBoundLanPort(server);
+      if (bound > 0 && bound != requested && waitPortListening(bound, 1200L)) {
+         VoxLinkMod.LOGGER.warn("[CreateRoom] MC port {} not listening, using {}", requested, bound);
+         return bound;
+      }
+
+      VoxLinkMod.LOGGER.warn("[CreateRoom] LAN port probe failed, fallback {}", requested);
+      return requested;
    }
 
    private void closeLan() {

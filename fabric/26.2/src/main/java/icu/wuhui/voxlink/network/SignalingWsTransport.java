@@ -322,6 +322,9 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.signaling_connecting");
          long id = obj.has("id") ? obj.get("id").getAsLong() : -1L;
          // 推送帧：id==0 且含 push 字段
          if (id == 0L && obj.has("push")) {
+         if ("lobby".equals(obj.get("push").getAsString())) {
+            icu.wuhui.voxlink.ui.LobbyPush.fire();
+         }
             JsonObject data = obj.has("data") && obj.get("data").isJsonObject()
                ? obj.getAsJsonObject("data")
                : new JsonObject();

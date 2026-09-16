@@ -90,8 +90,6 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    protected int currentPage = 1;
    protected int totalRooms = 0;
    protected volatile boolean loadingMore = false;
-   /** 上次自动刷新时刻（打开浏览器期间 5s 节流）。 */
-   private long lastAutoRefreshMs = System.currentTimeMillis();
    protected volatile boolean removed = false;
    protected Map<String, String> categoryMap = new LinkedHashMap<>();
    protected boolean categoriesFetched = false;
@@ -121,6 +119,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
 
    @Override
    protected void init() {
+         LobbyPush.set(this::onLobbyPush);
+      VoxLinkMod.getSignalingClient().preconnectWebSocket();
       super.init();
       int w = this.width;
       int pad = Math.max(8, w / 40);
@@ -138,7 +138,6 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          b.setMessage(Component.translatable("voxlink.browser.sort", new Object[]{this.sortMode.label}));
          this.applyFilter();
       }).bounds(sortX, 6, w / 5, 20).build());
-      this.addRenderableWidget(Button.builder(Component.translatable("voxlink.refresh"), b -> this.fetchRooms()).bounds(w - pad - 60, 6, 60, 20).build());
       this.joinBtn = Button.builder(Component.translatable("voxlink.join_room"), b -> this.joinSelected())
          .bounds(w / 2 - 10, this.height - 24, 100, 20)
          .build();
@@ -357,6 +356,69 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             }
          }
       }
+   }
+
+   private void onLobbyPush() {
+      Minecraft.getInstance().execute(this::refreshInPlace);
+   }
+
+   // 事件驱动刷新: 响应到达后原子替换, 不清屏不动滚动
+   protected void refreshInPlace() {
+      if (this.removed || this.loadingMore || this.currentPage > 1) {
+         return;
+      }
+
+      this.loadingMore = true;
+      String category = "all".equals(this.selectedCategory) ? null : this.selectedCategory;
+      VoxLinkMod.getSignalingClient()
+         .listRooms(1, 20, category, this.selectedLoader)
+         .thenAccept(
+            apiResponse -> Minecraft.getInstance().execute(() -> {
+               this.loadingMore = false;
+               if (this.removed || apiResponse == null || apiResponse.data == null) {
+                  return;
+               }
+
+               try {
+                  JsonObject data = apiResponse.data;
+                  this.totalRooms = data.has("total") ? data.get("total").getAsInt() : this.totalRooms;
+                  List<RoomBrowserScreenBase.RoomEntry> fresh = new ArrayList<>();
+                  if (data.has("rooms") && data.get("rooms").isJsonArray()) {
+                     for (JsonElement e : data.getAsJsonArray("rooms")) {
+                        JsonObject r = e.getAsJsonObject();
+                        String code = r.has("code") ? r.get("code").getAsString() : "";
+                        String roomClientType = r.has("clientType") ? r.get("clientType").getAsString() : "mod";
+                        if (!code.isEmpty() && "mod".equals(roomClientType)) {
+                           fresh.add(new RoomBrowserScreenBase.RoomEntry(code,
+                              r.has("name") ? r.get("name").getAsString() : Component.translatable("voxlink.unknown").getString(),
+                              r.has("category") ? r.get("category").getAsString() : "other",
+                              r.has("loader") ? r.get("loader").getAsString() : "unknown",
+                              r.has("currentPlayers") ? r.get("currentPlayers").getAsInt() : 0,
+                              r.has("maxPlayers") ? r.get("maxPlayers").getAsInt() : 20,
+                              r.has("hasPassword") && r.get("hasPassword").getAsBoolean(),
+                              r.has("natType") ? r.get("natType").getAsString() : "unknown",
+                              r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
+                              r.has("gameVersion") ? r.get("gameVersion").getAsString() : ""));
+                        }
+                     }
+                  }
+
+                  this.allRooms.clear();
+                  this.allRooms.addAll(fresh);
+                  this.currentPage = 1;
+                  this.fetchP2PDetails();
+               } catch (Exception ex) {
+                  this.statusMsg = Component.translatable("voxlink.browser.load_rooms_failed").getString();
+                  this.statusColor = VoxLinkColors.ERROR;
+               }
+            })
+         )
+         .exceptionally(e -> {
+            Minecraft.getInstance().execute(() -> {
+               this.loadingMore = false;
+            });
+            return null;
+         });
    }
 
    protected void fetchRooms() {
@@ -597,11 +659,6 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       // 房间列表自动刷新（1.1.5）：打开浏览器期间每 5s 拉一次第一页（人数/新房间实时），
       // 拉取中/翻页浏览中(第2页起)不打断
-      long now = System.currentTimeMillis();
-      if (now - this.lastAutoRefreshMs >= 5000L && !this.loadingMore && this.currentPage <= 1) {
-         this.lastAutoRefreshMs = now;
-         this.fetchRooms();
-      }
       this.updatePageInput();
       super.render(graphics, mouseX, mouseY, partialTick);
       int cols = this.getColumns();
@@ -834,6 +891,7 @@ return this.handleClick(mouseX, mouseY, button) ? true : super.mouseClicked(mous
    public void removed() {
       super.removed();
       this.removed = true;
+      LobbyPush.set(null);
    }
 
    protected record RoomEntry(

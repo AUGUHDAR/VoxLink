@@ -26,6 +26,7 @@ public final class VoxLinkConstants {
          case "1.21.11" -> 774;
          case "26.1", "26.1.1", "26.1.2" -> 775;
          case "26.2" -> 776;
+         case "26.3" -> 777;
          default -> 0;
       };
    }
