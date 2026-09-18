@@ -39,11 +39,21 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
 
    private static final int FIELD_W = 220;
    private static final int DESC_H = 56;
+   private static final int MIN_DESC_H = 40;
+   private static final int MAX_TIP_EXAMPLES = 4;
+   private static final int TIP_LINE_H = 10;
+   private static final int STATUS_RESERVE = 22;   // 状态行预留高度
    private static final int TITLE_Y = 15;
    private static final int MAX_FILE_LINES = 2;
    private final Screen chooser;   // 选择界面（FeedbackScreen）
    private final Screen parent;    // 最终返回的界面
    private MultiLineEditBox descBox;
+   private int descH = DESC_H;
+   private int tipExamples = MAX_TIP_EXAMPLES;
+   private int rowY;
+   private int logY;
+   private int tipsY;
+   private int statusY;
    private Button submitButton;
    private final List<Path> attachments = new ArrayList<>();
    private boolean includeLogs = true;
@@ -65,15 +75,16 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
    @Override
    protected void init() {
       super.init();
+      this.computeLayout();
       int centerX = this.width / 2;
       int x = centerX - FIELD_W / 2;
       this.descBox = MultiLineEditBox.builder()
          .setX(x)
          .setY(30)
          .setPlaceholder(Component.translatable("voxlink.fb.desc_hint"))
-         .build(this.font, FIELD_W, DESC_H, Component.translatable("voxlink.fb.form_title"));
+         .build(this.font, FIELD_W, this.descH, Component.translatable("voxlink.fb.form_title"));
       this.addRenderableWidget(this.descBox);
-      int rowY = 30 + DESC_H + 6;
+      int rowY = this.rowY;
       this.addRenderableWidget(
          Button.builder(Component.translatable("voxlink.fb.add_files"), button -> this.openFileChooser())
             .bounds(centerX - 100, rowY, 98, 20)
@@ -87,7 +98,7 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
             .bounds(centerX + 2, rowY, 98, 20)
             .build()
       );
-      int logY = rowY + 24;
+      int logY = this.logY;
       this.addRenderableWidget(
          Button.builder(Component.translatable("voxlink.fb.include_logs", new Object[]{Component.translatable(this.includeLogs ? "voxlink.fb.on" : "voxlink.fb.off")}), button -> {
                this.includeLogs = !this.includeLogs;
@@ -109,15 +120,56 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
       );
    }
 
+   /** 垂直布局: 提示随屏高自适应 */
+   private void computeLayout() {
+      int submitY = this.height - 46;
+      this.descH = DESC_H;
+      this.tipExamples = MAX_TIP_EXAMPLES;
+      while (true) {
+         int bottom = 30 + this.descH + 6 + 20 + 4 + 20 + 8 + (2 + this.tipExamples) * TIP_LINE_H;
+         if (bottom <= submitY - STATUS_RESERVE) {
+            break;
+         }
+
+         if (this.descH > MIN_DESC_H) {
+            this.descH = Math.max(MIN_DESC_H, this.descH - 8);
+         } else if (this.tipExamples > 0) {
+            this.tipExamples--;
+         } else {
+            break;
+         }
+      }
+
+      this.rowY = 30 + this.descH + 6;
+      this.logY = this.rowY + 24;
+      this.tipsY = this.logY + 24;
+      this.statusY = this.tipsY + (2 + this.tipExamples) * TIP_LINE_H + 4;
+   }
+
+   /** 发前自检提示与示例 */
+   private void drawTips(GuiGraphicsExtractor graphics, int centerX) {
+      int y = this.tipsY;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.tips_title").getString(), centerX, y, VoxLinkColors.WARNING);
+      y += TIP_LINE_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.tips_body").getString(), centerX, y, VoxLinkColors.GRAY);
+      y += TIP_LINE_H;
+
+      for (int i = 0; i < this.tipExamples; i++) {
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.tips_ex" + (i + 1)).getString(), centerX, y, VoxLinkColors.MUTED);
+         y += TIP_LINE_H;
+      }
+   }
+
    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
       super.extractRenderState(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
       this.drawCenteredString(graphics, this.title.getString(), centerX, TITLE_Y, VoxLinkColors.WHITE);
+      this.drawTips(graphics, centerX);
       this.drawStatus(graphics, centerX);
    }
 
    private void drawStatus(GuiGraphicsExtractor graphics, int centerX) {
-      int y = 30 + DESC_H + 6 + 24 + 20 + 6;
+      int y = this.statusY;
       if (this.submitted) {
          this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.success").getString(), centerX, y, VoxLinkColors.SUCCESS);
          y += 10;

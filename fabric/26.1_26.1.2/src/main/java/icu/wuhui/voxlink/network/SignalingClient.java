@@ -763,6 +763,18 @@ public class SignalingClient {
       }
    }
 
+   /** 透传 WS 重连成功监听（上层单次补拉）。 */
+   public void setWsReconnectedListener(Runnable listener) {
+      if (!this.config.isUseWebSocket()) {
+         return;
+      }
+      if (listener != null) {
+         this.getWsTransport().setReconnectListener(listener);
+      } else if (this.wsTransport != null) {
+         this.wsTransport.setReconnectListener(null);
+      }
+   }
+
    /** 从完整 URL 解析出 WS 帧所需的 route 与 query；非 /?route= 形态（旧 PHP）返回 null 走 HTTP。 */
    private WsRouteInfo parseWsRoute(String path) {
       if (path == null || !path.startsWith("http")) {

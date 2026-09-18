@@ -48,6 +48,13 @@ public class TurnRelayClient {
    private static final int PROBE_TOTAL_BUDGET_MS = 4000;
    private static final int BIND_TIMEOUT_MS = 2000;
    private static final int KEEPALIVE_INTERVAL_SEC = 15;
+   private static final int FETCH_MAX_ATTEMPTS = 4;
+   private static final long FETCH_RETRY_DELAY_MS = 800L;
+   private static final long NODE_CACHE_TTL_MS = 60_000L;
+   private static final Object NODE_CACHE_LOCK = new Object();
+   private static SignalingClient nodeCacheOwner;
+   private static List<NodeInfo> nodeCache;
+   private static long nodeCacheAtMs;
 
    /**
     * 已分配的 TURN 会话（本端视角）。allocate 响应的两张票分别供两端 BIND：
@@ -139,28 +146,90 @@ public class TurnRelayClient {
    }
 
    public static CompletableFuture<List<NodeInfo>> fetchNodeList(SignalingClient sc) {
-      return sc.getRelayList().thenApply(r -> {
-         List<NodeInfo> nodes = new ArrayList<>();
-         if (r.success && r.data != null && r.data.has("nodes") && r.data.get("nodes").isJsonArray()) {
-            for (JsonElement el : r.data.getAsJsonArray("nodes")) {
-               if (!el.isJsonObject()) {
-                  continue;
-               }
+      List<NodeInfo> hit = nodeCacheGet(sc, true);
+      if (hit != null) {
+         return CompletableFuture.completedFuture(hit);
+      }
 
-               JsonObject n = el.getAsJsonObject();
-               NodeInfo info = new NodeInfo();
-               info.id = n.has("id") ? n.get("id").getAsString() : "";
-               info.name = n.has("name") ? n.get("name").getAsString() : info.id;
-               info.host = n.has("host") ? n.get("host").getAsString() : "";
-               info.port = n.has("port") ? n.get("port").getAsInt() : 37000;
-               if (!info.id.isEmpty() && !info.host.isEmpty() && info.port > 0) {
-                  nodes.add(info);
-               }
+      return fetchNodeRound(sc, FETCH_MAX_ATTEMPTS);
+   }
+
+   /** 首轮加 3 轮重试；全败回退旧缓存。 */
+   private static CompletableFuture<List<NodeInfo>> fetchNodeRound(SignalingClient sc, int left) {
+      return sc.getRelayList()
+         .thenApply(TurnRelayClient::parseNodeList)
+         .thenCompose(nodes -> {
+            if (!nodes.isEmpty()) {
+               nodeCachePut(sc, nodes);
+               return CompletableFuture.completedFuture(nodes);
+            }
+
+            return fetchNodeRetry(sc, left, "empty");
+         })
+         .exceptionallyCompose(ex -> fetchNodeRetry(sc, left, ex == null ? "error" : ex.getMessage()));
+   }
+
+   private static CompletableFuture<List<NodeInfo>> fetchNodeRetry(SignalingClient sc, int left, String why) {
+      if (left > 1) {
+         LOGGER.warn("[TurnRelay] relay_list failed ({}), retry {}/{} in {}ms", why, FETCH_MAX_ATTEMPTS - left + 1, FETCH_MAX_ATTEMPTS - 1, FETCH_RETRY_DELAY_MS);
+         return CompletableFuture
+            .supplyAsync(() -> null, CompletableFuture.delayedExecutor(FETCH_RETRY_DELAY_MS, TimeUnit.MILLISECONDS))
+            .thenCompose(v -> fetchNodeRound(sc, left - 1));
+      }
+
+      List<NodeInfo> stale = nodeCacheGet(sc, false);
+      if (stale != null) {
+         LOGGER.warn("[TurnRelay] relay_list failed ({}), using stale cache", why);
+         return CompletableFuture.completedFuture(stale);
+      }
+
+      return CompletableFuture.completedFuture(new ArrayList<>());
+   }
+
+   private static List<NodeInfo> parseNodeList(SignalingClient.ApiResponse r) {
+      List<NodeInfo> nodes = new ArrayList<>();
+      if (r.success && r.data != null && r.data.has("nodes") && r.data.get("nodes").isJsonArray()) {
+         for (JsonElement el : r.data.getAsJsonArray("nodes")) {
+            if (!el.isJsonObject()) {
+               continue;
+            }
+
+            JsonObject n = el.getAsJsonObject();
+            NodeInfo info = new NodeInfo();
+            info.id = n.has("id") ? n.get("id").getAsString() : "";
+            info.name = n.has("name") ? n.get("name").getAsString() : info.id;
+            info.host = n.has("host") ? n.get("host").getAsString() : "";
+            info.port = n.has("port") ? n.get("port").getAsInt() : 37000;
+            if (!info.id.isEmpty() && !info.host.isEmpty() && info.port > 0) {
+               nodes.add(info);
             }
          }
+      }
 
-         return nodes;
-      });
+      return nodes;
+   }
+
+   /** freshOnly=true 只认未过期缓存。 */
+   private static List<NodeInfo> nodeCacheGet(SignalingClient sc, boolean freshOnly) {
+      synchronized (NODE_CACHE_LOCK) {
+         if (sc == null || sc != nodeCacheOwner || nodeCache == null) {
+            return null;
+         }
+
+         if (freshOnly && System.currentTimeMillis() - nodeCacheAtMs > NODE_CACHE_TTL_MS) {
+            return null;
+         }
+
+         return new ArrayList<>(nodeCache);
+      }
+   }
+
+   private static void nodeCachePut(SignalingClient sc, List<NodeInfo> nodes) {
+      synchronized (NODE_CACHE_LOCK) {
+         nodeCacheOwner = sc;
+         nodeCache = new ArrayList<>(nodes);
+         nodeCacheAtMs = System.currentTimeMillis();
+      }
    }
 
    public static class Allocation {

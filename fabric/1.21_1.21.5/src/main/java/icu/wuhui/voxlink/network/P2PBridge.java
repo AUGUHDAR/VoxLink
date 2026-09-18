@@ -366,6 +366,105 @@ public class P2PBridge {
       });
    }
 
+   /** TCP 打洞胜利 socket 交棒：joiner 侧直接建本地桥，不再二次 connect。 */
+   public static synchronized CompletableFuture<Integer> connectToHostPreconnected(Socket punched, String hostIp, int hostPort) {
+      cancelled.set(false);
+      tcpJoinerBridgeConnectedV4.set(false);
+      if (isRunning()) {
+         int jp = joinerPort;
+         if (jp > 0) {
+            try {
+               punched.close();
+            } catch (Exception ignored) {
+            }
+            LOGGER.warn("Joiner: bridge already on {}, reuse it, close new punched socket", jp);
+            return CompletableFuture.completedFuture(jp);
+         }
+
+         disconnect();
+      }
+
+      return CompletableFuture.supplyAsync(() -> {
+         try {
+            if (punched == null || punched.isClosed()) {
+               running.set(false);
+               return -1;
+            }
+
+            ServerSocket js = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
+            int jpx = js.getLocalPort();
+            synchronized (P2PBridge.class) {
+               joinerServer = js;
+               joinerPort = jpx;
+               currentHostIp = hostIp;
+               currentHostPort = hostPort;
+            }
+
+            punched.setTcpNoDelay(true);
+            punched.setSendBufferSize(32768);
+            punched.setReceiveBufferSize(32768);
+            running.set(true);
+            LOGGER.info("Joiner: punched-socket bridge on port {} (peer {}:{})", new Object[]{jpx, hostIp, hostPort});
+            getOrCreateExecutor().submit(() -> acceptJoinerConnectionPreconnected(js, punched));
+            return jpx;
+         } catch (IOException e) {
+            LOGGER.error("Joiner: punched-socket bridge failed: {}", e.getMessage());
+            running.set(false);
+            if (punched != null) {
+               try {
+                  punched.close();
+               } catch (IOException ignored) {
+               }
+            }
+
+            return -1;
+         }
+      }, getOrCreateExecutor());
+   }
+
+   /** TCP 打洞胜利 socket 交棒：host 侧直桥本地 MC（等价 accept 后处理）。 */
+   public static synchronized boolean bridgePunchedHostSocket(Socket punched, int minecraftPort) {
+      if (punched == null || punched.isClosed() || minecraftPort <= 0) {
+         return false;
+      }
+
+      Socket mcSocket = null;
+      try {
+         cancelled.set(false);
+         running.set(true);
+         punched.setTcpNoDelay(true);
+         punched.setSendBufferSize(32768);
+         punched.setReceiveBufferSize(32768);
+         LOGGER.info("Punched client from {}, bridging to MC port {}", new Object[]{punched.getRemoteSocketAddress(), minecraftPort});
+         mcSocket = new Socket();
+         mcSocket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), minecraftPort), 10000);
+         mcSocket.setTcpNoDelay(true);
+         mcSocket.setSendBufferSize(32768);
+         mcSocket.setReceiveBufferSize(32768);
+         BridgePair pair = new BridgePair(punched, mcSocket);
+         activePairs.add(pair);
+         ExecutorService exec = getOrCreateExecutor();
+         exec.submit(() -> bridge(pair, pair.client, pair.mc, "Punched->MC"));
+         exec.submit(() -> bridge(pair, pair.mc, pair.client, "MC->Punched"));
+         return true;
+      } catch (IOException e) {
+         LOGGER.error("Punched-socket host bridge failed: {}", e.getMessage());
+         if (mcSocket != null) {
+            try {
+               mcSocket.close();
+            } catch (IOException ignored) {
+            }
+         }
+
+         try {
+            punched.close();
+         } catch (IOException ignored) {
+         }
+
+         return false;
+      }
+   }
+
    private static void acceptJoinerConnectionPreconnected(ServerSocket js, Socket preconnectedHostSocket) {
       try {
          js.setSoTimeout(10000);

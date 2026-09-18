@@ -22,8 +22,11 @@ public enum NatClass {
             return CONE;
          case SYMMETRIC_EASY_INC:
          case SYMMETRIC_EASY_DEC:
+         case EASY_SYM_INC:
+         case EASY_SYM_DEC:
             return EASY_SYM;
          case SYMMETRIC:
+         case HARD_SYM:
             return HARD_SYM;
          default:
             return UNKNOWN;

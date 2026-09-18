@@ -122,6 +122,10 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       this.modSyncChecked = modSyncChecked;
    }
 
+   public Screen entryScreen() {
+      return this.parent;
+   }
+
    @Override
    protected void init() {
       icu.wuhui.voxlink.ui.UiLogBus.attach();

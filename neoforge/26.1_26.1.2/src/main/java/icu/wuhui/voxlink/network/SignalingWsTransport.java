@@ -16,6 +16,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -28,7 +29,7 @@ import java.util.function.Consumer;
  *
  * <p>与服务端 /ws 端点通信：请求/响应按 id 多路复用，id==0 的帧为服务端实时推送。
  * 任何网络异常（连接失败/超时/断连）都会让对应请求以异常完成，由 SignalingClient 降级为 HTTP。
- * 连接断开后采用指数退避（10s/30s/60s，上限 60s）懒重连：仅在下次 request() 时尝试，
+ * 连接断开后立即主动重连，失败按指数退避（10s/30s/60s 封顶）续试；
  * 退避窗口内 canUse() 返回 false，SignalingClient 直接走 HTTP，避免每次轮询都卡 3s。
  */
 public final class SignalingWsTransport {
@@ -67,6 +68,8 @@ public final class SignalingWsTransport {
 
    private volatile WebSocket webSocket;
    private volatile Consumer<JsonObject> pushListener;
+   private volatile Runnable reconnectListener;
+   private volatile WebSocket reconnectFiredFor;
 
    // 退避状态：nextRetryAt 之前 canUse() 为 false
    private final AtomicLong nextRetryAt = new AtomicLong(0L);
@@ -77,6 +80,8 @@ public final class SignalingWsTransport {
    private final Object connectLock = new Object();
    private final AtomicBoolean connecting = new AtomicBoolean(false);
    private volatile CompletableFuture<Boolean> connectPromise;
+   // 主动重连排队标记（防重复排程）
+   private final AtomicBoolean reconnectPending = new AtomicBoolean(false);
 
    public SignalingWsTransport(String serverUrl) {
       this.wsUrl = deriveWsUrl(serverUrl);
@@ -149,6 +154,11 @@ public final class SignalingWsTransport {
    /** 注册推送帧监听器（data 部分为 {"s":[...],"ts":N}）。传 null 取消。 */
    public void setPushListener(Consumer<JsonObject> listener) {
       this.pushListener = listener;
+   }
+
+   /** 注册重连监听。传 null 取消。 */
+   public void setReconnectListener(Runnable listener) {
+      this.reconnectListener = listener;
    }
 
    /**
@@ -294,6 +304,20 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.signaling_connecting");
       // 连接成功，重置退避
       this.backoffStep.set(0L);
       this.nextRetryAt.set(0L);
+      // 重连成功触发单次补拉(去重)
+      WebSocket prevWs = this.reconnectFiredFor;
+      if (prevWs != ws) {
+         this.reconnectFiredFor = ws;
+         if (prevWs != null) {
+            Runnable r = this.reconnectListener;
+            if (r != null) {
+               try {
+                  this.executor.execute(r);
+               } catch (Exception ignored) {
+               }
+            }
+         }
+      }
    }
 
    private void onDisconnected() {
@@ -309,8 +333,39 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.signaling_connecting");
       this.pending.clear();
       if (wasConnected) {
          icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.signaling_lost");
-         VoxLinkMod.LOGGER.debug("[WS] 连接断开，等待下次请求触发重连");
+         VoxLinkMod.LOGGER.debug("[WS] 连接断开，立即主动重连");
       }
+      this.scheduleReconnect(0L);
+   }
+
+   /** 断开后主动重连，退避封顶60s */
+   private void scheduleReconnect(long delayMs) {
+      if (this.closed.get() || this.wsUrl == null) {
+         return;
+      }
+      if (!this.reconnectPending.compareAndSet(false, true)) {
+         return;
+      }
+      try {
+         this.scheduler.schedule(this::runReconnect, delayMs, TimeUnit.MILLISECONDS);
+      } catch (RejectedExecutionException ignored) {
+         this.reconnectPending.set(false);
+      }
+   }
+
+   private void runReconnect() {
+      this.reconnectPending.set(false);
+      if (this.closed.get() || this.isConnected()) {
+         return;
+      }
+      this.ensureConnected().whenComplete((ok, ex) -> {
+         if (this.closed.get() || Boolean.TRUE.equals(ok)) {
+            return;
+         }
+         this.markUnavailable();
+         long delay = Math.max(1000L, this.nextRetryAt.get() - System.currentTimeMillis());
+         this.scheduleReconnect(delay);
+      });
    }
 
    private void handleFrame(String text) {

@@ -41,6 +41,7 @@ public final class PunchProfile {
    public final int maxCycles;
    public final int maxSymCycles;
    public final int fallbackCycles;
+   public final SymParams sym;
    private static final PunchProfile.SendParams SEND_DEFAULT = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 3, 3, 1, 10, 800);
    private static final PunchProfile.SendParams SEND_DEFAULT_FAST = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 1, 2, 1, 5, 800);
    private static final PunchProfile.SendParams SEND_SPRINT = new PunchProfile.SendParams(100, 300, 600, 1200, 400, 150, 1, 1, 1, 3, 400);
@@ -70,6 +71,48 @@ public final class PunchProfile {
    public static final PunchProfile WIDE_SWEEP = new PunchProfile(
       "WIDE_SWEEP", 35000, 70, 800, new int[]{100, 200, 400, 800}, 1, 25, 20, 30, 50, 800, 3, 20, 84, 5, 3, 84, 32, 50, 5, 30, 25, 50, 10, 2, 50, 12000, 60, 65, 110, 5, 500, 12, 10, 3, SEND_WIDE
    );
+   /**
+    * 对称NAT分级配方参数(EasyTier量化值)
+    */
+   public static final class SymParams {
+      public final int easySymBombSockets;
+      public final int easySymBombWindow;
+      public final int easySymRoundIntervalMs;
+      public final int easySymBombDurationMs;
+      public final int hardSymSprayPortMin;
+      public final int hardSymSprayPortMax;
+      public final int hardSymPacketsPerPort;
+      public final int hardSymPortIntervalMs;
+      public final int hardSymDecayNumerator;
+      public final int hardSymDecayFloor;
+
+      public SymParams(
+         int easySymBombSockets,
+         int easySymBombWindow,
+         int easySymRoundIntervalMs,
+         int easySymBombDurationMs,
+         int hardSymSprayPortMin,
+         int hardSymSprayPortMax,
+         int hardSymPacketsPerPort,
+         int hardSymPortIntervalMs,
+         int hardSymDecayNumerator,
+         int hardSymDecayFloor
+      ) {
+         this.easySymBombSockets = easySymBombSockets;
+         this.easySymBombWindow = easySymBombWindow;
+         this.easySymRoundIntervalMs = easySymRoundIntervalMs;
+         this.easySymBombDurationMs = easySymBombDurationMs;
+         this.hardSymSprayPortMin = hardSymSprayPortMin;
+         this.hardSymSprayPortMax = hardSymSprayPortMax;
+         this.hardSymPacketsPerPort = hardSymPacketsPerPort;
+         this.hardSymPortIntervalMs = hardSymPortIntervalMs;
+         this.hardSymDecayNumerator = hardSymDecayNumerator;
+         this.hardSymDecayFloor = hardSymDecayFloor;
+      }
+   }
+
+   public static final SymParams RECIPE = new SymParams(25, 20, 100, 5000, 600, 800, 3, 1, 2, 180);
+
    private static volatile PunchProfile current = DEFAULT;
    private static volatile String switchReason = "initial";
    private static volatile PunchParams dynamicOverride;
@@ -148,6 +191,7 @@ public final class PunchProfile {
       this.maxSymCycles = maxSymCycles;
       this.fallbackCycles = fallbackCycles;
       this.send = send;
+      this.sym = RECIPE;
    }
 
    public static void applyDynamicParams(PunchParams p) {

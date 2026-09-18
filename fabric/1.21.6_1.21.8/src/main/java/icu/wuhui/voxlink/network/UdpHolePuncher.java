@@ -68,6 +68,9 @@ public class UdpHolePuncher {
    private volatile boolean skipFirewallDetection;
    private volatile PunchProfile profile;
    private volatile PunchParams punchParams;
+   // HardSym洗牌表, 跨轮共享
+   private int[] hardSymSprayTable;
+   private int hardSymSprayCursor;
    // 日志限流: birthday attack 同一会话会重复打印起动行/逐轮整张端口表(线上案例 77s 刷满 4MB 配额,
    // 关键诊断信息被截断), 同一目标在时间窗内只保留首条 INFO, 其余降 DEBUG。
    private static final long PUNCH_LOG_INFO_DEDUP_MS = 60000L;
@@ -409,17 +412,22 @@ public class UdpHolePuncher {
       long startTime = System.currentTimeMillis();
       int socketsTried = socketGroup.size();
       byte[] data = this.buildControl(TYPE_PUNCH);
-      int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
+      PunchParams mode = this.punchParams != null ? this.punchParams : PunchParams.fromProfile(this.profile());
+      boolean sprayMode = mode.hardSymSpray;
+      boolean bombMode = mode.easySymBomb;
+      int roundInterval = bombMode ? Math.min(this.effectiveSendInterval(), Math.max(1, mode.bombRoundIntervalMs)) : this.effectiveSendInterval();
+      int maxTotalCycles = this.effectiveTimeoutMs() / Math.max(1, roundInterval);
+      String modeName = sprayMode ? "hard_sym_spray" : bombMode ? "easy_sym_bomb" : "classic";
       // birthday attack 同会话重复起动行: 只保留首条 INFO, 其余降 DEBUG
       if (shouldLogPunchStartInfo(remoteIp, targetPort)) {
          LOGGER.info(
-            "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
-            new Object[]{remoteIp, targetPort, socketGroup.size(), this.effectiveSendInterval(), this.profile().describeInstance()}
+            "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, mode={}, profile={}",
+            new Object[]{remoteIp, targetPort, socketGroup.size(), roundInterval, modeName, this.profile().describeInstance()}
          );
       } else {
          LOGGER.debug(
-            "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, profile={}",
-            new Object[]{remoteIp, targetPort, socketGroup.size(), this.effectiveSendInterval(), this.profile().describeInstance()}
+            "[UdpHolePuncher] Multi-socket send start: target={}:{}, sockets={}, interval={}ms, mode={}, profile={}",
+            new Object[]{remoteIp, targetPort, socketGroup.size(), roundInterval, modeName, this.profile().describeInstance()}
          );
       }
       List<DatagramChannel> channels = new ArrayList<>();
@@ -559,6 +567,17 @@ public class UdpHolePuncher {
                                        this.remoteAddress = from.getAddress();
                                        this.remotePort = from.getPort();
                                        LOGGER.info("[UdpHolePuncher] socket#{} received PUNCH, punch success (NIO)", sIdx);
+                                       try {
+                                          key.cancel();
+                                          // 排空取消事件, 防阻塞模式误读
+                                          try {
+                                             finalSelector.selectNow();
+                                          } catch (Exception ignoredSel) {
+                                          }
+                                          ch.configureBlocking(true);
+                                       } catch (Exception varBlk) {
+                                          LOGGER.warn("[UdpHolePuncher] win socket restore blocking failed: {}", String.valueOf(varBlk));
+                                       }
                                        long elapsed = System.currentTimeMillis() - startTime;
                                        result.complete(PunchResult.success(sp.getSocket(), socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed));
                                     }
@@ -575,6 +594,17 @@ public class UdpHolePuncher {
                                        this.remoteAddress = from.getAddress();
                                        this.remotePort = from.getPort();
                                        LOGGER.info("[UdpHolePuncher] socket#{} received ACK, punch success (NIO)", sIdx);
+                                       try {
+                                          key.cancel();
+                                          // 排空取消事件, 防阻塞模式误读
+                                          try {
+                                             finalSelector.selectNow();
+                                          } catch (Exception ignoredSel) {
+                                          }
+                                          ch.configureBlocking(true);
+                                       } catch (Exception varBlk) {
+                                          LOGGER.warn("[UdpHolePuncher] win socket restore blocking failed: {}", String.valueOf(varBlk));
+                                       }
                                        long elapsed = System.currentTimeMillis() - startTime;
                                        result.complete(PunchResult.success(sp.getSocket(), socketsTried, recvPunchCounter[0], recvAckCounter[0], 0, elapsed));
                                     }
@@ -626,20 +656,49 @@ public class UdpHolePuncher {
                }
             }
 
-            int sweepSpan = sweepSpread > 0 ? sweepSpread * 2 + 1 : 0;
-            int sweepIdx = 0;
+            if (sprayMode) {
+               cycles++;
+               if (!this.sprayRound(data, mode, socketGroup, cycles)) {
+                  break;
+               }
 
-            for (UdpHolePuncher sp : socketGroup) {
-               DatagramSocket s = sp.getSocket();
-               if (s != null && !s.isClosed()) {
-                  int destPort = this.remotePort;
-                  if (sweepSpread > 0) {
-                     destPort = this.remotePort + ((sweepIdx++ % sweepSpan) - sweepSpread);
+               continue;
+            }
+
+            if (bombMode) {
+               // 每轮全量广播: 每socket向对端base±窗口各发1包
+               for (UdpHolePuncher sp : socketGroup) {
+                  DatagramSocket s = sp.getSocket();
+                  if (s != null && !s.isClosed()) {
+                     for (int off = -mode.bombWindow; off <= mode.bombWindow; off++) {
+                        int dp = this.remotePort + off;
+                        if (dp < 1) {
+                           dp = 1;
+                        } else if (dp > 65535) {
+                           dp = 65535;
+                        }
+
+                        DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, dp);
+                        sendPkt(s, pkt);
+                     }
                   }
+               }
+            } else {
+               int sweepSpan = sweepSpread > 0 ? sweepSpread * 2 + 1 : 0;
+               int sweepIdx = 0;
 
-                  for (int r = 0; r < 3; r++) {
-                     DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, destPort);
-                     sendPkt(s, pkt);
+               for (UdpHolePuncher sp : socketGroup) {
+                  DatagramSocket s = sp.getSocket();
+                  if (s != null && !s.isClosed()) {
+                     int destPort = this.remotePort;
+                     if (sweepSpread > 0) {
+                        destPort = this.remotePort + ((sweepIdx++ % sweepSpan) - sweepSpread);
+                     }
+
+                     for (int r = 0; r < 3; r++) {
+                        DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, destPort);
+                        sendPkt(s, pkt);
+                     }
                   }
                }
             }
@@ -647,7 +706,10 @@ public class UdpHolePuncher {
             cycles++;
 
             try {
-               Thread.sleep(this.effectiveSendInterval());
+               int sleepMs = bombMode && System.currentTimeMillis() - sendStartMs < mode.bombDurationMs
+                  ? mode.bombRoundIntervalMs
+                  : this.effectiveSendInterval();
+               Thread.sleep(sleepMs);
             } catch (InterruptedException e) {
                Thread.currentThread().interrupt();
                break;
@@ -682,6 +744,64 @@ public class UdpHolePuncher {
       this.timeoutFuture = tf;
       P2PBridge.registerPendingUdpTimeout(tf);
       return result;
+   }
+
+   /** HardSym喷洒轮; false=中断 */
+   private boolean sprayRound(byte[] data, PunchParams mode, List<UdpHolePuncher> group, int round) {
+      if (this.hardSymSprayTable == null) {
+         int[] table = new int[65535];
+         for (int i = 0; i < table.length; i++) {
+            table[i] = i + 1;
+         }
+
+         for (int i = table.length - 1; i > 0; i--) {
+            int j = ThreadLocalRandom.current().nextInt(i + 1);
+            int t = table[i];
+            table[i] = table[j];
+            table[j] = t;
+         }
+
+         this.hardSymSprayTable = table;
+         this.hardSymSprayCursor = 0;
+      }
+
+      for (int r = 0; r < mode.sprayPacketsPerPort; r++) {
+         DatagramPacket cone = new DatagramPacket(data, data.length, this.remoteAddress, this.remotePort);
+         sendPkt(this.socket, cone);
+      }
+
+      int span = Math.max(1, mode.sprayPortCountMax - mode.sprayPortCountMin + 1);
+      int base = mode.sprayPortCountMin + ThreadLocalRandom.current().nextInt(span);
+      int count = round > 2 ? Math.max(base * mode.sprayDecayNumerator / round, mode.sprayDecayFloor) : base;
+      LOGGER.debug("[UdpHolePuncher] spray round {}: {} ports, cursor={}", round, count, this.hardSymSprayCursor);
+
+      for (int i = 0; i < count; i++) {
+         int port = this.nextSprayPort();
+         DatagramSocket s = group.get(i % group.size()).getSocket();
+         if (s == null || s.isClosed()) {
+            continue;
+         }
+
+         for (int r = 0; r < mode.sprayPacketsPerPort; r++) {
+            DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, port);
+            sendPkt(s, pkt);
+         }
+
+         try {
+            Thread.sleep(Math.max(0, mode.sprayPortIntervalMs));
+         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+         }
+      }
+
+      return true;
+   }
+
+   private int nextSprayPort() {
+      int idx = this.hardSymSprayCursor % this.hardSymSprayTable.length;
+      this.hardSymSprayCursor = idx + 1;
+      return this.hardSymSprayTable[idx];
    }
 
    private void sendControlTo(byte type, InetAddress addr, int port) {
@@ -1215,10 +1335,19 @@ public class UdpHolePuncher {
       String remoteIp, int remoteBasePort, StunProbe.NatType localNat, StunProbe.NatType remoteNat, int socketCount
    ) {
       int effectiveSocketCount = socketCount > 0 ? socketCount : this.profile().easySymDualSocketCount;
+      PunchProfile.SymParams sym = this.profile().sym;
       LOGGER.info(
-         "[UdpHolePuncher] EasySym mutual punch start: target={}:{}, sockets={}, range=+/-{}, local={}, remote={}, profile={}",
+         "[UdpHolePuncher] EasySym mutual bomb: target={}:{}, sockets={}, window=+/-{}, round={}ms, budget={}ms, local={}, remote={}, profile={}",
          new Object[]{
-            remoteIp, remoteBasePort, effectiveSocketCount, this.profile().easySymDualPortRange, localNat.key, remoteNat.key, this.profile().describeInstance()
+            remoteIp,
+            remoteBasePort,
+            effectiveSocketCount,
+            sym.easySymBombWindow,
+            sym.easySymRoundIntervalMs,
+            sym.easySymBombDurationMs,
+            localNat.key,
+            remoteNat.key,
+            this.profile().describeInstance()
          }
       );
       List<UdpHolePuncher> punchers = new ArrayList<>();
@@ -1241,64 +1370,35 @@ public class UdpHolePuncher {
          return CompletableFuture.failedFuture(new SocketException("EasySym对打: 无可用socket"));
       }
 
-      List<UdpHolePuncher> punchersFinal = punchers;
-      List<CompletableFuture<PunchResult>> futures = new ArrayList<>();
-
-      for (UdpHolePuncher p : punchers) {
-         futures.add(p.punchWithPortPrediction(remoteIp, remoteBasePort, this.profile().easySymDualPortRange, true));
-      }
-
-      CompletableFuture<PunchResult> result = new CompletableFuture<>();
-      AtomicInteger remaining = new AtomicInteger(futures.size());
-      AtomicInteger recvPunchSum = new AtomicInteger(0);
-      AtomicInteger recvAckSum = new AtomicInteger(0);
-      long startTime = System.currentTimeMillis();
-      int socketsTried = punchersFinal.size();
-
-      for (int i = 0; i < futures.size(); i++) {
-         int idx = i;
-         futures.get(i).whenComplete((pr, ex) -> {
-            if (pr != null && pr.isSuccess()) {
-               if (result.complete(pr)) {
-                  LOGGER.info("[UdpHolePuncher] EasySym socket#{} hit, cancel others", idx);
-
-                  for (int j = 0; j < punchersFinal.size(); j++) {
-                     if (j != idx) {
-                        punchersFinal.get(j).cancel();
-                     }
-                  }
-               } else {
-                  try {
-                     pr.getSuccessSocket().close();
-                  } catch (Exception var15) {
-                  }
-               }
-            } else {
-               if (pr != null) {
-                  recvPunchSum.addAndGet(pr.socketsReceivedPunch);
-                  recvAckSum.addAndGet(pr.socketsReceivedAck);
-               }
-
-               if (remaining.decrementAndGet() == 0 && !result.isDone()) {
-                  for (UdpHolePuncher p : punchersFinal) {
-                     try {
-                        p.close();
-                     } catch (Exception var14x) {
-                     }
-                  }
-
-                  if (ex != null) {
-                     result.completeExceptionally(ex);
-                  } else {
-                     long elapsed = System.currentTimeMillis() - startTime;
-                     result.complete(PunchResult.failure(socketsTried, recvPunchSum.get(), recvAckSum.get(), 0, elapsed, false).withPortPrediction());
-                  }
-               }
+      // 对轰配方: 窗口内全量广播
+      PunchParams bomb = this.punchParams != null ? new PunchParams(this.punchParams) : PunchParams.fromProfile(this.profile());
+      bomb.easySymBomb = true;
+      bomb.bombWindow = sym.easySymBombWindow;
+      bomb.bombRoundIntervalMs = sym.easySymRoundIntervalMs;
+      bomb.bombDurationMs = sym.easySymBombDurationMs;
+      UdpHolePuncher lead = punchers.get(0);
+      lead.setPunchParams(bomb);
+      this.socketGroup = punchers;
+      CompletableFuture<PunchResult> wrapped = new CompletableFuture<>();
+      lead.punchMultiSocket(remoteIp, remoteBasePort, punchers, new AtomicBoolean(false), 0).whenComplete((pr, ex) -> {
+         for (UdpHolePuncher p : punchers) {
+            try {
+               p.cancel();
+            } catch (Exception ignored) {
             }
-         });
-      }
+         }
 
-      return result;
+         if (pr != null && pr.isSuccess()) {
+            wrapped.complete(pr);
+         } else if (ex != null) {
+            wrapped.completeExceptionally(ex);
+         } else if (pr != null) {
+            wrapped.complete(pr.withPortPrediction());
+         } else {
+            wrapped.completeExceptionally(new IllegalStateException("punchEasySymDual: no result"));
+         }
+      });
+      return wrapped;
    }
 
    private void sendControl(byte type) {

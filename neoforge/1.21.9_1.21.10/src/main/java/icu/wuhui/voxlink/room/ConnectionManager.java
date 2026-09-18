@@ -64,6 +64,8 @@ import icu.wuhui.voxlink.network.SignalingClient;
 
 import icu.wuhui.voxlink.network.StunProbe;
 
+import icu.wuhui.voxlink.network.TcpHolePuncher;
+
 import icu.wuhui.voxlink.network.UPnPManager;
 
 import icu.wuhui.voxlink.network.UdpHolePuncher;
@@ -79,6 +81,8 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 
 import java.net.InetSocketAddress;
+
+import java.net.Socket;
 
 import java.net.URI;
 
@@ -252,6 +256,19 @@ public class ConnectionManager {
    private final AtomicBoolean reversePunchAttempted = new AtomicBoolean(false);
 
    private final AtomicBoolean connectionWon = new AtomicBoolean(false);
+   // turn_ready 应用门: 信令双线程(WS push/HTTP poll)并发分发时防双建桥
+   private final AtomicBoolean turnReadyApplied = new AtomicBoolean(false);
+   // 热备保活句柄: teardown 必须取消, 否则每次热备泄漏一个15s任务
+   private volatile ScheduledFuture<?> hotstandbyKeepaliveTask;
+   // TURN bind/桥类长任务专用池, 防止阻塞信令单线程scheduler
+   private static final java.util.concurrent.ExecutorService TURN_BG_EXECUTOR =
+      java.util.concurrent.Executors.newCachedThreadPool(r -> {
+         Thread t = new Thread(r, "VoxLink-TurnBg");
+         t.setDaemon(true);
+         return t;
+      });
+   // TCP 双向打洞在飞占位: 防同轮重复邀约
+   private final AtomicBoolean tcpPunchInFlight = new AtomicBoolean(false);
 
    private final List<ConnectionFallback> activeFallbacks = new CopyOnWriteArrayList<>();
 
@@ -4730,12 +4747,12 @@ private volatile long lastProfileSwitchMs = 0L;
 
                            // 热循环修复①: 目标已拉黑的 puncher 本轮不再发起——拉黑目标会立即快速失败,
                            // 旧逻辑 300ms 后再来一轮, 单会话可空转数千次刷爆日志并白烧 CPU
-                           if (mp.isCurrentTargetBlacklisted()) {
-
-                              continue;
-
-                           }
-
+                           if (mp.isCurrentTargetBlacklisted()) {
+
+                              continue;
+
+                           }
+
                            // PREDICTION_OFF 会话级封顶: 停止无意义直连(配合 1.1.5 的
                            // round=3 自动 TURN, 此处静默让位中继; 降频轮询保留漂移恢复可能)
                            if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP) {
@@ -7099,6 +7116,10 @@ private volatile long lastProfileSwitchMs = 0L;
                   new AtomicBoolean(false);
 
                   List<CompletableFuture<ConnectionFallback.ConnectResult>> wave2Futures = new ArrayList<>();
+
+                  // TCP 双向打洞附加尝试: UDP 败一轮后才启动
+
+                  this.tryTcpHolePunch(state, hostMappedIp, cycle);
 
                   if (hostMappedIp != null && !hostMappedIp.isEmpty() && hostMappedPort > 0) {
 
@@ -10307,10 +10328,10 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
    /**
-    * 持续重试轮次的自动中继触发（1.1.5）：仅 joiner 侧发起（host 被动响应 turn_alloc）。
-    * 前置：中继开关开启、未在 TURN/手动中继中、未连上；60s 节流。
-    * 失败无害：teardownTurn 后继续走重试循环。
-    */
+    * 持续重试轮次的自动中继触发（1.1.5）：仅 joiner 侧发起（host 被动响应 turn_alloc）。
+    * 前置：中继开关开启、未在 TURN/手动中继中、未连上；60s 节流。
+    * 失败无害：teardownTurn 后继续走重试循环。
+    */
 
    private boolean enterContinuousRetryRound(RoomManager.RoomState state) {
 
@@ -11562,6 +11583,7 @@ private volatile long lastProfileSwitchMs = 0L;
     * 发 turn_alloc 交 host 票据 → 等 host turn_ready。全程异步，失败走 teardownTurn。
     */
    public void triggerTurnRelay() {
+      this.turnReadyApplied.set(false);
       if (this.turnInProgress || this.turnSession != null || this.manualRelayInProgress) {
          return;
       }
@@ -11632,9 +11654,14 @@ private volatile long lastProfileSwitchMs = 0L;
             TurnRelayClient.TurnSession session =
                new TurnRelayClient.TurnSession(alloc.sessionIdHex, sid, alloc.host, alloc.port, TurnRelayClient.ROLE_GUEST, alloc.guestTicket, alloc.expireSec);
                         // 3 轮重试(每轮5发): 弱网单轮全丢很常见(实证 09-11 22:42 guest 5发全丢)
-            int code = TurnRelayClient.bindWithRetry(session, 3);
-            if (code != TurnRelayClient.BIND_OK) {
-               session.unbind();
+            int code = TurnRelayClient.bindWithRetry(session, 3);
+            // code=4 对齐 host 容忍: 首发响应丢失重放被判冲突, 会话实际已绑定
+            if (code == TurnRelayClient.BIND_ROLE_CONFLICT) {
+               code = TurnRelayClient.BIND_OK;
+               VoxLinkMod.LOGGER.info("[Turn] guest bind ROLE_CONFLICT tolerated (session already bound)");
+            }
+            if (code != TurnRelayClient.BIND_OK) {
+               session.unbind();
                throw new IllegalStateException("BIND_FAILED_" + code);
             }
 
@@ -11660,7 +11687,7 @@ private volatile long lastProfileSwitchMs = 0L;
                this.activePunchAuthKey = turnAuthKey;
                VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (guest side)");
             } else {
-               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (host caps missing)");
+               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (host caps missing)");
             }
             // 互操作降级开关: 对端为旧引擎(未武装密钥)时连续认证失败自动回明文, 不再互丢致死
             transport.allowAuthDowngradeForInterop();
@@ -11712,6 +11739,7 @@ private volatile long lastProfileSwitchMs = 0L;
       // 此时再建 TURN 桥会同 clientId 双桥冲突，静默忽略（guest 兜底超时自动释放会话）
       if (this.connectionWon.get() && !this.isTurnActive()) {
          VoxLinkMod.LOGGER.info("[Turn] host already connected directly, ignore turn_alloc from {}", from);
+         this.sendTurnNack(state, from, "direct_won");
          return;
       }
 
@@ -11725,6 +11753,7 @@ private volatile long lastProfileSwitchMs = 0L;
       String ticket = data.get("ticket").getAsString();
       long expire = data.has("expire") ? data.get("expire").getAsLong() : 0L;
       if (sessionIdHex.length() != 32 || host.isEmpty() || port <= 0) {
+         this.sendTurnNack(state, from, "bad_alloc");
          return;
       }
 
@@ -11732,7 +11761,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
       // 1.1.5 TURN 可靠性: bind(3轮×5发, 弱网最长~16s)移出信令分发线程——
       // 单线程 scheduler 被阻塞期间房主收不到任何信令(其他房客 join/disconnect 全排队, 审计 P1-2)
-      this.scheduler.execute(() -> {
+      TURN_BG_EXECUTOR.execute(() -> {
           for (int i = 0; i < 16; i++) {
              sid[i] = (byte)Integer.parseInt(sessionIdHex.substring(i * 2, i * 2 + 2), 16);
           }
@@ -11741,14 +11770,15 @@ private volatile long lastProfileSwitchMs = 0L;
              new TurnRelayClient.TurnSession(sessionIdHex, sid, host, port, TurnRelayClient.ROLE_HOST, ticket, expire);
                 // 3 轮重试(每轮5发, 总预算~16s < guest 的 20s turn_ready 等待):
           // 实证 09-11 23:28 host 单轮 5 发无一到达 turn01, guest 同会话一次即中——纯弱网丢包
-          int code = TurnRelayClient.bindWithRetry(session, 3);
+          int code = TurnRelayClient.bindWithRetry(session, 3);
           // code=4 ROLE_CONFLICT: 首发bind已被节点接受但响应丢失, 重放被判冲突——会话已绑定, 视为成功
           if (code == TurnRelayClient.BIND_ROLE_CONFLICT) {
              code = TurnRelayClient.BIND_OK;
              VoxLinkMod.LOGGER.info("[Turn] host bind ROLE_CONFLICT (first bind accepted, response lost), proceeding");
           }
-          if (code != TurnRelayClient.BIND_OK) {
+          if (code != TurnRelayClient.BIND_OK) {
              VoxLinkMod.LOGGER.warn("[Turn] host bind failed code={} sid={} endpoint={}:{}", code, sessionIdHex.substring(0, 8), host, port);
+             this.sendTurnNack(state, from, "bind_failed");
              session.unbind();
              return;
           }
@@ -11777,7 +11807,7 @@ private volatile long lastProfileSwitchMs = 0L;
              this.activePunchAuthKey = turnAuthKey;
              VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (host side, peer {})", turnPeerId);
           } else {
-             VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (peer {} legacy/caps missing)", turnPeerId);
+             VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (peer {} legacy/caps missing)", turnPeerId);
           }
           // 互操作降级开关: 旧引擎 guest(桌面 App/旧版 mod)无密钥时连续认证失败自动回明文
           // (实证 09-11 23:03: host armed 而对端明文, path up 同秒互丢, 19s 后桥死)
@@ -11825,6 +11855,15 @@ private volatile long lastProfileSwitchMs = 0L;
          return;
       }
 
+      if (this.connectionWon.get() && !this.isTurnActive()) {
+         this.teardownTurn(state, "voxlink.turn.failed");
+         return;
+      }
+
+      if (!this.turnReadyApplied.compareAndSet(false, true)) {
+         return;
+      }
+
       this.turnInProgress = false;
       transport.start();
       this.activeUdpTransports.put("turn_host", transport);
@@ -11844,6 +11883,40 @@ private volatile long lastProfileSwitchMs = 0L;
       icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
    }
 
+   /** guest 收 turn_nack：提前拆线。 */
+   public void handleTurnNack(String from, JsonObject data) {
+      RoomManager.RoomState state = this.roomManager.currentRoom.get();
+      if (state == null || state == RoomManager.PENDING) {
+         return;
+      }
+      ReliableUdpTransport transport = this.turnTransport;
+      if (transport != null && transport.isConnected()) {
+         return;
+      }
+      if (transport == null && !this.turnInProgress) {
+         return;
+      }
+      String reason = data.has("reason") ? data.get("reason").getAsString() : "unknown";
+      VoxLinkMod.LOGGER.warn("[Turn] host nack ({}), tear down TURN early", reason);
+      this.teardownTurn(state, "voxlink.turn.failed");
+   }
+
+   private void sendTurnNack(RoomManager.RoomState state, String from, String reason) {
+      try {
+         JsonObject nack = new JsonObject();
+         nack.addProperty("clientId", state.roomInfo.getClientId());
+         nack.addProperty("reason", reason);
+         this.signalingClient
+            .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_nack", nack, from)
+            .exceptionally(e -> {
+               VoxLinkMod.LOGGER.debug("[Turn] turn_nack send failed: {}", e.getMessage());
+               return null;
+            });
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.debug("[Turn] turn_nack error: {}", String.valueOf(e));
+      }
+   }
+
    /** TURN 会话保活：15s 一次 KEEPALIVE（节点 90s 无包踢角色）。句柄存字段，teardown 取消。 */
    private void startTurnKeepalive(TurnRelayClient.TurnSession session) {
       this.cancelTurnKeepalive();
@@ -11860,6 +11933,14 @@ private volatile long lastProfileSwitchMs = 0L;
       if (f != null) {
          f.cancel(false);
          this.turnKeepaliveTask = null;
+      }
+   }
+
+   private void cancelHotstandbyKeepalive() {
+      ScheduledFuture<?> f = this.hotstandbyKeepaliveTask;
+      if (f != null) {
+         f.cancel(false);
+         this.hotstandbyKeepaliveTask = null;
       }
    }
 
@@ -12085,7 +12166,8 @@ private volatile long lastProfileSwitchMs = 0L;
                this.turnHotstandbyTransport = standby;
                VoxLinkMod.LOGGER.info("[Turn] player-relay hot standby established via {}:{}", relayIp, relayPort);
                // 热备保活：中继玩家桥与沿途 NAT 都需要持续流量
-               this.scheduler.scheduleAtFixedRate(() -> {
+               this.cancelHotstandbyKeepalive();
+               this.hotstandbyKeepaliveTask = this.scheduler.scheduleAtFixedRate(() -> {
                   try {
                      ReliableUdpTransport hs = this.turnHotstandbyTransport;
                      if (hs != null && hs.isConnected()) {
@@ -12140,6 +12222,7 @@ private volatile long lastProfileSwitchMs = 0L;
       this.turnSwitchedToP2p = true;
       this.cancelTurnBgMonitor();
       this.cancelTurnKeepalive();
+      this.cancelHotstandbyKeepalive();
       TurnRelayClient.TurnSession session = this.turnSession;
       this.turnSession = null;
       if (session != null) {
@@ -12173,6 +12256,12 @@ private volatile long lastProfileSwitchMs = 0L;
 
    /** TURN 失败/超时清理：unbind + release + 状态复位；TURN 断开时热备转正（程序化重连自愈）。 */
    private void teardownTurn(RoomManager.RoomState state, String failKey) {
+      this.turnReadyApplied.set(false);
+      ScheduledFuture<?> hsk = this.hotstandbyKeepaliveTask;
+      if (hsk != null) {
+         hsk.cancel(false);
+         this.hotstandbyKeepaliveTask = null;
+      }
       VoxLinkMod.LOGGER
          .info("[Turn] teardown: session={}, carrying={}, failKey={}", this.turnSession != null, this.turnTransport != null && this.turnTransport.isConnected(), failKey);
       this.turnInProgress = false;
@@ -12225,6 +12314,7 @@ private volatile long lastProfileSwitchMs = 0L;
          this.relayConnectedSignaled = false;
          this.turnPeerId = null;
          this.turnBgPunchWon.set(false);
+         this.activeUdpTransports.remove("turn_host");
          this.activeUdpTransports.put("relay_cone", standby);
          state.roomInfo.setUsingRelay(true);
          state.roomInfo.setConnectionMode(Component.translatable("voxlink.relay.connected_via"));
@@ -14903,6 +14993,360 @@ private volatile long lastProfileSwitchMs = 0L;
          this.mappedAddrs.clear();
 
       }
+
+   }
+
+   public void handleTcpPunchInfo(String from, JsonObject data) {
+
+      RoomManager.RoomState state = this.roomManager.currentRoom.get();
+
+      if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost()) {
+
+         return;
+
+      }
+
+
+
+      if (this.connectionWon.get() || this.localNatClass != NatClass.CONE) {
+
+         VoxLinkMod.LOGGER
+
+            .info("[TcpPunch] host skip tcp_punch_info (won={}, nat={})", new Object[]{this.connectionWon.get(), this.localNatClass});
+
+         return;
+
+      }
+
+
+
+      int port = data.has("tcpPunchPort") ? data.get("tcpPunchPort").getAsInt() : 0;
+
+      String joinerIp = data.has("tcpPunchIp") ? data.get("tcpPunchIp").getAsString() : null;
+
+      if (port <= 0 || port > 65535 || joinerIp == null || joinerIp.isEmpty()) {
+
+         return;
+
+      }
+
+
+
+      JsonObject go = new JsonObject();
+
+      go.addProperty("tcpPunchPort", port);
+
+      this.signalingClient
+
+         .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "tcp_punch_go", go, from)
+
+         .exceptionally(e -> {
+
+            VoxLinkMod.LOGGER.info("[TcpPunch] tcp_punch_go send failed: {}", e.getMessage());
+
+            return null;
+
+         });
+
+
+
+      TcpHolePuncher puncher = new TcpHolePuncher();
+
+      CompletableFuture<Socket> f = puncher.punchAsync(joinerIp, port, 5, this.connectionWon);
+
+      if (f != null) {
+
+         f.whenComplete((socket, ex) -> this.onTcpPunchSocket(state, socket, true));
+
+      }
+
+
+
+      VoxLinkMod.LOGGER.info("[TcpPunch] host go: connect {}:{} (10s window)", new Object[]{joinerIp, port});
+
+   }
+
+
+
+   public void handleTcpPunchGo(String from, JsonObject data) {
+
+      RoomManager.RoomState state = this.roomManager.currentRoom.get();
+
+      if (state == null || state == RoomManager.PENDING || state.roomInfo.isHost()) {
+
+         return;
+
+      }
+
+
+
+      if (this.connectionWon.get()) {
+
+         this.tcpPunchInFlight.set(false);
+
+         return;
+
+      }
+
+
+
+      int port = data.has("tcpPunchPort") ? data.get("tcpPunchPort").getAsInt() : 0;
+
+      String targetIp = this.savedConnectionHostMappedIp;
+
+      if (port <= 0 || port > 65535 || targetIp == null || targetIp.isEmpty()) {
+
+         this.tcpPunchInFlight.set(false);
+
+         return;
+
+      }
+
+
+
+      TcpHolePuncher puncher = new TcpHolePuncher();
+
+      CompletableFuture<Socket> f = puncher.punchAsync(targetIp, port, 1, this.connectionWon);
+
+      if (f == null) {
+
+         this.tcpPunchInFlight.set(false);
+
+         return;
+
+      }
+
+
+
+      f.whenComplete((socket, ex) -> {
+
+         this.tcpPunchInFlight.set(false);
+
+         this.onTcpPunchSocket(state, socket, false);
+
+      });
+
+      VoxLinkMod.LOGGER.info("[TcpPunch] joiner go: connect {}:{} then listen", new Object[]{targetIp, port});
+
+   }
+
+
+
+   private void tryTcpHolePunch(RoomManager.RoomState state, String hostMappedIp, int cycle) {
+
+      if (cycle < 1 || this.connectionWon.get() || state.roomInfo.isHost() || this.localNatClass != NatClass.CONE) {
+
+         return;
+
+      }
+
+
+
+      if (hostMappedIp == null || hostMappedIp.isEmpty() || this.signalingClient == null) {
+
+         return;
+
+      }
+
+
+
+      String myIp = state.roomInfo.getMyMappedIp();
+
+      if (myIp == null || myIp.isEmpty()) {
+
+         return;
+
+      }
+
+
+
+      if (!this.tcpPunchInFlight.compareAndSet(false, true)) {
+
+         return;
+
+      }
+
+
+
+      int punchPort = TcpHolePuncher.selectPunchPort();
+
+      if (punchPort <= 0) {
+
+         this.tcpPunchInFlight.set(false);
+
+         return;
+
+      }
+
+
+
+      JsonObject info = new JsonObject();
+
+      info.addProperty("tcpPunchIp", myIp);
+
+      info.addProperty("tcpPunchPort", punchPort);
+
+      // go 丢失看门狗: 释放占位, 下轮继续邀约
+
+      this.scheduler.schedule(() -> this.tcpPunchInFlight.set(false), 35L, TimeUnit.SECONDS);
+
+      this.signalingClient
+
+         .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "tcp_punch_info", info, "host")
+
+         .exceptionally(e -> {
+
+            VoxLinkMod.LOGGER.info("[TcpPunch] tcp_punch_info send failed: {}", e.getMessage());
+
+            return null;
+
+         });
+
+      VoxLinkMod.LOGGER.info("[TcpPunch] offer port {} to host {} (cycle {})", new Object[]{punchPort, hostMappedIp, cycle});
+
+   }
+
+
+
+   private void onTcpPunchSocket(RoomManager.RoomState state, Socket socket, boolean isHost) {
+
+      if (socket == null || this.roomManager.currentRoom.get() != state) {
+
+         if (socket != null) {
+
+            try {
+
+               socket.close();
+
+            } catch (Exception ignored) {
+
+            }
+
+         }
+
+
+
+         return;
+
+      }
+
+
+
+      if (!this.connectionWon.compareAndSet(false, true)) {
+
+         // 失败不拉黑, 静默等下轮
+
+         try {
+
+            socket.close();
+
+         } catch (Exception ignored) {
+
+         }
+
+
+
+         return;
+
+      }
+
+
+
+      if (isHost) {
+
+         int mcPort = state.roomInfo.getHostPort();
+
+         if (P2PBridge.bridgePunchedHostSocket(socket, mcPort)) {
+
+            VoxLinkMod.LOGGER.info("[TcpPunch] host bridged punched socket to MC port {}", mcPort);
+
+         } else {
+
+            this.connectionWon.set(false);
+
+         }
+
+      } else {
+
+         this.connectViaPunchedTcp(state, socket);
+
+      }
+
+   }
+
+
+
+   private void connectViaPunchedTcp(RoomManager.RoomState state, Socket punched) {
+
+      this.killAllConnectionAttempts();
+
+      P2PBridge.cancelPendingUdpTimeouts();
+
+      for (ReliableUdpTransport transport : this.activeUdpTransports.values()) {
+
+         try {
+
+            transport.close();
+
+         } catch (Exception ignored) {
+
+         }
+
+      }
+
+
+
+      this.activeUdpTransports.clear();
+
+      this.teardownTurn(state, null);
+
+      P2PBridge.connectToHostPreconnected(punched, this.savedConnectionHostMappedIp, this.savedConnectionHostPort).thenAccept(localPort -> {
+
+         if (localPort > 0) {
+
+            if (this.dualRaceActive) {
+
+               this.claimVoxlinkDualWin();
+
+            }
+
+
+
+            this.markConnectionEstablished();
+
+            this.connectionCycleActive.set(false);
+
+            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "connected", new JsonObject(), "host");
+
+            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_setup"));
+
+            ConnectionHelper.connectToServer(localPort, state.roomInfo);
+
+            this.notifyDualVoxlinkBridge(true);
+
+         } else {
+
+            this.connectionCycleActive.set(false);
+
+            ConnectionHelper.resetConnecting();
+
+            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+
+            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "disconnect", new JsonObject(), "host");
+
+            if (!this.dualRaceActive) {
+
+               this.handleConnectViaBridgeFailed(state);
+
+            }
+
+
+
+            this.notifyDualVoxlinkBridge(false);
+
+         }
+
+      });
 
    }
 

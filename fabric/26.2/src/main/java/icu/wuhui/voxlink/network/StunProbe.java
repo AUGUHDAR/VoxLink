@@ -30,6 +30,8 @@ public class StunProbe {
    private static final int STUN_DEFAULT_PORT = 3478;
    private static final int EASY_SYM_PORT_DELTA_THRESHOLD = 100;
    private static final int EASY_SYM_PORT_DELTA_FALLBACK = 200;
+   private static final int SYM_GRADE_SPAN_EASY_MAX = 15;
+   private static final int SYM_GRADE_SAMPLE_SERVERS = 4;
    private static final int ATTR_CHANGE_REQUEST = 3;
    private static final int CHANGE_IP_FLAG = 4;
    private static final int CHANGE_PORT_FLAG = 2;
@@ -970,6 +972,11 @@ public class StunProbe {
             return StunProbe.NatType.PORT_RESTRICTED_CONE;
          } else {
             VoxLinkMod.LOGGER.info("[StunProbe] Confirmed symmetric NAT (same-server alt-port differs), determine direction");
+            StunProbe.NatType graded = gradeSymmetricSeverity(socket, reachable, mapped1.port);
+            if (graded != null) {
+               return graded;
+            }
+
             StunProbe.NatType easyType = detectEasySymmetric(socket, mapped1.port, reachable);
             if (easyType != null) {
                return easyType;
@@ -1009,6 +1016,81 @@ public class StunProbe {
          if (socket != null) {
             socket.close();
          }
+      }
+   }
+
+   /** 分级: 多STUN采样, extra bind测向; null=旧路径 */
+   private static StunProbe.NatType gradeSymmetricSeverity(DatagramSocket socket, List<StunProbe.StunServerResult> reachable, int refPort) {
+      try {
+         List<String> urls = new ArrayList<>();
+         for (StunProbe.StunServerResult r : reachable) {
+            urls.add(r.url);
+         }
+
+         int n = Math.min(SYM_GRADE_SAMPLE_SERVERS, urls.size());
+         if (n < 2) {
+            return null;
+         }
+
+         StunProbe.PublicMappedAddress[] samples = discoverMappedAddressRace(socket, urls.subList(0, n), n);
+         List<Integer> ports = new ArrayList<>();
+         for (StunProbe.PublicMappedAddress s : samples) {
+            if (s != null && s.port > 0) {
+               ports.add(s.port);
+            }
+         }
+
+         if (ports.size() < 2) {
+            VoxLinkMod.LOGGER.info("[StunProbe] Sym grade: only {}/{} samples, fallback to legacy path", ports.size(), n);
+            return null;
+         }
+
+         int min = Integer.MAX_VALUE;
+         int max = Integer.MIN_VALUE;
+         for (int p : ports) {
+            if (p < min) {
+               min = p;
+            }
+            if (p > max) {
+               max = p;
+            }
+         }
+
+         int span = max - min;
+         VoxLinkMod.LOGGER
+            .info("[StunProbe] Sym grade: samples={}, span={} (easy<={})", new Object[]{ports, span, SYM_GRADE_SPAN_EASY_MAX});
+         if (span > SYM_GRADE_SPAN_EASY_MAX) {
+            return StunProbe.NatType.HARD_SYM;
+         }
+
+         StunProbe.PublicMappedAddress extra = discoverMappedAddress(socket, List.of(urls.get(0)));
+         if (extra == null || extra.port <= 0) {
+            VoxLinkMod.LOGGER.info("[StunProbe] Sym grade: extra bind failed, determined HardSym");
+            return StunProbe.NatType.HARD_SYM;
+         }
+
+         int delta = extra.port - refPort;
+         VoxLinkMod.LOGGER
+            .info(
+               "[StunProbe] Sym grade extra bind: ref={}, extra={}, delta={}, threshold={}",
+               new Object[]{refPort, extra.port, delta, EASY_SYM_PORT_DELTA_THRESHOLD}
+            );
+         if (delta > 0 && delta < EASY_SYM_PORT_DELTA_THRESHOLD) {
+            return StunProbe.NatType.EASY_SYM_INC;
+         }
+
+         if (delta < 0 && delta > -EASY_SYM_PORT_DELTA_THRESHOLD) {
+            return StunProbe.NatType.EASY_SYM_DEC;
+         }
+
+         if (delta == 0) {
+            return StunProbe.NatType.EASY_SYM_INC;
+         }
+
+         return StunProbe.NatType.HARD_SYM;
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.debug("[StunProbe] Sym grade failed: {}", e.getMessage());
+         return null;
       }
    }
 
@@ -1473,7 +1555,10 @@ public class StunProbe {
       PORT_RESTRICTED_CONE("port_restricted_cone"),
       SYMMETRIC_EASY_INC("symmetric_easy_inc"),
       SYMMETRIC_EASY_DEC("symmetric_easy_dec"),
-      SYMMETRIC("symmetric");
+      SYMMETRIC("symmetric"),
+      EASY_SYM_INC("symmetric_easy_inc"),
+      EASY_SYM_DEC("symmetric_easy_dec"),
+      HARD_SYM("symmetric");
 
       public final String key;
 
@@ -1482,19 +1567,24 @@ public class StunProbe {
       }
 
       public boolean isSymmetric() {
-         return this == SYMMETRIC || this == SYMMETRIC_EASY_INC || this == SYMMETRIC_EASY_DEC;
+         return this == SYMMETRIC
+            || this == SYMMETRIC_EASY_INC
+            || this == SYMMETRIC_EASY_DEC
+            || this == EASY_SYM_INC
+            || this == EASY_SYM_DEC
+            || this == HARD_SYM;
       }
 
       public boolean isEasySymmetric() {
-         return this == SYMMETRIC_EASY_INC || this == SYMMETRIC_EASY_DEC;
+         return this == SYMMETRIC_EASY_INC || this == SYMMETRIC_EASY_DEC || this == EASY_SYM_INC || this == EASY_SYM_DEC;
       }
 
       public boolean isHardSymmetric() {
-         return this == SYMMETRIC;
+         return this == SYMMETRIC || this == HARD_SYM;
       }
 
       public boolean canHolePunch() {
-         return this != SYMMETRIC;
+         return this != SYMMETRIC && this != HARD_SYM;
       }
    }
 

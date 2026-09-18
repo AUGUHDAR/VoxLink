@@ -45,6 +45,8 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final long RETRANSMIT_TIMEOUT_MS = 800L;
    private static final int KEEPALIVE_INTERVAL_S = 1;
    private static final int KEEPALIVE_TIMEOUT_S = 60;
+   // 判单向死所需连续失败心跳拍数
+   private static final int HEARTBEAT_FAIL_LIMIT = 5;
    private static final int MAX_SILENT_RETRANSMIT_CYCLES = 30;
    private static final int UNRELIABLE_FAIL_THRESHOLD = 5;
    private static final long UNRELIABLE_SILENCE_MS = 8000L;
@@ -97,6 +99,10 @@ public class ReliableUdpTransport implements AutoCloseable {
    // streakStartMs 锚定到本段连续重传起点, 期间任何对端收包都会使 lastRecvTime 前移从而整体复位
    private int deadPeerRetransmitRounds = 0;
    private long deadPeerStreakStartMs = 0L;
+   // 单向死检测(仅scheduler线程)
+   private long lastHeartbeatMs = System.currentTimeMillis();
+   private int heartbeatFailStreak = 0;
+   private boolean heartbeatEverRx = false;
    // punchAuthV1：数据面认证上下文（null = 非认证模式，帧格式与旧版本逐字节一致）
    private volatile byte[] authKeyBytes;
    private volatile Mac authMac;
@@ -202,6 +208,9 @@ public class ReliableUdpTransport implements AutoCloseable {
    }
 
    public void start() {
+      if (this.closed.get()) {
+         return;
+      }
       if (this.connected.compareAndSet(false, true)) {
          try {
             byte[] data = new byte[11];
@@ -219,7 +228,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          this.recvThread.start();
          this.retransmitTask = this.scheduler.scheduleWithFixedDelay(this::retransmitCheck, 50L, 50L, TimeUnit.MILLISECONDS);
          this.scheduler.scheduleWithFixedDelay(this::flushOutbound, 50L, 50L, TimeUnit.MILLISECONDS);
-         this.keepaliveTask = this.scheduler.scheduleWithFixedDelay(this::sendKeepalive, (long)KEEPALIVE_INTERVAL_S, (long)KEEPALIVE_INTERVAL_S, TimeUnit.SECONDS);
+         this.keepaliveTask = this.scheduler.scheduleWithFixedDelay(this::heartbeatTick, (long)KEEPALIVE_INTERVAL_S, (long)KEEPALIVE_INTERVAL_S, TimeUnit.SECONDS);
       }
    }
 
@@ -308,11 +317,11 @@ public class ReliableUdpTransport implements AutoCloseable {
       }
    }
 
-   private void sendPunchAck(SocketAddress from) {
+   private void sendPunchAck(UdpPath path, SocketAddress from) {
       try {
          byte[] data = new byte[]{MAGIC[0], MAGIC[1], 2, 0, 0};
          byte[] framed = this.finalizeFrame(data);
-         this.socket.send(new DatagramPacket(framed, framed.length, from));
+         path.socket.send(new DatagramPacket(framed, framed.length, from));
       } catch (IOException var3) {
       }
    }
@@ -373,7 +382,6 @@ public class ReliableUdpTransport implements AutoCloseable {
    private void recvPathLoop(UdpPath path) {
       byte[] buf = new byte[1454];
       DatagramPacket packet = new DatagramPacket(buf, buf.length);
-      boolean isPrimaryThread = path == this.primaryPath;
 
       while (this.running && !path.socket.isClosed()) {
          try {
@@ -383,7 +391,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          } catch (SocketTimeoutException var11) {
          } catch (IOException e) {
             if (path.socket.isClosed() || !this.running) {
-               if (isPrimaryThread) {
+               if (path == this.primaryPath) {
                   this.running = false;
                }
                break;
@@ -393,7 +401,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          } catch (Throwable t) {
             // 致命异常只允许主路径线程关闭整条连接；次路径线程退出即可（平滑切换候选失败不连累主路径）
             LOGGER.error("[ReliableUdp] receiveLoop died with exception: {}", t.getMessage(), t);
-            if (!isPrimaryThread) {
+            if (path != this.primaryPath) {
                break;
             }
 
@@ -491,8 +499,10 @@ public class ReliableUdpTransport implements AutoCloseable {
          } else {
             this.maybeRebindRemote(packet, path);
             this.lastRecvTime = System.currentTimeMillis();
+            path.rxCount++;
+            path.lastRxMs = System.currentTimeMillis();
             if (type == 1) {
-               this.sendPunchAck(packet.getSocketAddress());
+               this.sendPunchAck(path, packet.getSocketAddress());
             }
          }
       }
@@ -885,6 +895,28 @@ public class ReliableUdpTransport implements AutoCloseable {
          } catch (IOException var2) {
          }
       }
+   }
+
+   /** 心跳拍: 连续5拍零入站判单向死 */
+   private void heartbeatTick() {
+      if (!this.running || !this.connected.get()) {
+         return;
+      }
+
+      long now = System.currentTimeMillis();
+      if (this.lastRecvTime > this.lastHeartbeatMs) {
+         this.heartbeatFailStreak = 0;
+         this.heartbeatEverRx = true;
+      } else if (this.heartbeatEverRx && ++this.heartbeatFailStreak >= HEARTBEAT_FAIL_LIMIT) {
+         LOGGER.warn("[ReliableUdp] One-way dead: {} heartbeats no rx, restart & re-punch", this.heartbeatFailStreak);
+         this.sendRestart();
+         this.triggerIceRestart();
+         this.close();
+         return;
+      }
+
+      this.lastHeartbeatMs = now;
+      this.sendKeepalive();
    }
 
    private void retransmitCheck() {

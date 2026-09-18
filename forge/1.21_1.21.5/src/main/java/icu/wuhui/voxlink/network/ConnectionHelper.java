@@ -109,7 +109,12 @@ public final class ConnectionHelper {
                   roomInfo.setLocalBridgePort(localPort);
                   String addr = ViaCompat.buildViaAddress("127.0.0.1", localPort, roomInfo.getServerProtocolVersion());
                   ServerData serverData = createServerData(roomInfo.getName(), addr);
-                  invokeStartConnecting(mc.screen, mc, addr, serverData);
+                  // 返回入口页而非加入页
+                  Screen parentScreen = mc.screen;
+                  if (parentScreen instanceof icu.wuhui.voxlink.ui.AttemptingJoinScreen ajs && ajs.entryScreen() != null) {
+                     parentScreen = ajs.entryScreen();
+                  }
+                  invokeStartConnecting(parentScreen, mc, addr, serverData);
                   resetTask = RESET_SCHEDULER.schedule(() -> {
                      if (connecting.get() && connectInitiatedAt == myStartAt) {
                         VoxLinkMod.LOGGER.info("[ConnectionHelper] 30s timeout, auto reset connecting flag");

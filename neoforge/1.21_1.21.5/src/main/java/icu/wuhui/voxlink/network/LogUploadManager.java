@@ -362,10 +362,22 @@ public final class LogUploadManager
          UPLOAD_IN_FLIGHT.set(false);
          return;
       }
-      CompletableFuture<SignalingClient.ApiResponse> upload = postBytes(ROUTE_UPLOAD, payload, code);
-      upload.thenAccept(response -> {
+      CompletableFuture<SignalingClient.ApiResponse> upload = postBytes(ROUTE_UPLOAD, payload, code)
+         .orTimeout(90L, TimeUnit.SECONDS);
+      upload.whenComplete((response, ex) -> {
          UPLOAD_IN_FLIGHT.set(false);
-         if (response.success) {
+         if (ex != null) {
+            Throwable root = ex.getCause() != null ? ex.getCause() : ex;
+            String why = root instanceof java.util.concurrent.TimeoutException ? "timeout" : String.valueOf(root);
+            if (attemptsLeft > 1) {
+               VoxLinkMod.LOGGER.warn("[LogUpload] upload error ({}), retrying {} left", why, attemptsLeft - 1);
+               SCHEDULER.schedule(() -> uploadWithRetry(code, attemptsLeft - 1), RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+            } else {
+               VoxLinkMod.LOGGER.warn("[LogUpload] upload gave up, error={}", why);
+            }
+            return;
+         }
+         if (response != null && response.success) {
             VoxLinkMod.LOGGER.info("[LogUpload] uploaded code={} role={} size={}", code, role, payload.length);
             UPLOADED.set(true);
             Runnable cb = onUploaded;

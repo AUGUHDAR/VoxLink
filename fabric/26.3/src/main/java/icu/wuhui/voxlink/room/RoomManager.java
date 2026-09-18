@@ -57,6 +57,8 @@ public class RoomManager {
    private volatile ScheduledFuture<?> heartbeatFuture;
    private volatile ScheduledFuture<?> signalPollFuture;
    private final AtomicBoolean signalPollInFlight = new AtomicBoolean(false);
+   // WS补拉标记: 下次轮询强制HTTP
+   private final AtomicBoolean forcePollOnce = new AtomicBoolean(false);
    private final AtomicInteger heartbeatFailCount = new AtomicInteger(0);
    private static final int MAX_HEARTBEAT_FAILS = 8;
    private static final long MIN_HEARTBEAT_INTERVAL = 5L;
@@ -1575,15 +1577,19 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
    private void startSignalPoll() {
       this.signalPollTimestamp.set(System.currentTimeMillis() - 10000L);
       RoomManager.RoomState state = this.currentRoom.get();
-      if (state != null && !state.roomInfo.isHost()) {
-         // WS 健康时放宽到 1000ms，断开则保持 200ms 高频兜底
-         this.currentSignalPollInterval = this.signalingClient.isWsConnected() ? 1000L : 200L;
+      if (this.signalingClient.isWsConnected()) {
+         // WS 健康：轮询静默休眠，5s 空转节拍
+         this.currentSignalPollInterval = 5000L;
+      } else if (state != null && !state.roomInfo.isHost()) {
+         this.currentSignalPollInterval = 200L;
       } else {
          this.currentSignalPollInterval = VoxLinkMod.getConfig().getSignalPollInterval();
       }
 
       // 注册 WS 推送消费：推送 data 与轮询响应 data 同构，直接复用 handleSignalPollResponse 路径
       this.registerSignalPushHandler();
+      // WS 重连成功后单次补拉
+      this.signalingClient.setWsReconnectedListener(this::catchUpSignalOnce);
       // 预热 WS：首批心跳/信号请求直接走 WS，不必等第一次 HTTP 兜底触发建连
       this.signalingClient.preconnectWebSocket();
       this.scheduleSignalPoll();
@@ -1621,10 +1627,26 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       this.signalPollFuture = this.scheduler.scheduleAtFixedRate(this::doSignalPoll, interval, interval, TimeUnit.MILLISECONDS);
    }
 
+   /** WS 重连后单次补拉。 */
+   public void catchUpSignalOnce() {
+      RoomManager.RoomState state = this.currentRoom.get();
+      if (state == null || state == PENDING) {
+         return;
+      }
+      this.forcePollOnce.set(true);
+      this.scheduler.execute(this::doSignalPoll);
+   }
+
    private void doSignalPoll() {
       try {
          RoomManager.RoomState state = this.currentRoom.get();
          if (state == null || state == PENDING) {
+            return;
+         }
+
+         // WS 健康即休眠：零请求，仅校正节拍
+         if (this.signalingClient.isWsConnected() && !this.forcePollOnce.getAndSet(false)) {
+            this.recoverSignalPollInterval();
             return;
          }
 
@@ -1828,6 +1850,10 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
             case "turn_ready":
                this.connectionManager.handleTurnReady(from, data);
                break;
+            case "turn_nack":
+               this.connectionManager.handleTurnNack(from, data);
+               break;
+
             case "turn_bg_punch":
                this.connectionManager.handleTurnBgPunch(from, data);
                break;
@@ -1871,6 +1897,12 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
                break;
             case "topology_change":
                this.topologyClient.handleTopologySignal(type, data);
+               break;
+            case "tcp_punch_info":
+               this.connectionManager.handleTcpPunchInfo(from, data);
+               break;
+            case "tcp_punch_go":
+               this.connectionManager.handleTcpPunchGo(from, data);
                break;
             default:
                VoxLinkMod.LOGGER.debug("Unknown signal type: {}", type);
