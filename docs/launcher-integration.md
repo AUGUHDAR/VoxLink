@@ -40,7 +40,7 @@
 | 2 | 打洞 | **TCP 双向 SimOpen**：UDP 对称 NAT 场景叠加 TCP 同时打开打洞 | `network/TcpHolePuncher.java`、`network/PunchStrategySelector.java` |
 | 3 | 打洞 | **漂移分级**：对端端口漂移按 NAT 分级预测（`PunchProfile`），减少盲目全端口扫射 | `network/PunchProfile.java`、`network/PunchTuner.java` |
 | 4 | 打洞 | **心跳闭环**：连接稳定窗口内掉线立即快传日志/退房补传/关服兜底（可观察行为，弱网自愈更快） | `room/ConnectionManager.java`（`startConnectionWatchdog` 一带） |
-| 5 | 打洞 | PREDICTION_OFF 上限保护（50 次/会话），到达后自动转入中继/TURN，不再空转 | `network/UdpHolePuncher.java` |
+| 5 | 打洞 | PREDICTION_OFF 上限保护（50 次/会话），到达后仅停止直连打洞的端口预测尝试；TURN/玩家中继按钮早已可见，**是否使用由玩家主动决定，绝不自动切换中继**（与 §7.5 一致） | `network/UdpHolePuncher.java` |
 | 6 | TURN | **TCP 兜底承载**：UDP 全丢（BIND 失败码 5=UDP 黑洞）时自动降级走同端口 TCP 长连接，帧格式=2 字节大端长度+同构报文；本地回环 UDP shim 对上层零侵入；绝无手动选择 | `network/TurnTcpChannel.java`、`network/TurnRelayClient.java`（`bindWithRetry`/`engageTcpFallback`） |
 | 7 | TURN | BIND 带外层重试（3 轮×5 发）+ ROLE_CONFLICT 容忍 + 保活 15s | `network/TurnRelayClient.java` |
 | 8 | 模组 | **ModSync v2 全新功能**：详见 §3 | `modsync/` 整包 |
