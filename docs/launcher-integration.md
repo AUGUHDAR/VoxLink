@@ -182,3 +182,61 @@
 | [`network/TurnRelayClient.java`](../fabric/1.20_1.20.1/src/main/java/icu/wuhui/voxlink/network/TurnRelayClient.java) | TURN 客户端（BIND/保活/TCP 降级） |
 | [`network/TcpHolePuncher.java`](../fabric/1.20_1.20.1/src/main/java/icu/wuhui/voxlink/network/TcpHolePuncher.java) | TCP 双向 SimOpen 打洞 |
 | [`network/PunchProfile.java`](../fabric/1.20_1.20.1/src/main/java/icu/wuhui/voxlink/network/PunchProfile.java) | NAT 分级/漂移预测 |
+
+
+## 7. 打洞引擎常量验收表（逐值核对，禁止改动数值）
+
+> 本表是打洞引擎移植的**验收标准**：下列常量必须以相同数值出现在启动器实现中。
+> 改动任何一个数值、或以自造函数替代任何机制，都视为未完成。
+> 权威来源：`fabric/1.20_1.20.1/src/main/java/icu/wuhui/voxlink/network/` 下对应文件。
+
+### 7.1 PunchTuner（自适应调参，9 常量）
+
+| 常量 | 值 | 语义 |
+|------|----|------|
+| MAX_PORT_RANGE | 500 | 端口扫描范围上限 |
+| MAX_TIMEOUT_MS | 30000 | 单轮超时上限 |
+| MIN_SEND_INTERVAL_MS | 50 | 发包间隔下限 |
+| LATE_CYCLE_TIMEOUT_MS | 5000 | 后期轮次超时 |
+| ACK_RETRIES_ON_TIMEOUT | 3 | 超时后 ACK 重试次数 |
+| PREDICTION_DELTA_THRESHOLD | 100 | 端口漂移"大漂移"阈值 |
+| PORT_RANGE_MULTIPLIER | 2 | 每轮范围放大倍数 |
+| TIMEOUT_INCREMENT_MS | 4000 | 每轮超时增量 |
+| SEND_INTERVAL_DIVISOR | 2 | 每轮间隔缩减除数 |
+
+### 7.2 PunchProfile 五套发包模板（每套 11 参数，按序）
+
+SendParams 字段序：intervalMs, socketTimeoutMs, extraWaitMs, extraWaitLongMs,
+jitterBaseMs, jitterRangeMs, minRounds, minPass, sleepShortMs, sleepLongMs, sweepWindowSize
+
+| 模板 | 11 参数值 |
+|------|-----------|
+| SEND_DEFAULT | 200, 500, 1000, 2000, 600, 200, 3, 3, 1, 10, 800 |
+| SEND_DEFAULT_FAST | 200, 500, 1000, 2000, 600, 200, 1, 2, 1, 5, 800 |
+| SEND_SPRINT | 100, 300, 600, 1200, 400, 150, 1, 1, 1, 3, 400 |
+| SEND_WIDE | 150, 500, 1000, 2000, 600, 200, 1, 2, 1, 5, 800 |
+| SEND_WEAK | 250, 800, 1500, 3000, 500, 250, 3, 3, 2, 8, 600 |
+
+场景选择、双 socket 组、防火墙探测周期等模板切换逻辑以 `PunchProfile.java` 为准。
+
+### 7.3 SymParams（对称 NAT，RECIPE，按序）
+
+easySymBombSockets=25, easySymBombWindow=20, easySymRoundIntervalMs=100,
+easySymBombDurationMs=5000, hardSymSprayPortMin=600, hardSymSprayPortMax=800,
+hardSymPacketsPerPort=3, hardSymPortIntervalMs=1, hardSymDecayNumerator=2,
+hardSymDecayFloor=180, **maxPps=3000**（PpsLimiter 每秒发包上限）。
+
+### 7.4 PortPredictor（端口预测）
+
+- 单样本：直接用该端口，range=200；
+- 多样本：线性回归预测 × 0.6 + delta 预测 × 0.4 加权融合；
+- 置信范围按样本数：≥10 → ±32；≥5 → ±64；≥3 → ±100；否则 ±200；
+- 预测值钳制 [1024, 65535]；generateTargetPorts 围绕预测值 ±range 逐偏移上下交替扫。
+
+### 7.5 轮次与终局
+
+- 打洞轮次**无上限**；仅"连续 20 轮零收包"允许判定终局；
+- PREDICTION_OFF_CAP = 50（预测关闭兜底上限，到达后转中继，由玩家决定）；
+- join_request 重发固定 1.5s 间隔；
+- **禁止自造替代品**：上游不存在 `gradedPorts`、`punchStrategy`、简单 ±64 扫描等
+  简化实现，已有的一律删除，按本表重建。
