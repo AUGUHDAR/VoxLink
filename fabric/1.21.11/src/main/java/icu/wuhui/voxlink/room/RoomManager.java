@@ -977,7 +977,12 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       if (state.roomInfo.isHost()) {
          leaveFuture = this.signalingClient.leaveRoom(state.roomInfo.getCode(), state.roomInfo.getToken(), true).thenAccept(response -> {
             if (!response.success) {
-               VoxLinkMod.LOGGER.warn("Server leave room failed: {}", response.error);
+               String leaveErr = response.error != null ? response.error : "";
+               if (leaveErr.contains("INVALID_TOKEN") || leaveErr.contains("ROOM_NOT_FOUND") || leaveErr.contains("ROOM_EXPIRED")) {
+                  VoxLinkMod.LOGGER.debug("Server leave room skipped (room gone): {}", leaveErr);
+               } else {
+                  VoxLinkMod.LOGGER.warn("Server leave room failed: {}", leaveErr);
+               }
             }
          }).exceptionally(e -> {
             VoxLinkMod.LOGGER.warn("Server leave room failed: {}", e.getMessage());
@@ -1581,8 +1586,14 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       }
    }
 
+   // WS健康期轮询静默休眠,第6拍(30s)安全网补拉,防推送漏收与半开黑洞
+   private static final int WS_SAFETY_NET_TICKS = 6;
+   private int wsSafetyTicks = 0;
+
    private void startSignalPoll() {
       this.signalPollTimestamp.set(System.currentTimeMillis() - 10000L);
+      // 首拍真拉清积压(WS订阅前写入的信号推送不会送达)
+      this.forcePollOnce.set(true);
       RoomManager.RoomState state = this.currentRoom.get();
       if (this.signalingClient.isWsConnected()) {
          // WS 健康：轮询静默休眠，5s 空转节拍
@@ -1651,10 +1662,15 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
             return;
          }
 
-         // WS 健康即休眠：零请求，仅校正节拍
+         // WS健康:休眠5拍后第6拍安全网补拉(防推送漏收/半开黑洞)
          if (this.signalingClient.isWsConnected() && !this.forcePollOnce.getAndSet(false)) {
-            this.recoverSignalPollInterval();
-            return;
+            if (++this.wsSafetyTicks < WS_SAFETY_NET_TICKS) {
+               this.recoverSignalPollInterval();
+               return;
+            }
+            this.wsSafetyTicks = 0;
+         } else {
+            this.wsSafetyTicks = 0;
          }
 
          if (!this.signalPollInFlight.compareAndSet(false, true)) {
@@ -1797,6 +1813,9 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
          switch (type) {
             case "join_request":
                this.connectionManager.handleJoinRequest(from, data);
+               break;
+            case "mods_request":
+               icu.wuhui.voxlink.modsync.ModSyncManifestService.onModsRequest(data);
                break;
             case "holepunch_offer":
                this.connectionManager.handleHolePunchOffer(from, data);

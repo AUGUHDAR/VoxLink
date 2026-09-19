@@ -266,6 +266,7 @@ public class ConnectionManager {
          return t;
       });
    private final AtomicBoolean tcpPunchInFlight = new AtomicBoolean(false);
+   private final AtomicInteger tcpPunchSeq = new AtomicInteger(0);
 
    private final List<ConnectionFallback> activeFallbacks = new CopyOnWriteArrayList<>();
 
@@ -4742,17 +4743,9 @@ private volatile long lastProfileSwitchMs = 0L;
 
                            anyAlive = true;
 
-                           // 热循环修复①: 目标已拉黑的 puncher 本轮不再发起——拉黑目标会立即快速失败,
-                           // 旧逻辑 300ms 后再来一轮, 单会话可空转数千次刷爆日志并白烧 CPU
-                           if (mp.isCurrentTargetBlacklisted()) {
-
-                              continue;
-
-                           }
-
                            // PREDICTION_OFF 会话级封顶: 停止无意义直连(配合 1.1.5 的
                            // round=3 自动 TURN, 此处静默让位中继; 降频轮询保留漂移恢复可能)
-                           if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP) {
+                           if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP && !this.sessionPunchRecvEver.get()) {
                               continue;
                            }
                            anyPunchable = true;
@@ -6275,6 +6268,12 @@ private volatile long lastProfileSwitchMs = 0L;
 
       go.addProperty("tcpPunchPort", port);
 
+      if (data.has("tcpPunchSeq")) {
+
+         go.addProperty("tcpPunchSeq", data.get("tcpPunchSeq").getAsInt());
+
+      }
+
       this.signalingClient
 
          .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "tcp_punch_go", go, from)
@@ -6332,6 +6331,14 @@ private volatile long lastProfileSwitchMs = 0L;
       int port = data.has("tcpPunchPort") ? data.get("tcpPunchPort").getAsInt() : 0;
 
       String targetIp = this.savedConnectionHostMappedIp;
+
+      if (data.has("tcpPunchSeq") && data.get("tcpPunchSeq").getAsInt() != this.tcpPunchSeq.get()) {
+
+         VoxLinkMod.LOGGER.info("[TcpPunch] stale tcp_punch_go dropped (seq={})", data.get("tcpPunchSeq").getAsInt());
+
+         return;
+
+      }
 
       if (port <= 0 || port > 65535 || targetIp == null || targetIp.isEmpty()) {
 
@@ -6425,6 +6432,8 @@ private volatile long lastProfileSwitchMs = 0L;
 
       info.addProperty("tcpPunchPort", punchPort);
 
+      info.addProperty("tcpPunchSeq", this.tcpPunchSeq.incrementAndGet());
+
       // go丢失兜底释放占位
       this.scheduler.schedule(() -> this.tcpPunchInFlight.set(false), 35L, TimeUnit.SECONDS);
 
@@ -6499,6 +6508,24 @@ private volatile long lastProfileSwitchMs = 0L;
          } else {
 
             this.connectionWon.set(false);
+
+            String joinerId = this.savedConnectionFrom;
+
+            if (joinerId != null && !joinerId.isEmpty()) {
+
+               VoxLinkMod.LOGGER.info("[TcpPunch] host bridge failed, notify joiner fast-fail");
+
+               try {
+
+                  this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "disconnect", new JsonObject(), joinerId);
+
+               } catch (Exception sigEx) {
+
+                  VoxLinkMod.LOGGER.debug("[TcpPunch] bridge-fail notify error: {}", sigEx.getMessage());
+
+               }
+
+            }
 
          }
 
@@ -6820,7 +6847,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
          // PREDICTION_OFF 封顶快速失败: birthday attack 风暴下避免无限空转 + 日志被刷爆。
          // 与 ZERO_RECV_FINAL_ROUND_LIMIT 正交, 此处用相同终态结论确保对端停手 + 进入 fallback。
-         if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP) {
+         if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP && !this.sessionPunchRecvEver.get()) {
             VoxLinkMod.LOGGER.warn("[UdpHolePuncher] PREDICTION_OFF cap reached ({}), abort punch", this.sessionPredictionOffCount.get());
             ConnectionState.transitionTo(ConnectionState.FAILED, "PREDICTION_OFF 封顶");
             this.showConnectFailed(state, "voxlink.connection.max_cycles_exceeded");
@@ -7472,40 +7499,6 @@ private volatile long lastProfileSwitchMs = 0L;
 
                   if (hostMappedIp != null && !hostMappedIp.isEmpty() && hostMappedPort > 0) {
 
-                     ConnectionFallback tcpSimFallback = this.trackFallback(new ConnectionFallback());
-
-                     int simLocalPort = P2PBridge.getHostPort() > 0 ? P2PBridge.getHostPort() : hostPort;
-
-                     String myMappedIp = state.roomInfo.getMyMappedIp();
-
-                     int myMappedPort = state.roomInfo.getMyMappedPort();
-
-                     if (myMappedIp != null && myMappedPort > 0 && this.signalingClient != null) {
-
-                        JsonObject simReq = new JsonObject();
-
-                        simReq.addProperty("joinerMappedIp", myMappedIp);
-
-                        simReq.addProperty("joinerMappedPort", myMappedPort);
-
-                        this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "tcp_simopen_request", simReq, "host");
-
-                        VoxLinkMod.LOGGER.info("[Connection] Wave 2: Send tcp_simopen_request to host ({}:{})", myMappedIp, myMappedPort);
-
-                     }
-
-
-
-                     int tcpTargetPort = hostPort > 0 ? hostPort : hostMappedPort;
-
-                     wave2Futures.add(tcpSimFallback.tryTcpSimultaneousOpen(hostMappedIp, tcpTargetPort, simLocalPort));
-
-                  }
-
-
-
-                  if (hostMappedIp != null && !hostMappedIp.isEmpty() && hostMappedPort > 0) {
-
                      ConnectionFallback tcpMappedFallback = this.trackFallback(new ConnectionFallback());
 
                      int tcpDirectPort = hostPort > 0 ? hostPort : hostMappedPort;
@@ -8137,17 +8130,9 @@ private volatile long lastProfileSwitchMs = 0L;
 
                   InetSocketAddress punchTargetAddr = new InetSocketAddress(fTargetIp, fTargetPort);
 
-                  if (this.addressBlacklist.isBlacklisted(punchTargetAddr)) {
+                  UdpHolePuncher.observeBlacklistedTarget(punchTargetAddr.getAddress(), punchTargetAddr.getPort());
 
-                     VoxLinkMod.LOGGER.info("[Connection] Target {}:{} in blacklist, skip UDP punch", fTargetIp, fTargetPort);
-
-                     finalPuncher.close();
-
-                     this.activeHolePunchers.remove("joiner");
-
-                     this.tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 1);
-
-                  } else if (this.stunProbeResult != null && this.stunProbeResult.natType.isEasySymmetric() && state.roomInfo.isHostEasySym()) {
+                  if (this.stunProbeResult != null && this.stunProbeResult.natType.isEasySymmetric() && state.roomInfo.isHostEasySym()) {
 
                      int dualSocketCount = this.continuousRetryRound.get() > 0 ? this.punchProfile().easySymMutualRetrySocketCount : this.punchProfile().easySymMutualSocketCount;
 

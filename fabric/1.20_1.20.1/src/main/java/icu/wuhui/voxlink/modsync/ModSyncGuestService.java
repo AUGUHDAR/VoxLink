@@ -80,9 +80,10 @@ public final class ModSyncGuestService {
 
    /**
     * 加入流程入口门控（在 join_room / 打洞之前调用）。
+    * scope=required（仅必装）| all（房主全部可识别模组）。
     * onProceed/onCancel 都会被调度回主线程执行。
     */
-   public static void gate(String roomCode, Runnable onProceed, Runnable onCancel) {
+   public static void gate(String roomCode, String scope, Runnable onProceed, Runnable onCancel) {
       if (!isEnabled() || !RoomCodeRouter.isVoxLinkCode(roomCode)) {
          onProceed.run();
          return;
@@ -110,8 +111,10 @@ public final class ModSyncGuestService {
       };
 
 
+      final String fetchScope = ModSyncManifestService.SCOPE_ALL.equals(scope)
+         ? ModSyncManifestService.SCOPE_ALL : ModSyncManifestService.SCOPE_REQUIRED;
       EXECUTOR.execute(() -> {
-         JsonObject manifest = fetchManifestWithRetry(roomCode);
+         JsonObject manifest = fetchManifestWithRetry(roomCode, fetchScope);
          if (BYPASSED_THIS_LAUNCH.contains(roomCode)) {
             // 玩家已在获取页点"直接进入"或取消：丢弃结果，绝不弹窗打断已开始的加入
             return;
@@ -226,7 +229,7 @@ public final class ModSyncGuestService {
    }
 
    /** 返回 null 表示"无需处理"（不支持/拉取失败/未就绪超时/空清单）。 */
-   private static JsonObject fetchManifestWithRetry(String roomCode) {
+   private static JsonObject fetchManifestWithRetry(String roomCode, String scope) {
       boolean sawNotReady = false;
       boolean sawTransient = false;
       // 弱网实测：信令 8 秒超时很常见。超时/网络类失败必须与"未就绪"一样重试，
@@ -243,8 +246,8 @@ public final class ModSyncGuestService {
 
          try {
             var resp = VoxLinkMod.getSignalingClient()
-               .getRoomMods(roomCode)
-               .get(5L, TimeUnit.SECONDS);
+               .requestRoomMods(roomCode, scope)
+               .get(8L, TimeUnit.SECONDS);
             if (!resp.success || resp.data == null) {
                String err = resp.error != null ? resp.error.toUpperCase(java.util.Locale.ROOT) : "";
                boolean authoritative = err.contains("ROOM_NOT_FOUND") || err.contains("ROOM_EXPIRED")

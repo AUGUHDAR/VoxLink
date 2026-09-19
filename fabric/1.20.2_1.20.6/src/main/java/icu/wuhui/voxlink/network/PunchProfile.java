@@ -42,6 +42,8 @@ public final class PunchProfile {
    public final int maxSymCycles;
    public final int fallbackCycles;
    public final SymParams sym;
+   // 必须先于所有静态profile实例声明,否则构造时sym读到null
+   public static final SymParams RECIPE = new SymParams(25, 20, 100, 5000, 600, 800, 3, 1, 2, 180, 3000);
    private static final PunchProfile.SendParams SEND_DEFAULT = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 3, 3, 1, 10, 800);
    private static final PunchProfile.SendParams SEND_DEFAULT_FAST = new PunchProfile.SendParams(200, 500, 1000, 2000, 600, 200, 1, 2, 1, 5, 800);
    private static final PunchProfile.SendParams SEND_SPRINT = new PunchProfile.SendParams(100, 300, 600, 1200, 400, 150, 1, 1, 1, 3, 400);
@@ -85,6 +87,7 @@ public final class PunchProfile {
       public final int hardSymPortIntervalMs;
       public final int hardSymDecayNumerator;
       public final int hardSymDecayFloor;
+      public final int maxPps;
 
       public SymParams(
          int easySymBombSockets,
@@ -96,7 +99,8 @@ public final class PunchProfile {
          int hardSymPacketsPerPort,
          int hardSymPortIntervalMs,
          int hardSymDecayNumerator,
-         int hardSymDecayFloor
+         int hardSymDecayFloor,
+         int maxPps
       ) {
          this.easySymBombSockets = easySymBombSockets;
          this.easySymBombWindow = easySymBombWindow;
@@ -108,10 +112,9 @@ public final class PunchProfile {
          this.hardSymPortIntervalMs = hardSymPortIntervalMs;
          this.hardSymDecayNumerator = hardSymDecayNumerator;
          this.hardSymDecayFloor = hardSymDecayFloor;
+         this.maxPps = maxPps;
       }
    }
-
-   public static final SymParams RECIPE = new SymParams(25, 20, 100, 5000, 600, 800, 3, 1, 2, 180);
 
    private static volatile PunchProfile current = DEFAULT;
    private static volatile String switchReason = "initial";

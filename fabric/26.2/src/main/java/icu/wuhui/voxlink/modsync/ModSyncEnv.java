@@ -21,4 +21,9 @@ public final class ModSyncEnv {
    public static Path getModsDir() {
       return FabricLoader.getInstance().getGameDir().resolve("mods");
    }
+
+   /** modsync 本地清单缓存文件（游戏目录/voxlink 下，不进 mods 目录）。 */
+   public static Path getCacheFile() {
+      return FabricLoader.getInstance().getGameDir().resolve("mods").resolve("voxlink").resolve("modsync_cache.json");
+   }
 }

@@ -162,13 +162,24 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                Button.builder(Component.translatable("voxlink.back"), button -> this.goBack()).bounds(centerX - 100, btnY, 200, 20).build()
             );
          } else if (gatePending) {
+            // ModSync v2: 两档范围选择（必装 / 房主全部可识别），跳过/取消保留
             this.addRenderableWidget(
-               Button.builder(Component.translatable("voxlink.modsync.skip_check"), button -> this.onSkipCheckClicked())
-                  .bounds(centerX - 100, btnY, 200, 20)
+               Button.builder(Component.translatable("voxlink.modsync.scope_required"), button -> this.onScopePicked("required"))
+                  .bounds(centerX - 100, btnY - 26, 200, 20)
                   .build()
             );
             this.addRenderableWidget(
-               Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY + 24, 200, 20).build()
+               Button.builder(Component.translatable("voxlink.modsync.scope_all"), button -> this.onScopePicked("all"))
+                  .bounds(centerX - 100, btnY - 2, 200, 20)
+                  .build()
+            );
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.modsync.skip_check"), button -> this.onSkipCheckClicked())
+                  .bounds(centerX - 100, btnY + 22, 200, 20)
+                  .build()
+            );
+            this.addRenderableWidget(
+               Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY + 46, 200, 20).build()
             );
          } else {
             this.addRenderableWidget(
@@ -315,30 +326,45 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       // ModSync 门控：开关开启且为 VoxLink 房间号时，先拉必装清单再进入连接流程；
       // 已门控过/已跳过的房间直接放行；放行回调一律以 modSyncChecked=true 重建本屏，
       // 绝不再入 gate()——否则快速通道会在本屏上空转，卡死在"正在获取清单"
+      // ModSync v2 门控：进入"选择范围"待选态，由玩家点按钮决定必装/全部/跳过；
+      // 已跳过的房间直接放行；放行回调一律以 modSyncChecked=true 重建本屏。
       if (!this.modSyncChecked
          && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
          && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
          && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode)) {
-         Minecraft mc0 = Minecraft.getInstance();
-         AttemptingJoinScreen self = this;
          this.modSyncChecking = true;
-         this.voxlinkStatusText = Component.translatable("voxlink.modsync.checking").getString();
+         this.voxlinkStatusText = Component.translatable("voxlink.modsync.scope_hint").getString();
          this.voxlinkStatusColor = VoxLinkColors.WARNING;
-         icu.wuhui.voxlink.modsync.ModSyncGuestService.gate(
-            this.roomCode,
-            () -> mc0.execute(() -> mc0.gui.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password, true))),
-            () -> mc0.execute(() -> {
-               if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
-                  VoxLinkMod.getRoomManager().leaveRoom();
-               }
-
-               mc0.gui.setScreen(self.parent);
-            })
-         );
+         this.clearOurWidgets();
+         this.init();
          return;
       }
 
       this.doStartDualP2P();
+   }
+
+   /** 玩家选定同步范围：按 scope 走门控拉清单（继续/取消回调与原门控一致）。 */
+   private void onScopePicked(String scope) {
+      if (!this.modSyncChecking) {
+         return;
+      }
+
+      this.voxlinkStatusText = Component.translatable("voxlink.modsync.checking").getString();
+      this.voxlinkStatusColor = VoxLinkColors.WARNING;
+      Minecraft mc0 = Minecraft.getInstance();
+      AttemptingJoinScreen self = this;
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.gate(
+         this.roomCode,
+         scope,
+         () -> mc0.execute(() -> mc0.gui.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password, true))),
+         () -> mc0.execute(() -> {
+            if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
+               VoxLinkMod.getRoomManager().leaveRoom();
+            }
+
+            mc0.gui.setScreen(self.parent);
+         })
+      );
    }
 
    /** 获取清单页"直接进入"：跳过必装检查立刻开始连接；在途清单结果作废（bypass）。 */

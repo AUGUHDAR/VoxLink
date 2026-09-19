@@ -449,6 +449,7 @@ public class P2PBridge {
          return true;
       } catch (IOException e) {
          LOGGER.error("Punched-socket host bridge failed: {}", e.getMessage());
+         running.set(false);
          if (mcSocket != null) {
             try {
                mcSocket.close();

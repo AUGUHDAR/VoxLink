@@ -63,12 +63,14 @@ public class TurnRelayClient {
    public static class TurnSession {
       public final String sessionIdHex;
       public final byte[] sessionId;
-      public final String host;
-      public final int port;
       public final byte role;
       public final String ticket;
       public final long expireSec;
-      public final DatagramSocket socket;
+      // TCP 兜底激活后被替换：socket→shim 回环口、host/port→shim 地址
+      public volatile DatagramSocket socket;
+      public volatile String host;
+      public volatile int port;
+      public volatile TurnTcpChannel tcpChannel = null;
       public volatile boolean bound = false;
       // 保活统计（仅发送侧计数；TURN 节点 90s 无包踢角色，KEEPALIVE 到达即保活）
       public final AtomicLong keepaliveSent = new AtomicLong();
@@ -129,6 +131,11 @@ public class TurnRelayClient {
             LOGGER.debug("[TurnRelay] unbind send failed: {}", e.getMessage());
          } finally {
             this.bound = false;
+            TurnTcpChannel ch = this.tcpChannel;
+            if (ch != null) {
+               ch.close();
+               this.tcpChannel = null;
+            }
             try {
                if (this.socket != null) {
                   this.socket.close();
@@ -412,6 +419,58 @@ public class TurnRelayClient {
                return code;
             }
          }
+      }
+      // UDP 轮次耗尽仍无响应（BIND_FAILED_5=UDP黑洞实证）→ TCP 兜底
+      return engageTcpFallback(session, code);
+   }
+
+   /**
+    * TCP 兜底：UDP 全丢时经本地 shim 转走 TCP 长连接（同端口）。
+    * 只改 session 的 socket/host/port，bind/keepalive/rudp 零感知；
+    * 节点侧跨承载接管保证会话连续。
+    */
+   private static int engageTcpFallback(TurnRelayClient.TurnSession session, int udpCode) {
+      if (session.tcpChannel != null) {
+         return udpCode;
+      }
+      LOGGER.warn("[TurnRelay] UDP bind no response (code={}) after retries, engaging TCP fallback to {}:{}", udpCode, session.host, session.port);
+      int preferPort = session.socket != null && !session.socket.isClosed() ? session.socket.getLocalPort() : 0;
+      if (session.socket != null) {
+         try {
+            session.socket.close();
+         } catch (Exception e) {
+         }
+      }
+      TurnTcpChannel ch;
+      try {
+         ch = TurnTcpChannel.open(session.host, session.port, preferPort);
+      } catch (IOException e) {
+         LOGGER.warn("[TurnRelay] TCP fallback connect failed: {}", e.getMessage());
+         return udpCode;
+      }
+      session.tcpChannel = ch;
+      session.socket = ch.clientSocket();
+      session.host = "127.0.0.1";
+      session.port = ch.shimPort();
+      int code = BIND_SERVER_BUSY;
+      for (int attempt = 1; attempt <= 2; attempt++) {
+         code = bindOnce(session);
+         if (code != BIND_SERVER_BUSY) {
+            break;
+         }
+         if (attempt < 2) {
+            try {
+               Thread.sleep(1000L);
+            } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               break;
+            }
+         }
+      }
+      if (code == BIND_OK) {
+         LOGGER.warn("[TurnRelay] TCP fallback bind OK (UDP path dead)");
+      } else {
+         LOGGER.warn("[TurnRelay] TCP fallback bind failed code={}", code);
       }
       return code;
    }

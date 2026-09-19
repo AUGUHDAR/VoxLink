@@ -4,6 +4,8 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.tree.CommandNode;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.mixin.CommandNodeAccessor;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Predicate;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.commands.CommandSourceStack;
@@ -20,6 +22,12 @@ import net.minecraft.server.commands.PardonIpCommand;
 import net.minecraft.server.commands.WhitelistCommand;
 
 public final class LanCommandRegistry {
+   private static final String[] NATIVE_COMMANDS = new String[]{
+      "op", "deop", "ban", "ban-ip", "banlist", "pardon", "pardon-ip", "whitelist", "kick"
+   };
+   /** 仅 Fabric 走 accessor 路径 */
+   private static final boolean ACCESSOR_PATH_USABLE = isFabricLoaderPresent();
+
    private LanCommandRegistry() {
    }
 
@@ -33,29 +41,31 @@ public final class LanCommandRegistry {
       PardonIpCommand.register(dispatcher);
       WhitelistCommand.register(dispatcher);
       KickCommand.register(dispatcher);
-      modifyNativeRequires(dispatcher, "op");
-      modifyNativeRequires(dispatcher, "deop");
-      modifyNativeRequires(dispatcher, "ban");
-      modifyNativeRequires(dispatcher, "ban-ip");
-      modifyNativeRequires(dispatcher, "banlist");
-      modifyNativeRequires(dispatcher, "pardon");
-      modifyNativeRequires(dispatcher, "pardon-ip");
-      modifyNativeRequires(dispatcher, "whitelist");
-      modifyNativeRequires(dispatcher, "kick");
+      List<String> failures = new ArrayList<>();
+      for (String name : NATIVE_COMMANDS) {
+         modifyNativeRequires(dispatcher, name, failures);
+      }
+
+      if (!failures.isEmpty()) {
+         VoxLinkMod.LOGGER.warn(
+            "[LanCmd] Failed to modify native command requires, {}/{} failed: {}",
+            failures.size(), NATIVE_COMMANDS.length, String.join("; ", failures)
+         );
+      }
    }
 
-   private static void modifyNativeRequires(CommandDispatcher<CommandSourceStack> dispatcher, String name) {
+   private static void modifyNativeRequires(CommandDispatcher<CommandSourceStack> dispatcher, String name, List<String> failures) {
       try {
          CommandNode<CommandSourceStack> child = dispatcher.getRoot().getChild(name);
          if (child == null) {
-            VoxLinkMod.LOGGER.warn("[LanCmd] Native command {} not found, skip modification", name);
+            failures.add(name + ": native command not found");
             return;
          }
 
          Predicate<CommandSourceStack> original = child.getRequirement();
-         setRequirementBypass(child, original, name);
+         setRequirementBypass(child, original, name, failures);
       } catch (Exception e) {
-         VoxLinkMod.LOGGER.warn("[LanCmd] Failed to modify native command {} requires: {}", name, e.getMessage());
+         failures.add(name + ": " + e);
       }
    }
 
@@ -66,21 +76,36 @@ public final class LanCommandRegistry {
     * 此时退回反射——brigadier 是无混淆库且 jar 为自动模块（全开放），反射跨加载器可用。
     */
    @SuppressWarnings({"unchecked", "rawtypes"})
-   private static void setRequirementBypass(CommandNode<CommandSourceStack> node, Predicate<CommandSourceStack> original, String name) {
+   private static void setRequirementBypass(CommandNode<CommandSourceStack> node, Predicate<CommandSourceStack> original, String name, List<String> failures) {
       Predicate bypass = src -> original != null && original.test((CommandSourceStack)src) ? true : isLanHost((CommandSourceStack)src);
-      try {
-         CommandNodeAccessor accessor = (CommandNodeAccessor)node;
-         accessor.voxlink$setRequirement(bypass);
-         VoxLinkMod.LOGGER.info("[LanCmd] Native command {} requires bypassed for LAN host", name);
-      } catch (ClassCastException mixinNotApplied) {
+      if (ACCESSOR_PATH_USABLE) {
          try {
-            java.lang.reflect.Field requirementField = CommandNode.class.getDeclaredField("requirement");
-            requirementField.setAccessible(true);
-            requirementField.set(node, bypass);
-            VoxLinkMod.LOGGER.info("[LanCmd] Native command {} requires bypassed for LAN host (reflection)", name);
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.warn("[LanCmd] Failed to modify native command {} requires: {}", name, e.getMessage());
+            CommandNodeAccessor accessor = (CommandNodeAccessor)node;
+            accessor.voxlink$setRequirement(bypass);
+            VoxLinkMod.LOGGER.info("[LanCmd] Native command {} requires bypassed for LAN host", name);
+            return;
+         } catch (ClassCastException mixinNotApplied) {
+            // 降级到反射
          }
+      }
+
+      try {
+         java.lang.reflect.Field requirementField = CommandNode.class.getDeclaredField("requirement");
+         requirementField.setAccessible(true);
+         requirementField.set(node, bypass);
+         VoxLinkMod.LOGGER.info("[LanCmd] Native command {} requires bypassed for LAN host (reflection)", name);
+      } catch (Exception e) {
+         failures.add(name + ": " + e);
+      }
+   }
+
+   private static boolean isFabricLoaderPresent() {
+      try {
+         // 不触发类初始化
+         Class.forName("net.fabricmc.loader.api.FabricLoader", false, LanCommandRegistry.class.getClassLoader());
+         return true;
+      } catch (ClassNotFoundException notFabric) {
+         return false;
       }
    }
 

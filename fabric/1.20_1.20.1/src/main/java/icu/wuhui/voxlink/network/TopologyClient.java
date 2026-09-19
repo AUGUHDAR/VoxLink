@@ -245,6 +245,9 @@ public class TopologyClient implements P2POverlayManager.PacketHandler {
             this.signalingClient.reportLinkReady(this.roomCode, this.token, this.isHost).thenAccept(response -> {
                if (response.success) {
                   LOGGER.info("Link ready report success");
+               } else if (response.error != null && (response.error.contains("INVALID_TOKEN") || response.error.contains("ROOM_NOT_FOUND"))) {
+                  // 房间已终态后的迟到上报，属正常边缘，降为 debug 防噪音
+                  LOGGER.debug("Link ready report skipped (room gone): {}", response.error);
                } else {
                   LOGGER.warn("Link ready report failed: {}", response.error);
                }

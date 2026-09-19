@@ -218,18 +218,15 @@ public class UdpHolePuncher {
       return fr;
    }
 
-   /** 发起打洞前的黑名单检查：被拉黑目标直接快速失败（触发上层 relay/direct 兜底）。 */
-   private static boolean isTargetBlacklisted(InetAddress addr, int port) {
+   /** 拉黑仅观测: 不拦截照常打洞 */
+   public static void observeBlacklistedTarget(InetAddress addr, int port) {
       if (addr == null || port <= 0) {
-         return false;
+         return;
       }
 
-      boolean blocked = AddressBlacklist.get().isBlacklisted(new InetSocketAddress(addr, port));
-      if (blocked) {
+      if (AddressBlacklist.get().isBlacklisted(new InetSocketAddress(addr, port))) {
          warnBlacklistedOnce(addr, port);
       }
-
-      return blocked;
    }
 
    /** 黑名单告警限频：同一目标 30s 最多一条。热循环场景下曾单会话刷 7000 条。 */
@@ -238,24 +235,13 @@ public class UdpHolePuncher {
       long now = System.currentTimeMillis();
       Long last = BLACKLIST_WARN_AT.put(key, now);
       if (last == null || now - last >= 30000L) {
-         LOGGER.warn("[UdpHolePuncher] Target {} blacklisted by repeated failures, skip punch", key);
+         LOGGER.warn("[Punch] target {} blacklisted (observation-only), punching anyway", key);
       }
-   }
-
-   /** 当前目标（含 updateTarget 漂移纠偏后的端口）是否已被拉黑：上层组循环据此跳过本轮。 */
-   public boolean isCurrentTargetBlacklisted() {
-      InetAddress addr = this.remoteAddress;
-      int port = this.remotePort;
-      return addr != null && port > 0 && AddressBlacklist.get().isBlacklisted(new InetSocketAddress(addr, port));
    }
 
    /** 当前目标端口（updateTarget 漂移纠偏后的最新值；未发起过打洞时为 -1）。 */
    public int getRemotePort() {
       return this.remotePort;
-   }
-
-   private static CompletableFuture<PunchResult> blacklistedFuture() {
-      return CompletableFuture.completedFuture(PunchResult.failure(0, 0, 0, 0, 0L, false));
    }
 
    /**
@@ -397,10 +383,7 @@ public class UdpHolePuncher {
          return CompletableFuture.failedFuture(e);
       }
 
-      if (isTargetBlacklisted(this.remoteAddress, targetPort)) {
-         this.punching.set(false);
-         return blacklistedFuture();
-      }
+      observeBlacklistedTarget(this.remoteAddress, targetPort);
 
       CompletableFuture<PunchResult> result = new CompletableFuture<>();
       this.activeResult = result;
@@ -415,6 +398,7 @@ public class UdpHolePuncher {
       PunchParams mode = this.punchParams != null ? this.punchParams : PunchParams.fromProfile(this.profile());
       boolean sprayMode = mode.hardSymSpray;
       boolean bombMode = mode.easySymBomb;
+      PpsLimiter ppsLimiter = new PpsLimiter(this.profile().sym.maxPps);
       int roundInterval = bombMode ? Math.min(this.effectiveSendInterval(), Math.max(1, mode.bombRoundIntervalMs)) : this.effectiveSendInterval();
       int maxTotalCycles = this.effectiveTimeoutMs() / Math.max(1, roundInterval);
       String modeName = sprayMode ? "hard_sym_spray" : bombMode ? "easy_sym_bomb" : "classic";
@@ -658,7 +642,7 @@ public class UdpHolePuncher {
 
             if (sprayMode) {
                cycles++;
-               if (!this.sprayRound(data, mode, socketGroup, cycles)) {
+               if (!this.sprayRound(data, mode, socketGroup, cycles, ppsLimiter)) {
                   break;
                }
 
@@ -679,6 +663,7 @@ public class UdpHolePuncher {
                         }
 
                         DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, dp);
+                        ppsLimiter.beforeSend();
                         sendPkt(s, pkt);
                      }
                   }
@@ -747,7 +732,7 @@ public class UdpHolePuncher {
    }
 
    /** HardSym喷洒轮; false=中断 */
-   private boolean sprayRound(byte[] data, PunchParams mode, List<UdpHolePuncher> group, int round) {
+   private boolean sprayRound(byte[] data, PunchParams mode, List<UdpHolePuncher> group, int round, PpsLimiter limiter) {
       if (this.hardSymSprayTable == null) {
          int[] table = new int[65535];
          for (int i = 0; i < table.length; i++) {
@@ -767,6 +752,7 @@ public class UdpHolePuncher {
 
       for (int r = 0; r < mode.sprayPacketsPerPort; r++) {
          DatagramPacket cone = new DatagramPacket(data, data.length, this.remoteAddress, this.remotePort);
+         limiter.beforeSend();
          sendPkt(this.socket, cone);
       }
 
@@ -784,6 +770,7 @@ public class UdpHolePuncher {
 
          for (int r = 0; r < mode.sprayPacketsPerPort; r++) {
             DatagramPacket pkt = new DatagramPacket(data, data.length, this.remoteAddress, port);
+            limiter.beforeSend();
             sendPkt(s, pkt);
          }
 
@@ -825,6 +812,31 @@ public class UdpHolePuncher {
          } catch (IOException | RuntimeException var5) {
             // Windows对UDP socket有ICMP不可达锁存: 扫到未映射端口后路由器回ICMP, 下一次send
             // 抛WSAECONNRESET且错误只报一次; 立即重试即恢复, 不重试=静默丢包(VPRFC6实证)
+         }
+      }
+   }
+
+   /** pps限速器 */
+   private static final class PpsLimiter {
+      private final int maxPps;
+      private final long startNanos = System.nanoTime();
+      private long sent;
+
+      PpsLimiter(int maxPps) {
+         this.maxPps = Math.max(1, maxPps);
+      }
+
+      void beforeSend() {
+         this.sent++;
+         long allowed = (System.nanoTime() - this.startNanos) * (long)this.maxPps / 1000000000L;
+         if (this.sent > allowed) {
+            long sleepNs = (this.sent - allowed) * 1000000000L / (long)this.maxPps;
+
+            try {
+               Thread.sleep(sleepNs / 1000000L, (int)(sleepNs % 1000000L));
+            } catch (InterruptedException var6) {
+               Thread.currentThread().interrupt();
+            }
          }
       }
    }
@@ -908,10 +920,7 @@ public class UdpHolePuncher {
             return CompletableFuture.failedFuture(e);
          }
 
-         if (isTargetBlacklisted(this.remoteAddress, targetPorts.get(0))) {
-            this.punching.set(false);
-            return blacklistedFuture();
-         }
+         observeBlacklistedTarget(this.remoteAddress, targetPorts.get(0));
 
          CompletableFuture<PunchResult> result = new CompletableFuture<>();
          this.activeResult = result;
@@ -1117,10 +1126,7 @@ public class UdpHolePuncher {
          return CompletableFuture.failedFuture(e);
       }
 
-      if (isTargetBlacklisted(this.remoteAddress, basePort)) {
-         this.punching.set(false);
-         return blacklistedFuture();
-      }
+      observeBlacklistedTarget(this.remoteAddress, basePort);
 
       CompletableFuture<PunchResult> result = new CompletableFuture<>();
       this.activeResult = result;
@@ -1768,12 +1774,12 @@ public class UdpHolePuncher {
       int maxTotalCycles = this.effectiveTimeoutMs() / this.effectiveSendInterval();
       if (shouldLogPunchStartInfo(remoteIp, targetPort)) {
          LOGGER.info(
-            "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
+            "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, mode=classic(fallback), profile={}",
             new Object[]{remoteIp, targetPort, socketGroup.size(), this.profile().describeInstance()}
          );
       } else {
          LOGGER.debug(
-            "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, profile={}",
+            "[UdpHolePuncher] Multi-socket send start (Legacy): target={}:{}, sockets={}, mode=classic(fallback), profile={}",
             new Object[]{remoteIp, targetPort, socketGroup.size(), this.profile().describeInstance()}
          );
       }

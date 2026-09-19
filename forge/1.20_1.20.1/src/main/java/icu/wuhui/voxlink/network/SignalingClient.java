@@ -57,7 +57,9 @@ public class SignalingClient {
       Map.entry("relay_allocate", "/relay/allocate"),
       Map.entry("relay_release", "/relay/release"),
       Map.entry("publish_mod_manifest", "/room/mods/publish"),
-      Map.entry("get_room_mods", "/room/mods")
+      Map.entry("get_room_mods", "/room/mods"),
+      Map.entry("request_room_mods", "/room/mods/request"),
+      Map.entry("answer_room_mods", "/room/mods/answer")
    );
    private final VoxLinkConfig config;
    private final HttpClient httpClient;
@@ -459,6 +461,27 @@ public class SignalingClient {
       body.addProperty("code", code != null ? code.toUpperCase() : "");
       body.addProperty("action", "get_room_mods");
       return this.postNoRetry(this.buildPath("get_room_mods"), body);
+   }
+
+   /** ModSync v2：房客按需请求清单（scope=required|all）；服务器缓存未命中时经信号向房主取。 */
+   public CompletableFuture<SignalingClient.ApiResponse> requestRoomMods(String code, String scope) {
+      JsonObject body = new JsonObject();
+      body.addProperty("code", code != null ? code.toUpperCase() : "");
+      body.addProperty("scope", scope != null && !scope.isEmpty() ? scope : "required");
+      body.addProperty("action", "request_room_mods");
+      return this.postNoRetry(this.buildPath("request_room_mods"), body);
+   }
+
+   /** ModSync v2：房主应答按需请求（requestId 关联），服务器落缓存并唤醒房客长轮询。 */
+   public CompletableFuture<SignalingClient.ApiResponse> answerRoomMods(String code, String token, String requestId, String scope, JsonObject manifest) {
+      JsonObject body = new JsonObject();
+      body.addProperty("code", code != null ? code.toUpperCase() : "");
+      body.addProperty("token", token != null ? token : "");
+      body.addProperty("requestId", requestId != null ? requestId : "");
+      body.addProperty("scope", scope != null && !scope.isEmpty() ? scope : "required");
+      body.add("manifest", manifest != null ? manifest : new JsonObject());
+      body.addProperty("action", "answer_room_mods");
+      return this.postNoRetry(this.buildPath("answer_room_mods"), body);
    }
 
    public CompletableFuture<SignalingClient.ApiResponse> reportLinkReady(String code, String token, boolean isHost) {

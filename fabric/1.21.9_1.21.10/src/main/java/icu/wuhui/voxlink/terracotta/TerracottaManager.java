@@ -49,6 +49,17 @@ public final class TerracottaManager {
    private static volatile Consumer<TerracottaState> uiStateCallback = null;
    private static final AtomicReference<TerracottaManager.WaitContext> pendingWait = new AtomicReference<>(null);
 
+   static {
+      // 预热嵌套类,避开Forge事件总线坑
+      Class<?>[] warmup = new Class<?>[]{
+         TerracottaState.Bootstrap.class, TerracottaState.Exception.class, TerracottaState.Fatal.class,
+         TerracottaState.GuestConnecting.class, TerracottaState.GuestOK.class, TerracottaState.GuestStarting.class,
+         TerracottaState.HostOK.class, TerracottaState.HostScanning.class, TerracottaState.HostStarting.class,
+         TerracottaState.Launching.class, TerracottaState.PortSpecific.class, TerracottaState.Ready.class,
+         TerracottaState.Uninitialized.class, TerracottaState.Unknown.class, TerracottaState.Waiting.class
+      };
+   }
+
    private TerracottaManager() {
    }
 

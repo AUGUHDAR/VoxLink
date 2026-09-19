@@ -106,6 +106,21 @@ public final class ModSyncFileHasher {
       return hash(file, "SHA-512");
    }
 
+   /** 字节数组的 sha1（modsync 本地缓存状态键用）。 */
+   public static String sha1OfBytes(byte[] data) {
+      try {
+         MessageDigest digest = MessageDigest.getInstance("SHA-1");
+         StringBuilder sb = new StringBuilder(digest.getDigestLength() * 2);
+         for (byte b : digest.digest(data)) {
+            sb.append(Character.forDigit(b >> 4 & 15, 16)).append(Character.forDigit(b & 15, 16));
+         }
+
+         return sb.toString();
+      } catch (Exception e) {
+         return String.valueOf(data == null ? 0 : data.length);
+      }
+   }
+
    private static String hash(Path file, String algorithm) throws IOException {
       MessageDigest digest;
       try {

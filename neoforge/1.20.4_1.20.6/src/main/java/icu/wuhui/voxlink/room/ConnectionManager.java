@@ -4745,17 +4745,11 @@ private volatile long lastProfileSwitchMs = 0L;
 
                            anyAlive = true;
 
-                           // 热循环修复①: 目标已拉黑的 puncher 本轮不再发起——拉黑目标会立即快速失败,
-                           // 旧逻辑 300ms 后再来一轮, 单会话可空转数千次刷爆日志并白烧 CPU
-                           if (mp.isCurrentTargetBlacklisted()) {
-
-                              continue;
-
-                           }
+                           
 
                            // PREDICTION_OFF 会话级封顶: 停止无意义直连(配合 1.1.5 的
                            // round=3 自动 TURN, 此处静默让位中继; 降频轮询保留漂移恢复可能)
-                           if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP) {
+                           if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP && !this.sessionPunchRecvEver.get()) {
                               continue;
                            }
                            anyPunchable = true;
@@ -6470,7 +6464,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
          // PREDICTION_OFF 封顶快速失败: birthday attack 风暴下避免无限空转 + 日志被刷爆。
          // 与 ZERO_RECV_FINAL_ROUND_LIMIT 正交, 此处用相同终态结论确保对端停手 + 进入 fallback。
-         if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP) {
+         if (this.sessionPredictionOffCount.get() >= PREDICTION_OFF_CAP && !this.sessionPunchRecvEver.get()) {
             VoxLinkMod.LOGGER.warn("[UdpHolePuncher] PREDICTION_OFF cap reached ({}), abort punch", this.sessionPredictionOffCount.get());
             ConnectionState.transitionTo(ConnectionState.FAILED, "PREDICTION_OFF 封顶");
             this.showConnectFailed(state, "voxlink.connection.max_cycles_exceeded");
@@ -7788,17 +7782,9 @@ private volatile long lastProfileSwitchMs = 0L;
 
                   InetSocketAddress punchTargetAddr = new InetSocketAddress(fTargetIp, fTargetPort);
 
-                  if (this.addressBlacklist.isBlacklisted(punchTargetAddr)) {
+                                    UdpHolePuncher.observeBlacklistedTarget(punchTargetAddr.getAddress(), punchTargetAddr.getPort());
 
-                     VoxLinkMod.LOGGER.info("[Connection] Target {}:{} in blacklist, skip UDP punch", fTargetIp, fTargetPort);
-
-                     finalPuncher.close();
-
-                     this.activeHolePunchers.remove("joiner");
-
-                     this.tryConnectionStep(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, 1);
-
-                  } else if (this.stunProbeResult != null && this.stunProbeResult.natType.isEasySymmetric() && state.roomInfo.isHostEasySym()) {
+                  if (this.stunProbeResult != null && this.stunProbeResult.natType.isEasySymmetric() && state.roomInfo.isHostEasySym()) {
 
                      int dualSocketCount = this.continuousRetryRound.get() > 0 ? this.punchProfile().easySymMutualRetrySocketCount : this.punchProfile().easySymMutualSocketCount;
 

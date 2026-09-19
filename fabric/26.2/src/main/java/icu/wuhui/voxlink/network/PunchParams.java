@@ -64,15 +64,8 @@ public final class PunchParams {
    public static PunchParams fromProfile(PunchProfile profile) {
       PunchParams p = new PunchParams(profile.portPredictionMaxRange, profile.punchTimeoutMs, profile.send.intervalMs, 1, false, false, null);
       PunchProfile.SymParams s = profile.sym;
-      p.sprayPortCountMin = s.hardSymSprayPortMin;
-      p.sprayPortCountMax = s.hardSymSprayPortMax;
-      p.sprayPacketsPerPort = s.hardSymPacketsPerPort;
-      p.sprayPortIntervalMs = s.hardSymPortIntervalMs;
-      p.sprayDecayNumerator = s.hardSymDecayNumerator;
-      p.sprayDecayFloor = s.hardSymDecayFloor;
-      p.bombWindow = s.easySymBombWindow;
-      p.bombRoundIntervalMs = s.easySymRoundIntervalMs;
-      p.bombDurationMs = s.easySymBombDurationMs;
+      if (s != null) {
+       p.sprayPortCountMin = s.hardSymSprayPortMin;       p.sprayPortCountMax = s.hardSymSprayPortMax;       p.sprayPacketsPerPort = s.hardSymPacketsPerPort;       p.sprayPortIntervalMs = s.hardSymPortIntervalMs;       p.sprayDecayNumerator = s.hardSymDecayNumerator;       p.sprayDecayFloor = s.hardSymDecayFloor;       p.bombWindow = s.easySymBombWindow;       p.bombRoundIntervalMs = s.easySymRoundIntervalMs;       p.bombDurationMs = s.easySymBombDurationMs;      }
       if (profile == PunchProfile.HARDSYM) {
          p.hardSymSpray = true;
       }

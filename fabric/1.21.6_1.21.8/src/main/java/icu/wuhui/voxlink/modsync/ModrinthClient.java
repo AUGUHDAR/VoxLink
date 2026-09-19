@@ -84,7 +84,16 @@ public final class ModrinthClient {
          chunk.forEach(arr::add);
          body.add("hashes", arr);
          body.addProperty("algorithm", "sha1");
-         JsonObject resp = postJson(API + "/version_files", body.toString());
+         JsonObject resp;
+         try {
+            resp = postJson(API + "/version_files", body.toString());
+         } catch (InterruptedException ie) {
+            throw ie;
+         } catch (Exception e) {
+            // 分块网络失败只损失该块（落入 unknownMods），不作废整张清单（实证 MXZD5N：单块超时全清单报废）
+            ModSyncLog.warn("version_files chunk failed ({} hashes): {}", chunk.size(), e.getMessage());
+            continue;
+         }
          if (resp == null) {
             continue;
          }
@@ -116,7 +125,16 @@ public final class ModrinthClient {
 
          sb.append(']');
          String url = API + "/projects?ids=" + URLEncoder.encode(sb.toString(), StandardCharsets.UTF_8);
-         JsonArray arr = getJsonArray(url);
+         JsonArray arr;
+         try {
+            arr = getJsonArray(url);
+         } catch (InterruptedException ie) {
+            throw ie;
+         } catch (Exception e) {
+            // 分块失败降级：元数据缺失由调用方 fail-open 处理，不作废整批
+            ModSyncLog.warn("projects chunk failed ({} ids): {}", chunk.size(), e.getMessage());
+            continue;
+         }
          if (arr == null) {
             continue;
          }

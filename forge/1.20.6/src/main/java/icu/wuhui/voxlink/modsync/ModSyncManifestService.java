@@ -5,11 +5,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.room.RoomInfo;
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
-import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -26,9 +24,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 房主侧：创建房间成功后，后台解析本地 mods → Modrinth 批量反查 →
- * 以"客户端必装"为根、沿 required 依赖走闭包（按 project_id 去重）生成清单，
- * MR 查不到的 jar 进 unknownMods 仅提示名单 → 发布到信令服务器。
+ * 房主侧：解析本地 mods → Modrinth 批量反查 → 构建两档清单（必装闭包 / 全部可识别）
+ * 缓存到本地磁盘（按 mods 状态哈希键，跨房间复用）；不再建房即上报。
+ * 房客按需经信号 mods_request 请求时，从本地缓存应答（缓存未命中则现场构建）。
  * 全程异步、失败静默降级（房间照常可用）。
  */
 public final class ModSyncManifestService {
@@ -38,60 +36,174 @@ public final class ModSyncManifestService {
       return t;
    });
    private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
-   /** 构建期间又来了新的建房请求时暂存于此，本轮完成后补一次（快速重开房间不再丢清单）。 */
-   private static volatile RoomInfo PENDING;
    /** 依赖闭包最大深度（防脏元数据成环/超深；visited 已防环，此为双保险）。 */
    private static final int MAX_DEP_DEPTH = 8;
    /** unknownMods 清单上限（信令单条消息 48KB 上限，1024 个 jar 文件名可能撑爆）。 */
    private static final int UNKNOWN_MODS_CAP = 64;
+   /** scope 取值：仅必装闭包 / 房主全部 MR 可识别模组。 */
+   public static final String SCOPE_REQUIRED = "required";
+   public static final String SCOPE_ALL = "all";
 
    private ModSyncManifestService() {
    }
 
-   /** 房主创建房间成功后的入口（fire-and-forget，绝不阻塞建房）。 */
+   /** 房主创建房间成功后的入口：确保本地缓存已构建（异步），不再上报服务器。 */
    public static void onRoomCreated(RoomInfo room) {
-      if (room == null || room.getCode() == null || room.getCode().isEmpty() || room.getToken() == null || room.getToken().isEmpty()) {
-         return;
-      }
-
-      if (!VoxLinkMod.getConfig().isHostModSyncPublish()) {
-         ModSyncLog.info("host mod-sync publish disabled, skip manifest build");
-         return;
-      }
-
-      if (!RUNNING.compareAndSet(false, true)) {
-         PENDING = room;
-         ModSyncLog.warn("previous manifest build still running, queued this round");
-         return;
-      }
-
       EXECUTOR.execute(() -> {
          try {
-            buildAndPublish(room);
-            RoomInfo next = PENDING;
-            PENDING = null;
-            if (next != null && next.getCode() != null && !next.getCode().equals(room.getCode())) {
-               try {
-                  buildAndPublish(next);
-               } catch (Throwable t) {
-                  ModSyncLog.warn("queued manifest build failed: {}", t.toString());
-               }
-            }
+            ensureCache();
          } catch (Throwable t) {
-            ModSyncLog.warn("manifest build/publish failed (room continues without modsync): {}", t.toString());
-         } finally {
-            RUNNING.set(false);
+            ModSyncLog.warn("local manifest cache build failed: {}", t.toString());
          }
       });
    }
 
-   private static void buildAndPublish(RoomInfo room) throws Exception {
+   /**
+    * 房主收到房客的按需请求（信号 mods_request）：从本地缓存取对应档清单
+    * （未命中现场构建）→ POST /room/mods/answer 回服务器。
+    */
+   public static void onModsRequest(JsonObject data) {
+      if (!VoxLinkMod.getConfig().isHostModSyncPublish()) {
+         ModSyncLog.info("host mod-sync disabled, ignore mods_request");
+         return;
+      }
+      String requestId = data.has("requestId") && data.get("requestId").isJsonPrimitive()
+         ? data.get("requestId").getAsString() : "";
+      String scope = data.has("scope") && data.get("scope").isJsonPrimitive()
+         ? data.get("scope").getAsString() : SCOPE_REQUIRED;
+      if (requestId.isEmpty()) {
+         return;
+      }
+      if (!SCOPE_ALL.equals(scope)) {
+         scope = SCOPE_REQUIRED;
+      }
+
+      RoomInfo room = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
+      if (room == null || room.getCode() == null || room.getCode().isEmpty() || room.getToken() == null || room.getToken().isEmpty()) {
+         ModSyncLog.warn("mods_request {} ignored (not hosting)", requestId);
+         return;
+      }
+      final RoomInfo hostRoom = room;
+      final String reqId = requestId;
+      final String reqScope = scope;
+      EXECUTOR.execute(() -> {
+         try {
+            JsonObject manifest = ensureCache().getAsJsonObject(reqScope);
+            var resp = VoxLinkMod.getSignalingClient()
+               .answerRoomMods(hostRoom.getCode(), hostRoom.getToken(), reqId, reqScope, manifest)
+               .get(20L, TimeUnit.SECONDS);
+            ModSyncLog.info("mods_request {} ({}) answered, success={}", new Object[]{reqId, reqScope, resp.success});
+         } catch (Throwable t) {
+            ModSyncLog.warn("answer mods_request {} failed: {}", new Object[]{reqId, t.toString()});
+         }
+      });
+   }
+
+   // ---------- 本地缓存 ----------
+
+   /** 内存缓存：mods 状态哈希 → 两档清单。 */
+   private static volatile String cachedStateHash = null;
+   private static volatile JsonObject cachedManifests = null;
+
+   /** 确保本地缓存可用（状态哈希命中直接复用；否则构建并落盘）。 */
+   private static JsonObject ensureCache() throws Exception {
+      String stateHash = computeStateHash();
+      JsonObject mem = cachedManifests;
+      if (mem != null && stateHash.equals(cachedStateHash)) {
+         return mem;
+      }
+
+      JsonObject disk = readDiskCache(stateHash);
+      if (disk != null) {
+         cachedStateHash = stateHash;
+         cachedManifests = disk;
+         ModSyncLog.info("manifest cache hit (state {})", stateHash);
+         return disk;
+      }
+
+      JsonObject built = buildBothManifests(stateHash);
+      cachedStateHash = stateHash;
+      cachedManifests = built;
+      writeDiskCache(stateHash, built);
+      return built;
+   }
+
+   /** mods 状态哈希：全部 jar 的 sha1 排序后再 sha1。内容变则缓存键变。 */
+   private static String computeStateHash() throws Exception {
+      List<Path> jars = ModSyncFileHasher.listModJars();
+      List<String> sha1s = new ArrayList<>();
+      for (Path jar : jars) {
+         try {
+            sha1s.add(ModSyncFileHasher.sha1(jar));
+         } catch (Exception ignored) {
+         }
+      }
+      java.util.Collections.sort(sha1s);
+      return ModSyncFileHasher.sha1OfBytes(String.join("\n", sha1s).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+   }
+
+   private static Path cacheFile() {
+      return ModSyncEnv.getCacheFile();
+   }
+
+   private static JsonObject readDiskCache(String stateHash) {
+      try {
+         Path f = cacheFile();
+         if (!Files.isRegularFile(f)) {
+            return null;
+         }
+         JsonObject root = com.google.gson.JsonParser
+            .parseString(Files.readString(f, java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+         if (!stateHash.equals(root.has("stateHash") && root.get("stateHash").isJsonPrimitive()
+            ? root.get("stateHash").getAsString() : "")) {
+            return null;
+         }
+         if (root.has("required") && root.get("required").isJsonObject()
+            && root.has("all") && root.get("all").isJsonObject()) {
+            return root;
+         }
+         return null;
+      } catch (Throwable t) {
+         return null;
+      }
+   }
+
+   private static void writeDiskCache(String stateHash, JsonObject manifests) {
+      try {
+         manifests.addProperty("stateHash", stateHash);
+         manifests.addProperty("builtAt", System.currentTimeMillis() / 1000L);
+         Path f = cacheFile();
+         if (f.getParent() != null) {
+            Files.createDirectories(f.getParent());
+         }
+         Path tmp = f.resolveSibling(f.getFileName().toString() + ".tmp");
+         Files.writeString(tmp, manifests.toString(), java.nio.charset.StandardCharsets.UTF_8);
+         Files.move(tmp, f, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      } catch (Throwable t) {
+         ModSyncLog.warn("manifest cache write failed: {}", t.toString());
+      }
+   }
+
+   // ---------- 构建 ----------
+
+   /**
+    * 一次扫描构建两档清单：
+    *   required = 以"客户端必装"为根、沿 required 依赖走闭包（1.1.2 起的语义，已修
+    *              元数据查询漏掉自有 mod project_id 导致根集恒空的缺陷）；
+    *   all      = 房主全部 MR 可识别模组（server-only 除外），不区分 client_side。
+    */
+   private static JsonObject buildBothManifests(String stateHash) throws Exception {
       long start = System.currentTimeMillis();
+      JsonObject required = emptyManifest();
+      JsonObject all = emptyManifest();
+      JsonObject out = new JsonObject();
+      out.add("required", required);
+      out.add("all", all);
+
       List<Path> jars = ModSyncFileHasher.listModJars();
       if (jars.isEmpty()) {
-         publish(room, emptyManifest());
-         ModSyncLog.info("no local mods, published empty manifest in {}ms", System.currentTimeMillis() - start);
-         return;
+         ModSyncLog.info("no local mods, manifests built in {}ms", System.currentTimeMillis() - start);
+         return out;
       }
 
       // 1) 本地 jar 的 sha1 → MR 版本对象（识别哪些本地文件在 Modrinth 上）
@@ -102,15 +214,12 @@ public final class ModSyncManifestService {
             String sha1 = ModSyncFileHasher.sha1(jar);
             sha1ToJarName.put(sha1, jar.getFileName().toString());
             sha1List.add(sha1);
-         } catch (IOException e) {
+         } catch (Exception e) {
             ModSyncLog.warn("hash failed {}: {}", jar.getFileName(), e.getMessage());
          }
       }
-
-      JsonObject manifest = emptyManifest();
       if (sha1List.isEmpty()) {
-         publish(room, manifest);
-         return;
+         return out;
       }
 
       Map<String, JsonObject> versionsBySha1 = ModrinthClient.versionsFromSha1(sha1List);
@@ -123,7 +232,7 @@ public final class ModSyncManifestService {
          }
       }
 
-      // project_id → 版本对象（同项目多文件取首个；哈希来自房主实际安装，天然去重后仍唯一）
+      // project_id → 版本对象（同项目多文件取首个）
       Map<String, JsonObject> versionByProject = new LinkedHashMap<>();
       Set<String> depRefs = new LinkedHashSet<>();
       for (JsonObject v : versionsBySha1.values()) {
@@ -136,12 +245,15 @@ public final class ModSyncManifestService {
          collectRequiredDepIds(v, depRefs);
       }
 
-      // 3) 项目元数据一次批量查全（自身 + 被引用的前置），避免逐层请求
-      Map<String, JsonObject> projects = ModrinthClient.projectsByIds(depRefs);
+      // 3) 项目元数据一次批量查全：自有 mod + 被引用的前置。
+      //    修复记录：1.1.2 二轮曾只查 depRefs，自有 mod 元数据缺失 → 根集 fail-open
+      //    全排除 → 必装清单恒为 0（生产日志 "0 required entries" 实锤）。
+      Set<String> projectIds = new LinkedHashSet<>(versionByProject.keySet());
+      projectIds.addAll(depRefs);
+      Map<String, JsonObject> projects = ModrinthClient.projectsByIds(projectIds);
 
-      // 4) 根集（依赖感知）：client_required 但"同时是其他房主 mod 的 required 依赖"的库类
-      //    （Architectury API / Cloth Config 等）不作根——它们是否必装由 BFS 按需决定：
-      //    只要有必装根真的依赖它们就会经闭包拉入；依赖它们的都是选装 mod 时不打扰房客。
+      // 4) required 根集（依赖感知）：client_required 但"同时是其他房主 mod 的 required
+      //    依赖"的库类不作根——它们是否必装由 BFS 按需决定。
       Set<String> depIdsOfHostMods = new HashSet<>();
       for (JsonObject v : versionsBySha1.values()) {
          depIdsOfHostMods.addAll(requiredDepIds(v));
@@ -181,8 +293,8 @@ public final class ModSyncManifestService {
          }
       }
 
-      // 6) 组装清单
-      int count = 0;
+      // 6) 组装：required=闭包结果；all=全部可识别（server-only 除外）
+      int requiredCount = 0;
       for (JsonObject version : selectedVersions) {
          String pid = str(version, "project_id");
          ModSyncEntry entry = ModSyncEntry.fromVersion(version, projects.get(pid));
@@ -190,25 +302,42 @@ public final class ModSyncManifestService {
             continue;
          }
 
-         manifest.getAsJsonArray("mods").add(entry.toJson());
-         count++;
+         required.getAsJsonArray("mods").add(entry.toJson());
+         requiredCount++;
       }
 
-      // 保护清单大小: 信令服务器单条消息有 48KB 上限, 1024 个 jar 的文件名可能撑爆。
-      // unknownMods 只用于提示, 截断到 64 条对玩家提示已足够, 损失信息仅"多 N 个 mod 无法识别"。
-      if (unknownMods.size() > UNKNOWN_MODS_CAP) {
-         JsonArray trimmed = new JsonArray();
-         for (int i = 0; i < UNKNOWN_MODS_CAP; i++) {
-            trimmed.add(unknownMods.get(i));
+      int allCount = 0;
+      for (Map.Entry<String, JsonObject> e : versionByProject.entrySet()) {
+         JsonObject meta = projects.get(e.getKey());
+         if (ModrinthClient.isServerOnly(meta)) {
+            continue;
          }
-         unknownMods = trimmed;
+
+         ModSyncEntry entry = ModSyncEntry.fromVersion(e.getValue(), meta);
+         if (entry.downloadUrl.isEmpty()) {
+            continue;
+         }
+
+         all.getAsJsonArray("mods").add(entry.toJson());
+         allCount++;
       }
-      manifest.add("unknownMods", unknownMods);
-      publish(room, manifest);
+
+      // 保护清单大小：unknownMods 只用于提示，截断到 64 条
+      JsonArray trimmedUnknown = unknownMods;
+      if (unknownMods.size() > UNKNOWN_MODS_CAP) {
+         trimmedUnknown = new JsonArray();
+         for (int i = 0; i < UNKNOWN_MODS_CAP; i++) {
+            trimmedUnknown.add(unknownMods.get(i));
+         }
+      }
+      required.add("unknownMods", trimmedUnknown);
+      all.add("unknownMods", trimmedUnknown);
+
       ModSyncLog.info(
-         "manifest ready: {} jars scanned, {} required entries, {} unknown-only, {}ms",
-         new Object[]{jars.size(), count, unknownMods.size(), System.currentTimeMillis() - start}
+         "manifests ready: {} jars, required={} all={} unknown={} state={} {}ms",
+         new Object[]{jars.size(), requiredCount, allCount, unknownMods.size(), stateHash.substring(0, 8), System.currentTimeMillis() - start}
       );
+      return out;
    }
 
    private static void collectRequiredDepIds(JsonObject version, Set<String> out) {
@@ -241,11 +370,8 @@ public final class ModSyncManifestService {
    }
 
    /**
-    * 根集判定：optional/unsupported → 否；缺失字段按"fail-open"判否——
-    * 把 Modrinth 元数据查不到的 mod 一律当必装根集会污染房客（房主端仅看 mods 目录里有就纳入）。
-    * 真正必装的 mod 通常会被其他必装 mod 的 required 前置依赖闭包重新捞回 BFS；
-    * 元数据缺失本身是异常情况，保持最小破坏面。
-    * 注意：BFS 闭包内对 projectId 的依赖仍然全量保留，这里只改"根集"。
+    * 根集判定：optional/unsupported → 否；元数据缺失按"fail-open"判否——
+    * 元数据查询失败的 mod 不作必装根（查询现已包含自有 ids，缺失属 MR 异常）。
     */
    private static boolean isClientRequiredRoot(JsonObject project, String projectId) {
       if (project == null) {
@@ -268,84 +394,5 @@ public final class ModSyncManifestService {
       m.addProperty("mcVersion", ModSyncEnv.GAME_VERSION);
       m.add("mods", new JsonArray());
       return m;
-   }
-
-   private static void publish(RoomInfo room, JsonObject manifest) throws Exception {
-      var resp = VoxLinkMod.getSignalingClient()
-         .publishModManifest(room.getCode(), room.getToken(), manifest)
-         .get(20L, java.util.concurrent.TimeUnit.SECONDS);
-      if (resp.success) {
-         ModSyncLog.info("manifest published for room {}", room.getCode());
-         // 给房主本地聊天提示: 从已发布的 manifest 里读 mods / unknownMods,
-         // 各自为空则不发; 不修改 publish 签名, 避免调用方一连串改动。
-         notifyHostFromManifest(manifest);
-      } else {
-         // 清单发布失败不影响建房；重试一次
-         Thread.sleep(3000L);
-         var retry = VoxLinkMod.getSignalingClient()
-            .publishModManifest(room.getCode(), room.getToken(), manifest)
-            .get(20L, TimeUnit.SECONDS);
-         ModSyncLog.warn("manifest publish retry success={} error={}", retry.success, retry.error);
-      }
-   }
-
-   /**
-    * 房主本地聊天提示：unknownMods / 必装条目各自为空则不发；最多取前 3 个文件名做列表,
-    * 超出加省略号。EXECUTOR 后台线程 → 用 Minecraft.execute 切到主线程调用 displayClientMessage。
-    */
-   private static void notifyHostFromManifest(JsonObject manifest) {
-      int requiredCount = manifest.has("mods") && manifest.get("mods").isJsonArray()
-         ? manifest.getAsJsonArray("mods").size() : 0;
-      JsonArray unknownMods = manifest.has("unknownMods") && manifest.get("unknownMods").isJsonArray()
-         ? manifest.getAsJsonArray("unknownMods") : null;
-      boolean hasUnknown = unknownMods != null && unknownMods.size() > 0;
-      boolean hasRequired = requiredCount > 0;
-      if (!hasUnknown && !hasRequired) {
-         return;
-      }
-
-      Minecraft mc = Minecraft.getInstance();
-      if (mc == null) {
-         return;
-      }
-
-      final int rc = requiredCount;
-      final JsonArray um = unknownMods;
-      mc.execute(() -> {
-         try {
-            Minecraft m = Minecraft.getInstance();
-            if (m.player == null) {
-               return;
-            }
-
-            if (um != null && um.size() > 0) {
-               int total = um.size();
-               StringBuilder names = new StringBuilder();
-               int shown = Math.min(3, total);
-               for (int i = 0; i < shown; i++) {
-                  if (i > 0) {
-                     names.append(", ");
-                  }
-                  names.append(um.get(i).getAsString());
-               }
-               if (total > shown) {
-                  names.append("...");
-               }
-               m.player.displayClientMessage(
-                  Component.translatable("voxlink.modsync.host_unknown",
-                     new Object[]{total, names.toString()})
-                     .withStyle(ChatFormatting.YELLOW)
-               , false);
-            }
-            if (rc > 0) {
-               m.player.displayClientMessage(
-                  Component.translatable("voxlink.modsync.host_published",
-                     new Object[]{rc})
-                     .withStyle(ChatFormatting.GREEN)
-               , false);
-            }
-         } catch (Exception ignored) {
-         }
-      });
    }
 }
