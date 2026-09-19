@@ -39,8 +39,8 @@
 | 1 | 信令 | **WS 优先**：信令通道优先走 WebSocket（`/ws`，帧协议见该文件头注释），HTTP 轮询降级为兜底；断线自动回退与恢复 | `network/SignalingWsTransport.java`、`ws.go`（服务端 `/ws` 帧协议） |
 | 2 | 打洞 | **TCP 双向 SimOpen**：UDP 对称 NAT 场景叠加 TCP 同时打开打洞 | `network/TcpHolePuncher.java`、`network/PunchStrategySelector.java` |
 | 3 | 打洞 | **漂移分级**：对端端口漂移按 NAT 分级预测（`PunchProfile`），减少盲目全端口扫射 | `network/PunchProfile.java`、`network/PunchTuner.java` |
-| 4 | 打洞 | **心跳闭环**：连接稳定窗口内掉线立即快传日志/退房补传/关服兜底（可观察行为，弱网自愈更快） | `room/ConnectionManager.java`（`startConnectionWatchdog` 一带） |
-| 5 | 打洞 | PREDICTION_OFF 上限保护（50 次/会话），到达后仅停止直连打洞的端口预测尝试；TURN/玩家中继按钮早已可见，**是否使用由玩家主动决定，绝不自动切换中继**（与 §7.5 一致） | `network/UdpHolePuncher.java` |
+| 4 | 打洞 | **心跳闭环**：桥建好后首包 watchdog 观察，链路死亡自动 `requestIceRestart`（ice_restart 能力信令）重新协商；掉线快传日志/退房补传/关服兜底 | `network/P2PBridge.java`（首包 watchdog）、`network/ReliableUdpTransport.java`（心跳判死）、`room/ConnectionManager.java`（`requestIceRestart`） |
+| 5 | 打洞 | PREDICTION_OFF 上限保护（50 次/会话），到达后仅停止直连打洞的端口预测尝试；TURN/玩家中继按钮早已可见，**是否使用由玩家主动决定，绝不自动切换中继**（与 §7.5 一致） | `room/ConnectionManager.java`（`PREDICTION_OFF_CAP` / `ZERO_RECV_FINAL_ROUND_LIMIT`） |
 | 6 | TURN | **TCP 兜底承载**：UDP 全丢（BIND 失败码 5=UDP 黑洞）时自动降级走同端口 TCP 长连接，帧格式=2 字节大端长度+同构报文；本地回环 UDP shim 对上层零侵入；绝无手动选择 | `network/TurnTcpChannel.java`、`network/TurnRelayClient.java`（`bindWithRetry`/`engageTcpFallback`） |
 | 7 | TURN | BIND 带外层重试（3 轮×5 发）+ ROLE_CONFLICT 容忍 + 保活 15s | `network/TurnRelayClient.java` |
 | 8 | 模组 | **ModSync v2 全新功能**：详见 §3 | `modsync/` 整包 |
@@ -237,6 +237,6 @@ hardSymDecayFloor=180, **maxPps=3000**（PpsLimiter 每秒发包上限）。
 
 - 打洞轮次**无上限**；仅"连续 20 轮零收包"允许判定终局；
 - PREDICTION_OFF_CAP = 50（预测关闭兜底上限，到达后转中继，由玩家决定）；
-- join_request 重发固定 1.5s 间隔；
+- join_request 由**服务器**在 `/room/join` 成功时自动注入房主（客户端无需自造直发定时器）；客户端打洞失败后的重试通过重新 join 驱动服务器重发；终局常量 `ZERO_RECV_FINAL_ROUND_LIMIT = 20`（整会话零收包），`PREDICTION_OFF_CAP = 50`（正交，管预测关闭频次），均在 `room/ConnectionManager.java`；
 - **禁止自造替代品**：上游不存在 `gradedPorts`、`punchStrategy`、简单 ±64 扫描等
   简化实现，已有的一律删除，按本表重建。
