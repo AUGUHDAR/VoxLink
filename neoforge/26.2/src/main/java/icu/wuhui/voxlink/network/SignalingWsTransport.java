@@ -37,7 +37,16 @@ public final class SignalingWsTransport {
    // 连接失败/退避档位（毫秒）
    private static final long[] BACKOFF_STEPS = {10000L, 30000L, 60000L};
    // 心跳看门狗：超过该时间未收到任何帧则主动断开重连
-   private static final long HEARTBEAT_WATCHDOG_MS = 90000L;
+   /**
+    * 静默判死阈值。半开连接（对端进程消失/NAT 映射失效但没发 FIN）下 socket 仍"可写"，
+    * 只有靠"多久没收到任何帧"才能判定。服务端 30s 一次 ping，故取 35s 留余量；
+    * 配合 10s 的检查粒度，最坏 35~45s 内发现并切回 HTTP 兜底。
+    * （旧值 90s + 30s 粒度 => 最坏 120s，表现为加入时长时间卡在"已连接到信令服务器"。）
+    */
+   private static final long HEARTBEAT_WATCHDOG_MS = 35000L;
+
+   /** 主动心跳间隔：本方每 15s 发一次 ping，对端必须回 pong，半开连接会被快速暴露。 */
+   private static final long CLIENT_PING_INTERVAL_SEC = 15L;
    // 单次连接尝试超时
    private static final long CONNECT_TIMEOUT_MS = 3000L;
 
@@ -95,9 +104,35 @@ public final class SignalingWsTransport {
          t.setDaemon(true);
          return t;
       });
-      // 心跳看门狗：每 30s 检查一次。onText/onPing/onPong 都会刷新 lastFrameAt,
-      // 因此即便服务端 30s 一次 ping (无业务文本帧) 也不会误判, 长空闲场景下 90s 阈值才生效
-      this.scheduler.scheduleAtFixedRate(this::heartbeatWatchdog, 30L, 30L, TimeUnit.SECONDS);
+      // 心跳看门狗：每 10s 检查一次。onText/onPing/onPong 都会刷新 lastFrameAt。
+      // 我方每 15s 主动 ping，对端回 pong 也刷新 lastFrameAt，因此半开连接最迟 35s 内被发现。
+      this.scheduler.scheduleAtFixedRate(this::heartbeatWatchdog, 10L, 10L, TimeUnit.SECONDS);
+      this.scheduler.scheduleAtFixedRate(this::clientPing, CLIENT_PING_INTERVAL_SEC,
+         CLIENT_PING_INTERVAL_SEC, TimeUnit.SECONDS);
+   }
+
+   /**
+    * 主动心跳：半开连接（对端已死但 socket 未报错）下 sendText 仍会"成功"，
+    * 只有主动 ping 且收不到 pong 才能暴露。失败即判死，触发重连。
+    */
+   private void clientPing() {
+      if (!isConnected()) {
+         return;
+      }
+      WebSocket ws = this.webSocket;
+      if (ws == null) {
+         return;
+      }
+      try {
+         ws.sendPing(ByteBuffer.allocate(0)).whenComplete((v, err) -> {
+            if (err != null) {
+               VoxLinkMod.LOGGER.debug("[WS] 主动 ping 发送失败: {}", err.getMessage());
+               onDisconnected();
+            }
+         });
+      } catch (Exception e) {
+         VoxLinkMod.LOGGER.debug("[WS] 主动 ping 异常: {}", e.getMessage());
+      }
    }
 
    /** 由 serverUrl 推导 /ws 端点：去掉路径与 query，scheme http→ws / https→wss，拼 /ws。 */
@@ -210,7 +245,9 @@ public final class SignalingWsTransport {
       pendingFut.whenComplete((resp, err) -> {
          this.pending.remove(id);
          if (err != null) {
-            // 超时/网络错误 → 异常完成，上层降级 HTTP
+            // 超时/网络错误 → 异常完成，上层降级 HTTP；
+            // 同时把 WS 标记为不可用进入退避，避免后续请求继续对着半开连接逐个等超时
+            markUnavailable();
             result.completeExceptionally(unwrap(err));
          } else {
             result.complete(resp);

@@ -18,7 +18,8 @@ import net.minecraft.client.Minecraft;
  * 房客侧门控：打洞前从信令服务器拉取房主必装清单 → 与本地 mods 离线 diff
  * （sha1 集合对比，客户端全程零 Modrinth API 调用）→ 有缺失时弹选择界面，
  * 下载走清单内 CDN 直链，完成后进入强制重启屏。
- * 开关关闭、旧房主（不支持 modSyncV1）、空清单时零打扰直通。
+ * 开关关闭、旧房主（不支持 modSyncV1）、空清单时直通；直通原因一律落日志，
+ * 旧房主与拉取失败另在日志面板留一行原因，空清单仅日志。
  */
 public final class ModSyncGuestService {
    private static final java.util.Set<String> GATED_THIS_LAUNCH = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -40,6 +41,9 @@ public final class ModSyncGuestService {
    });
    /** supported 但未 ready 的最长等待：5 次 × 2s（房主 MR 解析通常数秒内完成）。 */
    private static final int READY_RETRIES = 5;
+   /** 门控直通时的待播报提示：连接启动后由加入屏取出播报，避开 startDualP2P 的面板重置。 */
+   private static volatile int pendingNoteLevel = -1;
+   private static volatile String pendingNoteKey;
 
    private ModSyncGuestService() {
    }
@@ -48,6 +52,17 @@ public final class ModSyncGuestService {
    public static void clearGateFor(String roomCode) {
       if (roomCode != null) {
          GATED_THIS_LAUNCH.remove(roomCode);
+      }
+   }
+
+   /** 加入屏在连接启动后调用：播报并清掉门控直通提示（无提示时为空操作）。 */
+   public static void pushPendingGateNote() {
+      String key = pendingNoteKey;
+      int level = pendingNoteLevel;
+      pendingNoteKey = null;
+      pendingNoteLevel = -1;
+      if (key != null) {
+         icu.wuhui.voxlink.ui.UiLogBus.push(level, key);
       }
    }
 
@@ -62,6 +77,7 @@ public final class ModSyncGuestService {
    public static void bypass(String roomCode) {
       if (roomCode != null) {
          BYPASSED_THIS_LAUNCH.add(roomCode);
+         ModSyncLog.info("gate: player bypassed, room={}", roomCode);
       }
    }
 
@@ -113,18 +129,33 @@ public final class ModSyncGuestService {
 
       final String fetchScope = ModSyncManifestService.SCOPE_ALL.equals(scope)
          ? ModSyncManifestService.SCOPE_ALL : ModSyncManifestService.SCOPE_REQUIRED;
+      // 重置在途提示；gate 入口留痕供真机定谳
+      pendingNoteKey = null;
+      pendingNoteLevel = -1;
+      ModSyncLog.info("gate: room={} scope={}", roomCode, fetchScope);
       EXECUTOR.execute(() -> {
-         JsonObject manifest = fetchManifestWithRetry(roomCode, fetchScope);
+         FetchResult fetched = fetchManifestWithRetry(roomCode, fetchScope);
          if (BYPASSED_THIS_LAUNCH.contains(roomCode)) {
             // 玩家已在获取页点"直接进入"或取消：丢弃结果，绝不弹窗打断已开始的加入
             return;
          }
          Minecraft mc = Minecraft.getInstance();
-         if (manifest == null) {
-            // 拉取失败、房主不支持或清单尚未发布：不打扰，直接继续正常加入流程
+         if (fetched.outcome != FetchOutcome.MANIFEST) {
+            // 直通原因留痕；两类挂面板提示
+            ModSyncLog.info("gate skip: {}", fetched.outcome);
+            if (fetched.outcome == FetchOutcome.UNSUPPORTED) {
+               pendingNoteLevel = 0;
+               pendingNoteKey = "voxlink.logui.modsync_unsupported";
+            } else if (fetched.outcome == FetchOutcome.NOT_READY) {
+               pendingNoteLevel = 2;
+               pendingNoteKey = "voxlink.logui.modsync_fetch_failed";
+            }
+
             mc.execute(proceed);
             return;
          }
+
+         JsonObject manifest = fetched.manifest;
 
          try {
             DiffResult diff = computeDiff(manifest);
@@ -228,8 +259,21 @@ public final class ModSyncGuestService {
       return !BYPASSED_THIS_LAUNCH.contains(roomCode);
    }
 
-   /** 返回 null 表示"无需处理"（不支持/拉取失败/未就绪超时/空清单）。 */
-   private static JsonObject fetchManifestWithRetry(String roomCode, String scope) {
+   /** 清单拉取结果原因：区分静默直通的具体路径，供日志与玩家提示使用。 */
+   private enum FetchOutcome { MANIFEST, UNSUPPORTED, EMPTY, NOT_READY, BYPASSED }
+
+   private static final class FetchResult {
+      final FetchOutcome outcome;
+      final JsonObject manifest;
+
+      FetchResult(FetchOutcome outcome, JsonObject manifest) {
+         this.outcome = outcome;
+         this.manifest = manifest;
+      }
+   }
+
+   /** 拉取结果：MANIFEST=拿到清单；其余为直通原因（不支持/空清单/未就绪或失败/玩家跳过）。 */
+   private static FetchResult fetchManifestWithRetry(String roomCode, String scope) {
       boolean sawNotReady = false;
       boolean sawTransient = false;
       // 弱网实测：信令 8 秒超时很常见。超时/网络类失败必须与"未就绪"一样重试，
@@ -241,7 +285,7 @@ public final class ModSyncGuestService {
       for (int attempt = 0; attempt < maxAttempts && System.currentTimeMillis() < deadline; attempt++) {
          // 玩家已点"直接进入"或关弹窗：立刻退出循环，丢弃本次结果
          if (BYPASSED_THIS_LAUNCH.contains(roomCode)) {
-            return null;
+            return new FetchResult(FetchOutcome.BYPASSED, null);
          }
 
          try {
@@ -256,13 +300,13 @@ public final class ModSyncGuestService {
                   || err.contains("UNKNOWN_ENDPOINT") || err.contains("INVALID_ENDPOINT");
                if (authoritative) {
                   ModSyncLog.warn("getRoomMods failed (authoritative): {} {}", resp.error, resp.message);
-                  return null;
+                  return new FetchResult(FetchOutcome.NOT_READY, null);
                }
 
                sawTransient = true;
                ModSyncLog.warn("getRoomMods transient ({}/{}): {}", new Object[]{attempt + 1, maxAttempts, resp.error});
                if (!cancellableSleep(roomCode, 1500L)) {
-                  return null;
+                  return new FetchResult(FetchOutcome.BYPASSED, null);
                }
 
                continue;
@@ -270,7 +314,7 @@ public final class ModSyncGuestService {
 
             boolean supported = resp.data.has("supported") && resp.data.get("supported").getAsBoolean();
             if (!supported) {
-               return null;
+               return new FetchResult(FetchOutcome.UNSUPPORTED, null);
             }
 
             boolean ready = resp.data.has("ready") && resp.data.get("ready").getAsBoolean();
@@ -285,24 +329,24 @@ public final class ModSyncGuestService {
                   ? resp.data.getAsJsonArray("unknownMods")
                   : new com.google.gson.JsonArray());
                // mods 为空时不再一律静默: 若 unknownMods 非空, 仍返回 m 让 computeDiff 展示给玩家,
-               // 面板会提示"无法识别/需手动安装"的 mod 列表; 两者都为空才是真正的空清单, 才 return null。
+               // 面板会提示"无法识别/需手动安装"的 mod 列表; 两者都为空才是真正的空清单, 才直通。
                if (m.getAsJsonArray("mods").size() == 0 && m.getAsJsonArray("unknownMods").size() == 0) {
-                  return null;
+                  return new FetchResult(FetchOutcome.EMPTY, null);
                }
 
-               return m;
+               return new FetchResult(FetchOutcome.MANIFEST, m);
             }
 
             sawNotReady = true;
             if (!cancellableSleep(roomCode, 2000L)) {
-               return null;
+               return new FetchResult(FetchOutcome.BYPASSED, null);
             }
          } catch (java.util.concurrent.TimeoutException te) {
             sawTransient = true;
             ModSyncLog.warn("getRoomMods timeout ({}/{})", new Object[]{attempt + 1, maxAttempts});
          } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-            return null;
+            return new FetchResult(FetchOutcome.NOT_READY, null);
          } catch (Exception e) {
             sawTransient = true;
             ModSyncLog.warn("manifest fetch error: {}", e.toString());
@@ -315,7 +359,7 @@ public final class ModSyncGuestService {
          GATED_THIS_LAUNCH.remove(roomCode);
       }
 
-      return null;
+      return new FetchResult(FetchOutcome.NOT_READY, null);
    }
 
    private static String joinTitles(DiffResult diff) {

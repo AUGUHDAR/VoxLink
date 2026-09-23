@@ -59,6 +59,8 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
    private boolean includeLogs = true;
    private boolean submitting = false;
    private boolean submitted = false;
+   /** 创建成功的工单号（成功态展示用） */
+   private String createdTicketId;
    /** 限频截止时间戳（毫秒）：被服务端 429 后据此禁用提交按钮并显示剩余时间 */
    private long rateLimitedUntilMs = 0L;
    private String statusMessage = "";
@@ -171,7 +173,12 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
    private void drawStatus(GuiGraphics graphics, int centerX) {
       int y = this.statusY;
       if (this.submitted) {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.success").getString(), centerX, y, VoxLinkColors.SUCCESS);
+         if (this.createdTicketId != null && !this.createdTicketId.isEmpty()) {
+            this.drawCenteredClipped(graphics,
+               Component.translatable("voxlink.ticket.created", this.createdTicketId).getString(), centerX, y, VoxLinkColors.SUCCESS);
+         } else {
+            this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.success").getString(), centerX, y, VoxLinkColors.SUCCESS);
+         }
          y += 10;
          this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.rate_note").getString(), centerX, y, VoxLinkColors.MUTED);
          return;
@@ -412,17 +419,18 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
       this.submitButton.active = false;
       String url = VoxLinkMod.getConfig().getServerUrl();
       this.statusMessage = "";
-      FeedbackUploader.submit(url, desc, buildClientInfo(), this.attachments, logs, result -> Minecraft.getInstance().execute(() -> {
+      icu.wuhui.voxlink.network.TicketClient.submit(url, desc, buildClientInfo(), files, result -> Minecraft.getInstance().execute(() -> {
          this.submitting = false;
          if (result.success) {
             this.submitted = true;
+            this.createdTicketId = result.ticketId;
             this.attachments.clear();
             this.rateLimitedUntilMs = 0L;
          } else if ("RATE_LIMITED".equals(result.errorCode)) {
             int ra = result.retryAfterSec > 0 ? result.retryAfterSec : 600;
             this.rateLimitedUntilMs = System.currentTimeMillis() + ra * 1000L;
             this.statusMessage = "";
-         } else if ("FEEDBACK_TOO_LARGE".equals(result.errorCode)) {
+         } else if ("TICKET_TOO_LARGE".equals(result.errorCode)) {
             this.setStatusKey("voxlink.fb.too_large", VoxLinkColors.ERROR);
          } else {
             this.statusMessage = Component.translatable("voxlink.fb.err_failed").getString() + " (" + result.errorCode + ")";

@@ -194,7 +194,7 @@ public class SignalingClient {
          body.addProperty("hostIpv6", hostIpv6);
       }
 
-      body.addProperty("loader", "fabric");
+      body.addProperty("loader", VoxLinkConstants.LOADER);
       body.addProperty("clientProtocolVersion", 7);
       JsonArray capsArr = new JsonArray();
 

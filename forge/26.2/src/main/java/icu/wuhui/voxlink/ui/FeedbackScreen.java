@@ -26,25 +26,31 @@ public class FeedbackScreen extends VoxLinkScreenBase {
    protected void init() {
       super.init();
       int centerX = this.width / 2;
-      int colY = this.height / 2 - 52;
+      int colY = this.height / 2 - 64;
       this.addRenderableWidget(
-         Button.builder(Component.translatable("voxlink.fb.site"), button -> Minecraft.getInstance().gui.setScreen(new FeedbackFormScreen(this, this.parent)))
+         Button.builder(Component.translatable("voxlink.ticket.my"), button ->
+               Minecraft.getInstance().gui.setScreen(new TicketListScreen(new FeedbackScreen(this.parent))))
             .bounds(centerX - 100, colY, 200, 20)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("voxlink.fb.github"), button -> openBrowser(GITHUB_ISSUES_URL))
+         Button.builder(Component.translatable("voxlink.fb.site"), button -> Minecraft.getInstance().gui.setScreen(new FeedbackFormScreen(this, this.parent)))
             .bounds(centerX - 100, colY + 24, 200, 20)
             .build()
       );
       this.addRenderableWidget(
-         Button.builder(Component.translatable("voxlink.fb.gitee"), button -> openBrowser(GITEE_ISSUES_URL))
+         Button.builder(Component.translatable("voxlink.fb.github"), button -> openBrowser(GITHUB_ISSUES_URL))
             .bounds(centerX - 100, colY + 48, 200, 20)
             .build()
       );
       this.addRenderableWidget(
+         Button.builder(Component.translatable("voxlink.fb.gitee"), button -> openBrowser(GITEE_ISSUES_URL))
+            .bounds(centerX - 100, colY + 72, 200, 20)
+            .build()
+      );
+      this.addRenderableWidget(
          Button.builder(Component.translatable("voxlink.back"), button -> this.onClose())
-            .bounds(centerX - 100, colY + 80, 200, 20)
+            .bounds(centerX - 100, colY + 96, 200, 20)
             .build()
       );
    }

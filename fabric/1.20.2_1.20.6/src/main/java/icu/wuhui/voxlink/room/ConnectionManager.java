@@ -152,6 +152,9 @@ public class ConnectionManager {
    private final SignalingClient signalingClient;
 
    private final ScheduledExecutorService scheduler;
+   private static final int JOIN_TRANSIENT_MAX_ATTEMPTS = 3;
+   private static final long[] JOIN_RETRY_BACKOFF_MS = new long[]{1500L, 3000L};
+   private final java.util.concurrent.atomic.AtomicInteger joinAttemptGeneration = new java.util.concurrent.atomic.AtomicInteger();
 
    private final ExecutorService punchExecutor;
 
@@ -12846,6 +12849,8 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
 
 
    public void killAllConnectionAttempts() {
+      this.joinAttemptGeneration.incrementAndGet();
+
 
       boolean alreadyWon = this.connectionWon.get();
 
@@ -12969,6 +12974,8 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
 
 
    public void killAllConnectionAttempts(String reason) {
+      this.joinAttemptGeneration.incrementAndGet();
+
 
       if (reason == null) {
 
@@ -13970,9 +13977,43 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
 
 
    private CompletableFuture<Void> startVoxLinkP2P(String roomCode, String password) {
+      int gen = this.joinAttemptGeneration.incrementAndGet();
+      return this.startVoxLinkP2PAttempt(roomCode, password, 1, gen);
+   }
 
-      return this.roomManager.joinRoom(roomCode, password).thenAccept(r -> {});
+   private CompletableFuture<Void> startVoxLinkP2PAttempt(String roomCode, String password, int attempt, int gen) {
+      long t0 = System.currentTimeMillis();
+      return this.roomManager.joinRoom(roomCode, password).handle((r, e) -> {
+         if (e == null) {
+            VoxLinkMod.LOGGER.info("[joinRoom] attempt {}/{} OK in {}ms", new Object[]{attempt, JOIN_TRANSIENT_MAX_ATTEMPTS, System.currentTimeMillis() - t0});
+            return CompletableFuture.<Void>completedFuture(null);
+         }
 
+         Throwable cause = e;
+         while ((cause instanceof java.util.concurrent.CompletionException || cause instanceof java.util.concurrent.ExecutionException) && cause.getCause() != null) {
+            cause = cause.getCause();
+         }
+
+         boolean retryable = cause instanceof RoomManager.TransientException;
+         VoxLinkMod.LOGGER.warn("[joinRoom] attempt {}/{} failed in {}ms: {} — {}", new Object[]{attempt, JOIN_TRANSIENT_MAX_ATTEMPTS, System.currentTimeMillis() - t0, cause.getClass().getSimpleName(), cause.getMessage()});
+         if (!retryable || attempt >= JOIN_TRANSIENT_MAX_ATTEMPTS || gen != this.joinAttemptGeneration.get()) {
+            icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.join_failed", String.valueOf(cause.getMessage()));
+            return CompletableFuture.<Void>failedFuture(cause);
+         }
+
+         long delay = JOIN_RETRY_BACKOFF_MS[Math.min(attempt - 1, JOIN_RETRY_BACKOFF_MS.length - 1)];
+         icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.join_retry", new Object[]{attempt + 1, JOIN_TRANSIENT_MAX_ATTEMPTS});
+         VoxLinkMod.LOGGER.warn("[joinRoom] retrying in {}ms (attempt {}/{})", new Object[]{delay, attempt + 1, JOIN_TRANSIENT_MAX_ATTEMPTS});
+         CompletableFuture<Void> next = new CompletableFuture<>();
+         this.scheduler.schedule(() -> this.startVoxLinkP2PAttempt(roomCode, password, attempt + 1, gen).whenComplete((v2, e2) -> {
+            if (e2 != null) {
+               next.completeExceptionally(e2);
+            } else {
+               next.complete(null);
+            }
+         }), delay, TimeUnit.MILLISECONDS);
+         return next;
+      }).thenCompose(f -> f);
    }
 
 

@@ -90,6 +90,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private volatile ScheduledExecutorService connectionScheduler;
    private ScheduledFuture<?> connectionFuture;
    private int monitorTicks = 0;
+   private int joinNoResponseTicks = -1;
    private static final int MAX_MONITOR_TICKS = 360;
    private static final int BRIDGE_HANDSHAKE_TICKS = 60;
    private int bridgeEstablishedAtTick = -1;
@@ -331,6 +332,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
          && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode)) {
          this.modSyncChecking = true;
+         VoxLinkMod.LOGGER.info("[ModSync] gate: waiting for scope selection, room={}", this.roomCode);
          this.voxlinkStatusText = Component.translatable("voxlink.modsync.scope_hint").getString();
          this.voxlinkStatusColor = VoxLinkColors.WARNING;
          this.clearOurWidgets();
@@ -423,6 +425,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          return null;
       });
       this.startConnectionMonitor();
+      // 门控直通提示在面板重置后播报
+      icu.wuhui.voxlink.modsync.ModSyncGuestService.pushPendingGateNote();
    }
 
    private int colorForStatus(String statusKey) {
@@ -538,6 +542,24 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                      }
 
                      if (!AttemptingJoinScreen.this.joinCompleted) {
+                        if (AttemptingJoinScreen.this.joinNoResponseTicks < 0) {
+                           AttemptingJoinScreen.this.joinNoResponseTicks = AttemptingJoinScreen.this.monitorTicks;
+                        }
+
+                        if (AttemptingJoinScreen.this.monitorTicks - AttemptingJoinScreen.this.joinNoResponseTicks >= 60) {
+                           monitorActive.set(false);
+                           mc.execute(() -> {
+                              if (mc.screen == AttemptingJoinScreen.this) {
+                                 AttemptingJoinScreen.this.onFailed(Component.translatable("voxlink.connection.join_no_response").getString());
+                              }
+                           });
+                           if (AttemptingJoinScreen.this.connectionScheduler != null && !AttemptingJoinScreen.this.connectionScheduler.isShutdown()) {
+                              AttemptingJoinScreen.this.connectionScheduler.shutdownNow();
+                           }
+
+                           return;
+                        }
+
                         if (AttemptingJoinScreen.this.connectionFuture != null) {
                            AttemptingJoinScreen.this.connectionFuture.cancel(false);
                         }
@@ -564,6 +586,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
                      return;
                   }
+
+                  AttemptingJoinScreen.this.joinNoResponseTicks = -1;
 
                   if (roomInfo.getLocalBridgePort() > 0) {
                      if (AttemptingJoinScreen.this.bridgeEstablishedAtTick < 0) {

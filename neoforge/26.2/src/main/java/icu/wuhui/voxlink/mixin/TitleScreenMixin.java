@@ -25,6 +25,15 @@ public abstract class TitleScreenMixin extends Screen {
 
    @Inject(method = "init", at = @At("TAIL"), require = 0)
    private void onInit(CallbackInfo ci) {
+      icu.wuhui.voxlink.network.TicketClient.pollOnceIfNeeded(() -> {
+         Minecraft mc = Minecraft.getInstance();
+         mc.execute(() -> {
+            if (icu.wuhui.voxlink.network.TicketClient.hasUnread()
+               && mc.gui.screen() instanceof TitleScreen) {
+               mc.gui.setScreen(mc.gui.screen());
+            }
+         });
+      });
       int buttonWidth = Math.max(20, Math.min(50, this.width / 4 - 10));
       int x = Math.min(this.width / 2 + 104, this.width - buttonWidth - 10);
       this.addRenderableWidget(
@@ -32,5 +41,14 @@ public abstract class TitleScreenMixin extends Screen {
             .bounds(x, this.height / 4 + 48, buttonWidth, 20)
             .build()
       );
+      // 左上角工单未读弹窗：点击进我的工单
+      if (icu.wuhui.voxlink.network.TicketClient.hasUnread()) {
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("voxlink.ticket.notify"), button ->
+                  Minecraft.getInstance().setScreenAndShow(new icu.wuhui.voxlink.ui.TicketListScreen(this)))
+               .bounds(8, 8, 100, 18)
+               .build()
+         );
+      }
    }
 }

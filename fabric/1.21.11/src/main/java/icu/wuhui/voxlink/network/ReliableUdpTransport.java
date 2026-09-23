@@ -41,6 +41,8 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final int HEADER_SIZE = 11;
    private static final int PAYLOAD_LEN_SIZE = 2;
    private static final int MAX_PAYLOAD = 1400;
+   // 保 FEC 帧(22头+块+4MAC)不超节点 1400
+   private static final int TURN_MAX_SEND_CHUNK = 1374;
    private static final int WINDOW_SIZE = 64;
    private static final long RETRANSMIT_TIMEOUT_MS = 800L;
    private static final int KEEPALIVE_INTERVAL_S = 1;
@@ -249,6 +251,12 @@ public class ReliableUdpTransport implements AutoCloseable {
       this.onVoiceData = c;
    }
 
+   /** 按当前主路径取发送分块上限 */
+   private int currentMaxSendChunk() {
+      UdpPath pri = this.primaryPath;
+      return pri != null && pri.codec != null ? TURN_MAX_SEND_CHUNK : MAX_PAYLOAD;
+   }
+
    public void sendVoice(byte[] payload) {
       // 构造 socket 检查放宽: TURN->直连平滑切换后旧 TURN socket 已关闭,
       // 但 primaryPath 已 promote 到直连 socket——只看 this.socket 会让语音永久哑掉(审计 P2-4)
@@ -256,7 +264,7 @@ public class ReliableUdpTransport implements AutoCloseable {
       boolean anySendable = (this.socket != null && !this.socket.isClosed())
          || (primary != null && primary.socket != null && !primary.socket.isClosed());
       if (payload == null || !anySendable) return;
-      if (payload.length > 1400) {
+      if (payload.length > this.currentMaxSendChunk()) {
          LOGGER.debug("[ReliableUdp] Voice payload too large ({}), dropped", payload.length);
          return;
       }
@@ -424,7 +432,20 @@ public class ReliableUdpTransport implements AutoCloseable {
       }
    }
 
-   private void processDatagram(byte[] buf, int packetLen, DatagramPacket packet, UdpPath path) {
+   private void processDatagram(byte[] rx, int rxLen, DatagramPacket packet, UdpPath path) {
+      // TURN 路径先剥外层信封再解析
+      byte[] buf = rx;
+      int packetLen = rxLen;
+      if (path.codec != null) {
+         byte[] frame = path.codec.decode(rx, rxLen);
+         if (frame == null) {
+            return;
+         }
+
+         buf = frame;
+         packetLen = frame.length;
+      }
+
       if (packetLen >= 3 && buf[0] == MAGIC[0] && buf[1] == MAGIC[1]) {
          // punchAuthV1：认证模式下所有帧必须携带有效截断 MAC，失败一律丢弃；
          // 因此 maybeRebindRemote / 状态机只可能被认证源驱动
@@ -1011,7 +1032,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          int pos = offset;
 
          while (pos < offset + length) {
-            int chunkLen = Math.min(1400, offset + length - pos);
+            int chunkLen = Math.min(this.currentMaxSendChunk(), offset + length - pos);
             byte[] chunk = new byte[chunkLen];
             System.arraycopy(data, pos, chunk, 0, chunkLen);
             pos += chunkLen;

@@ -676,6 +676,7 @@ public class RoomManager {
                   if (!response.success) {
                      if (TRANSIENT_ERRORS.contains(response.error)) {
                         this.currentRoom.compareAndSet(PENDING, null);
+                        VoxLinkMod.LOGGER.warn("[joinRoom] transient failure {}: {} (retryable)", response.error, response.message);
                         throw new RoomManager.TransientException(response.error + ": " + response.message);
                      }
 
@@ -687,6 +688,7 @@ public class RoomManager {
                         errMsg = response.error + ": " + response.message;
                      }
 
+                     VoxLinkMod.LOGGER.warn("[joinRoom] join rejected {}: {}", response.error, response.message);
                      throw new RuntimeException(errMsg);
                   } else {
                      if (response.data == null) {
@@ -2146,7 +2148,7 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       }
    }
 
-   private static class TransientException extends RuntimeException {
+   static class TransientException extends RuntimeException {
       TransientException(String message) {
          super(message);
       }
