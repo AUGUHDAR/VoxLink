@@ -448,7 +448,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.signaling_connecting");
          return;
       }
       if (System.currentTimeMillis() - this.lastFrameAt.get() > HEARTBEAT_WATCHDOG_MS) {
-         VoxLinkMod.LOGGER.debug("[WS] 心跳看门狗：90s 内无收帧，主动断开重连");
+         VoxLinkMod.LOGGER.debug("[WS] 心跳看门狗：{}ms 内无收帧，主动断开重连", HEARTBEAT_WATCHDOG_MS);
          WebSocket ws = this.webSocket;
          if (ws != null) {
             try {

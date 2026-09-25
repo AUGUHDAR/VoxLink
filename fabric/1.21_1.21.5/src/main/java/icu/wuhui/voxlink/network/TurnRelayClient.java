@@ -207,6 +207,8 @@ public class TurnRelayClient {
             info.name = n.has("name") ? n.get("name").getAsString() : info.id;
             info.host = n.has("host") ? n.get("host").getAsString() : "";
             info.port = n.has("port") ? n.get("port").getAsInt() : 37000;
+            // 标准 TURN（RFC 5766）端口：节点启用双栈时由 WS 上报透出，>0 表示可用
+            info.stdTurnPort = n.has("stdTurnPort") ? n.get("stdTurnPort").getAsInt() : 0;
             if (!info.id.isEmpty() && !info.host.isEmpty() && info.port > 0) {
                nodes.add(info);
             }
@@ -291,6 +293,7 @@ public class TurnRelayClient {
       public String name;
       public String host;
       public int port;
+      public int stdTurnPort;
    }
 
    public static class ProbeResult {

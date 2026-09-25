@@ -40,9 +40,12 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
    private static final int FIELD_W = 220;
    private static final int DESC_H = 56;
    private static final int MIN_DESC_H = 40;
-   private static final int MAX_TIP_EXAMPLES = 4;
+   private static final int MAX_TIP_EXAMPLES = 3;
+   /** 提示区固定行数：引导标题 + 建议反馈 + 问题反馈 + 写作引导 */
+   private static final int FIXED_TIP_LINES = 4;
    private static final int TIP_LINE_H = 10;
-   private static final int STATUS_RESERVE = 22;   // 状态行预留高度
+   /** 状态区预留高度：文件两行 + 大小/超限行 + 状态消息行 */
+   private static final int STATUS_RESERVE = 40;
    private static final int TITLE_Y = 15;
    private static final int MAX_FILE_LINES = 2;
    private final Screen chooser;   // 选择界面（FeedbackScreen）
@@ -128,7 +131,7 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
       this.descH = DESC_H;
       this.tipExamples = MAX_TIP_EXAMPLES;
       while (true) {
-         int bottom = 30 + this.descH + 6 + 20 + 4 + 20 + 8 + (2 + this.tipExamples) * TIP_LINE_H;
+         int bottom = 30 + this.descH + 6 + 20 + 4 + 20 + 8 + (FIXED_TIP_LINES + this.tipExamples) * TIP_LINE_H;
          if (bottom <= submitY - STATUS_RESERVE) {
             break;
          }
@@ -145,13 +148,19 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
       this.rowY = 30 + this.descH + 6;
       this.logY = this.rowY + 24;
       this.tipsY = this.logY + 24;
-      this.statusY = this.tipsY + (2 + this.tipExamples) * TIP_LINE_H + 4;
+      // 状态区起点必须等于提示区实际绘制行数之后（drawTips 画 FIXED_TIP_LINES + tipExamples 行），
+      // 否则文件列表会叠到提示文案最后两行上
+      this.statusY = this.tipsY + (FIXED_TIP_LINES + this.tipExamples) * TIP_LINE_H + 4;
    }
 
-   /** 发前自检提示与示例 */
+   /** 引导：这里既能提建议也能报问题；其后是原有的写作引导与示例 */
    private void drawTips(GuiGraphicsExtractor graphics, int centerX) {
       int y = this.tipsY;
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.tips_title").getString(), centerX, y, VoxLinkColors.WARNING);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.guide_title").getString(), centerX, y, VoxLinkColors.WARNING);
+      y += TIP_LINE_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.guide_sug").getString(), centerX, y, VoxLinkColors.GRAY);
+      y += TIP_LINE_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.guide_bug").getString(), centerX, y, VoxLinkColors.GRAY);
       y += TIP_LINE_H;
       this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.tips_body").getString(), centerX, y, VoxLinkColors.GRAY);
       y += TIP_LINE_H;
@@ -232,10 +241,13 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
          this.submitButton.active = true;
       }
 
+      // 状态消息跟随状态区游标：固定位置会在提示区加行后与文件列表重叠；
+      // 上限压在提交按钮上方 10px，保证任何内容组合都不侵入按钮
+      int msgY = Math.min(y + 2, this.height - 58);
       if (!this.statusMessage.isEmpty()) {
-         this.drawCenteredClipped(graphics, this.statusMessage, centerX, this.height - 66, this.statusColor);
+         this.drawCenteredClipped(graphics, this.statusMessage, centerX, msgY, this.statusColor);
       } else if (this.submitting) {
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.submitting").getString(), centerX, this.height - 66, VoxLinkColors.MUTED);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.submitting").getString(), centerX, msgY, VoxLinkColors.MUTED);
       }
    }
 

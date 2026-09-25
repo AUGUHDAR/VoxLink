@@ -60,6 +60,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
    public ModSyncSelectScreen(
       String roomCode,
+      String scope,
       List<ModSyncEntry> downloadable,
       List<String> unresolvable,
       List<String> versionDiff,
@@ -67,7 +68,10 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       Runnable onProceed,
       Runnable onCancel
    ) {
-      super(Component.translatable("voxlink.modsync.title"));
+      // 标题按 scope 区分：此前写死"必装模组检查"，玩家选"获取房主全部模组"后
+      // 进入的页面也叫必装检查，看起来像 scope 没生效。
+      super(Component.translatable(
+         ModSyncManifestService.SCOPE_ALL.equals(scope) ? "voxlink.modsync.title_all" : "voxlink.modsync.title"));
       this.roomCode = roomCode;
       this.downloadable = downloadable;
       this.unresolvable = unresolvable;

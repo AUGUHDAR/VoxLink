@@ -193,6 +193,11 @@ public class ReliableUdpTransport implements AutoCloseable {
       LOGGER.warn("[ReliableUdp] peer sends unauthenticated frames x{}, TURN interop downgrade to plaintext", this.consecutiveAuthDrops);
       this.authKeyBytes = null;
       this.authMac = null;
+      // 降级竞速修复：auth 模式期间一直在丢对端帧，heartbeatFailStreak 可能已逼近/达到判死阈值，
+      // 若不重置，降级生效的同一拍就会被 One-way dead 判死（实证 68UFAY/WHFJNB：降级与判死仅差毫秒级）。
+      // 明文通道刚建立，给它一个完整的心跳窗口重新计数。
+      this.heartbeatFailStreak = 0;
+      this.lastRecvTime = System.currentTimeMillis();
    }
 
    /** 出帧统一出口：认证模式追加 MAC，否则原样返回（旧线上格式）。 */

@@ -194,6 +194,7 @@ public final class ModSyncGuestService {
                   Minecraft.getInstance().gui.setScreen(
                      new ModSyncSelectScreen(
                         roomCode,
+                        fetchScope,
                         diff.downloadable,
                         diff.unresolvable,
                         diff.versionDiff,

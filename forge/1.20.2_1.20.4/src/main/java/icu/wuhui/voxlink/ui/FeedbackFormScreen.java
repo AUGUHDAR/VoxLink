@@ -40,7 +40,9 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
    private static final int FIELD_W = 220;
    private static final int DESC_H = 56;
    private static final int MIN_DESC_H = 40;
-   private static final int MAX_TIP_EXAMPLES = 4;
+   private static final int MAX_TIP_EXAMPLES = 3;
+   /** 提示区固定行数：引导标题 + 建议反馈 + 问题反馈 + 写作引导 */
+   private static final int FIXED_TIP_LINES = 4;
    private static final int TIP_LINE_H = 10;
    private static final int STATUS_RESERVE = 22;   // 状态行预留高度
    private static final int TITLE_Y = 15;
@@ -125,7 +127,7 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
       this.descH = DESC_H;
       this.tipExamples = MAX_TIP_EXAMPLES;
       while (true) {
-         int bottom = 30 + this.descH + 6 + 20 + 4 + 20 + 8 + (2 + this.tipExamples) * TIP_LINE_H;
+         int bottom = 30 + this.descH + 6 + 20 + 4 + 20 + 8 + (FIXED_TIP_LINES + this.tipExamples) * TIP_LINE_H;
          if (bottom <= submitY - STATUS_RESERVE) {
             break;
          }
@@ -145,10 +147,14 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
       this.statusY = this.tipsY + (2 + this.tipExamples) * TIP_LINE_H + 4;
    }
 
-   /** 发前提示：要求 + 低价值示例 */
+   /** 引导：这里既能提建议也能报问题；其后是原有的写作引导与示例 */
    private void drawTips(GuiGraphics graphics, int centerX) {
       int y = this.tipsY;
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.tips_title").getString(), centerX, y, VoxLinkColors.WARNING);
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.guide_title").getString(), centerX, y, VoxLinkColors.WARNING);
+      y += TIP_LINE_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.guide_sug").getString(), centerX, y, VoxLinkColors.GRAY);
+      y += TIP_LINE_H;
+      this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.guide_bug").getString(), centerX, y, VoxLinkColors.GRAY);
       y += TIP_LINE_H;
       this.drawCenteredClipped(graphics, Component.translatable("voxlink.fb.tips_body").getString(), centerX, y, VoxLinkColors.GRAY);
       y += TIP_LINE_H;

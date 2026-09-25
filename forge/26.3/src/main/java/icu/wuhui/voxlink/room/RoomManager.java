@@ -832,12 +832,16 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       }
    }
 
-   public void leaveRoom() {
-      this.leaveRoom("用户主动离开");
-   }
+   // 无参 leaveRoom() 已删除：它把所有内部竞态路径的离开都硬编码成"用户主动离开"，
+   // 日志甩锅给用户且无法排查。所有调用点必须写明真实原因（detail 会进入 ConnState 日志）。
 
    public void leaveRoom(String detail) {
-      if (this.connectionManager.isConnectionInHandoff() && "用户主动离开".equals(detail)) {
+      // handoff 宽限防线：连接桥刚建立（含陶瓦通道）、MC 尚未真正连上的 5 秒窗口内，
+      // 忽略内部路径的 leaveRoom（LoggingOut 幽灵/迟到回调曾拆掉陶瓦进程导致 refused）。
+      // 豁免用户在界面上点的显式操作——点取消必须立即生效，不能让玩家觉得按钮是死的。
+      boolean userInitiated = "取消加入".equals(detail) || "返回上一界面".equals(detail);
+      if (!userInitiated && this.connectionManager.isConnectionInHandoff()) {
+         VoxLinkMod.LOGGER.warn("[RoomManager] leaveRoom({}) ignored: connection in handoff grace window", detail);
          return;
       }
 
@@ -1025,8 +1029,8 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       });
    }
 
-   public void closeRoom() {
-      this.leaveRoom();
+   public void closeRoom(String detail) {
+      this.leaveRoom(detail);
    }
 
    public void showRoomInfo(CommandSourceStack source) {
@@ -1472,6 +1476,9 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
                               if ("SERVER_403".equals(response.error) || "SERVER_404".equals(response.error)) {
                                  VoxLinkMod.LOGGER.warn("Server temp error ({}), not counted as heartbeat fail", response.error);
                                  this.heartbeatFailCount.decrementAndGet();
+                                 // 服务器有应答即链路活着：若处于降级态（轮询已被取消）必须恢复轮询，
+                                 // 否则限流/CDN 抖动期间进入降级后会因软错误分支永不退出而信号黑洞
+                                 this.exitSignalingDegradedIfAny();
                               }
 
                               if (fails >= 8 && !this.signalingDegraded) {
@@ -1492,6 +1499,10 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
                         }
 
                         this.heartbeatFailCount.set(0);
+                        // 限流/CDN 5xx 说明链路本身可达：若处于降级态（轮询已被取消）必须恢复轮询。
+                        // 轮询自身对 429/5xx 有指数退避（backoffSignalPollInterval），不会打爆；
+                        // 否则降级后遇到持续限流将永不退出，信号黑洞直到重进房间
+                        this.exitSignalingDegradedIfAny();
                         long newInterval = Math.min(this.currentHeartbeatInterval * 2L, 30L);
                         if (response.retryAfter > 0) {
                            newInterval = Math.max(newInterval, response.retryAfter);

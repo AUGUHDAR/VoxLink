@@ -76,8 +76,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       boolean downloading = showDownloadRow && TerracottaManager.isDownloading();
       boolean platformNote = !platformSupported;
 
-      int topRows = currentRoom == null && !isInSingleplayerWorld() ? 3 : 1;
-      topRows += 1; // 官网按钮恒为最后一行
+      int topRows = currentRoom == null && !isInSingleplayerWorld() ? 2 : 1;
       int sectionH = topRows * L_ROW + (topRows - 1) * L_GAP;
       // 头部安全线：无房间只让标题(20..29)；有房间要避开房号(36..45)/陶瓦码(50..59)，
       // 非房主还有连接状态两行(64..79)
@@ -88,19 +87,30 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       this.lySloganText = Integer.MIN_VALUE;
       this.lyPlatformNote = Integer.MIN_VALUE;
 
-      for (int attempt = 0; attempt < 2; attempt++) {
+      // 降级顺序：0) 带装饰带  1) 去装饰带  2) 去装饰带且未装陶瓦时再砍配置行
+      int maxAttempt = showDownloadRow ? 2 : 1;
+      for (int attempt = 0; attempt <= maxAttempt; attempt++) {
          int back = this.height - L_BOTTOM_MARGIN;
          int relay = back - L_STEP;
          int uploadLog = relay - L_STEP;
          boolean decor = currentRoom == null && attempt == 0;
-         int config = decor ? uploadLog - L_STEP - L_DECOR_H : uploadLog - L_STEP;
-         int downloadRow = showDownloadRow ? config - L_STEP : Integer.MIN_VALUE;
+         boolean dropConfig = attempt >= 2 && showDownloadRow;
+         int config = dropConfig ? Integer.MIN_VALUE
+               : (decor ? uploadLog - L_STEP - L_DECOR_H : uploadLog - L_STEP);
+         int stackBase = dropConfig ? uploadLog : config;
+         int downloadRow = showDownloadRow ? stackBase - L_STEP : Integer.MIN_VALUE;
 
-         int stackTop = showDownloadRow ? downloadRow : config;
-         int reserve = (downloading ? L_PROGRESS_RESERVE : 0) + (platformNote ? L_PLATFORM_NOTE_RESERVE : 0);
-         int limit = stackTop - reserve;
+         int stackTop = showDownloadRow ? downloadRow : stackBase;
+         // 官网/反馈行是常驻入口：恒占底部栈之上的一行，任何分辨率都不裁掉；
+         // 下载中时进度文字占据下载行上方 13px，官网/反馈行整体上移一行给它让位
+         int websiteRow = stackTop - L_STEP;
+         if (showDownloadRow && downloading) {
+            websiteRow = downloadRow - 13 - L_GAP - L_ROW;
+         }
+         int reserve = (downloading ? L_PROGRESS_RESERVE + L_ROW + L_GAP : 0) + (platformNote ? L_PLATFORM_NOTE_RESERVE : 0);
+         int limit = Math.min(stackTop - reserve, websiteRow - L_GAP);
          int ideal = Math.min(this.height / 2 - 30, limit - sectionH);
-         if (ideal >= headerFloor || attempt == 1) {
+         if (ideal >= headerFloor || attempt == maxAttempt) {
             this.decorVisible = decor;
             this.lyBack = back;
             this.lyRelay = relay;
@@ -109,12 +119,20 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             this.lyDownloadRow = downloadRow;
             // 头部文字与第一行按钮至少留 4px 间距，避免极端矮屏时头部文字与按钮粘连
             this.lyTopStart = Math.max(headerFloor + 4, ideal);
-            this.lyWebsite = this.lyTopStart + sectionH - L_ROW;
-            // 极矮屏强制提交时官网行会与下载行同位叠合（240 高实测同 y=116）：
-            // 裁掉官网行保下载行——下载是更关键的 CTA（与"装饰先裁"同一准则）
-            if (showDownloadRow && this.lyDownloadRow != Integer.MIN_VALUE && this.lyWebsite >= this.lyDownloadRow - L_ROW) {
-               this.lyWebsite = Integer.MIN_VALUE;
+            // 官网/反馈行常驻，且绝不与陶瓦下载行/进度文字重叠：
+            // 首选紧贴底部栈上方；顶部组被兜底抬高时顺延到其下方；顺延会压到下载行则退回顶部组下方最小间距
+            int wy = Math.max(websiteRow, this.lyTopStart + sectionH - L_ROW + L_STEP);
+            if (showDownloadRow && wy + L_ROW > downloadRow) {
+               wy = Math.max(websiteRow, this.lyTopStart + sectionH - L_ROW + L_GAP);
             }
+
+            if (showDownloadRow && downloading && wy + L_ROW > downloadRow - 13 - L_GAP) {
+               // 下载中最终保护：进度文字带（downloadRow-13 起）之上不再容按钮，
+               // 宁可收紧与顶部组的间距也不叠进度文字
+               wy = Math.max(websiteRow, Math.min(wy, downloadRow - 13 - L_GAP - L_ROW));
+            }
+
+            this.lyWebsite = wy;
             if (decor) {
                this.lySloganText = uploadLog - 14;
                this.lyHintText = uploadLog - 26;
@@ -125,7 +143,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             }
 
             if (platformNote) {
-               this.lyPlatformNote = config - 14;
+               this.lyPlatformNote = stackBase - 14;
             }
 
             break;
@@ -267,11 +285,13 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
          this.cancelDownloadBtn = null;
       }
 
-      this.addRenderableWidget(
-         Button.builder(Component.translatable("voxlink.terracotta.config"), button -> Minecraft.getInstance().gui.setScreen(new TerracottaConfigScreen(this)))
-            .bounds(centerX - 100, this.lyConfig, 200, 20)
-            .build()
-      );
+      if (this.lyConfig != Integer.MIN_VALUE) {
+         this.addRenderableWidget(
+            Button.builder(Component.translatable("voxlink.terracotta.config"), button -> Minecraft.getInstance().gui.setScreen(new TerracottaConfigScreen(this)))
+               .bounds(centerX - 100, this.lyConfig, 200, 20)
+               .build()
+         );
+      }
       boolean uploadLogOn = VoxLinkMod.getConfig().isLogUploadEnabled();
       Button uploadLogBtn = Button.builder(
             Component.translatable("voxlink.log_upload.toggle", new Object[]{Component.translatable(uploadLogOn ? "voxlink.log_upload.on" : "voxlink.log_upload.off")}),
@@ -422,6 +442,27 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                   this.drawCenteredClipped(graphics, detail.toString(), centerX, modeY + 11, VoxLinkColors.MUTED, maxWidth);
                }
             }
+         }
+
+         // 信令断线可视提示：数据面"已连接"不代表信令活着。降级期间房间事件（加入请求/信号）收不到，
+         // 必须把原因显示出来，而不是让玩家对着"已连接 awa"发呆。房主房客都显示。
+         if (VoxLinkMod.getRoomManager().isSignalingDegraded()) {
+            int badgeY = modeY + 11;
+            if (!currentRoom.isHost()) {
+               ConnectionState csNow = ConnectionState.getCurrent();
+               if (csNow != ConnectionState.CONNECTED && csNow != ConnectionState.IDLE && csNow != ConnectionState.FAILED) {
+                  badgeY = modeY + 22;
+               }
+            }
+
+            this.drawCenteredClipped(
+               graphics,
+               Component.translatable("voxlink.signaling.degraded_badge").getString(),
+               centerX,
+               badgeY,
+               VoxLinkColors.WARNING,
+               maxWidth
+            );
          }
       } else if (this.decorVisible) {
          if (this.lyHintText != Integer.MIN_VALUE) {

@@ -56,6 +56,7 @@ public class SignalingClient {
       Map.entry("relay_list", "/relay/list"),
       Map.entry("relay_allocate", "/relay/allocate"),
       Map.entry("relay_release", "/relay/release"),
+      Map.entry("relay_stdturn_cred", "/relay/stdturn/cred"),
       Map.entry("publish_mod_manifest", "/room/mods/publish"),
       Map.entry("get_room_mods", "/room/mods"),
       Map.entry("request_room_mods", "/room/mods/request"),
@@ -439,6 +440,12 @@ public class SignalingClient {
    public CompletableFuture<SignalingClient.ApiResponse> relayRelease(JsonObject body) {
       body.addProperty("action", "relay_release");
       return this.postOnce(this.buildPath("relay_release"), body, 5000L);
+   }
+
+   /** 标准 TURN 总控：签发 TURN REST 时间窗凭证（RFC 5766 节点 :3478 Allocate 用）。 */
+   public CompletableFuture<SignalingClient.ApiResponse> relayStdTurnCred(JsonObject body) {
+      body.addProperty("action", "relay_stdturn_cred");
+      return this.postOnce(this.buildPath("relay_stdturn_cred"), body, 5000L);
    }
 
    public CompletableFuture<SignalingClient.ApiResponse> getCategories() {

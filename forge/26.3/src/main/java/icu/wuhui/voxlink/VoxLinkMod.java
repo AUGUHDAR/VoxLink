@@ -66,11 +66,11 @@ public class VoxLinkMod {
         var dispatcher = event.getDispatcher();
         dispatcher.register(literal("voxlink")
                 .then(literal("leave").executes(ctx -> {
-                    if (roomManager != null) roomManager.leaveRoom();
+                    if (roomManager != null) roomManager.leaveRoom("/voxlink leave 命令");
                     return 1;
                 }))
                 .then(literal("close").executes(ctx -> {
-                    if (roomManager != null) roomManager.closeRoom();
+                    if (roomManager != null) roomManager.closeRoom("/voxlink close 命令");
                     return 1;
                 }))
                 .then(literal("info").executes(ctx -> {
@@ -87,7 +87,7 @@ public class VoxLinkMod {
             VoxLinkMod.LOGGER.info("Built-in server stopped, leaving room (network kept)");
             LanHostRegistry.clear();
             if (roomManager != null && roomManager.isInRoom()) {
-                roomManager.leaveRoom();
+                roomManager.leaveRoom("集成服务器停止");
             }
         }
     }

@@ -50,52 +50,75 @@ public class PeerServer {
 
     public static synchronized int start() {
         if (httpServer != null) return port;
-        try {
-            httpServer = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-            peerExecutor = newVirtualThreadExecutor();
-            httpServer.setExecutor(peerExecutor);
-            httpServer.createContext("/info", exchange -> {
-                String query = exchange.getRequestURI().getQuery();
-                String token = null;
-                if (query != null) {
-                    for (String param : query.split("&")) {
-                        String[] kv = param.split("=", 2);
-                        if (kv.length == 2 && "token".equals(kv[0])) {
-                            token = java.net.URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
-                            break;
+        // HTTP-Dispatcher 线程的 daemon 属性继承创建线程。若从 Render thread（非 daemon）创建，
+        // MC 关闭后 JVM 自然退出会永远等待这个 idle 的 dispatcher 线程，
+        // 15s 后被 ClientShutdownWatchdog 判死生成 crash report（启动器报错，1.1.0 之前就有）。
+        // 且"等待非 daemon 线程"阶段 shutdown hook 不会执行，doShutdown 里的 PeerServer.stop() 救不了场。
+        // 必须在 daemon 线程里 create+start，让 dispatcher 继承 daemon。
+        final java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(1);
+        final int[] result = {-1};
+        Thread creator = new Thread(null, () -> {
+            try {
+                httpServer = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+                peerExecutor = newVirtualThreadExecutor();
+                httpServer.setExecutor(peerExecutor);
+                httpServer.createContext("/info", exchange -> {
+                    String query = exchange.getRequestURI().getQuery();
+                    String token = null;
+                    if (query != null) {
+                        for (String param : query.split("&")) {
+                            String[] kv = param.split("=", 2);
+                            if (kv.length == 2 && "token".equals(kv[0])) {
+                                token = java.net.URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
+                                break;
+                            }
                         }
                     }
-                }
-                RoomInfo room = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
-                // 安全修复：token 比较改常量时间（防 HTTP 接口 timing 侧信道逐字节猜测房间令牌）
-                boolean tokenValid = room != null && token != null
-                        && MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), room.getToken().getBytes(StandardCharsets.UTF_8));
-                if (!tokenValid) {
-                    byte[] err = "{\"error\":\"unauthorized\"}".getBytes(StandardCharsets.UTF_8);
-                    exchange.getResponseHeaders().set("Content-Type", "application/json");
-                    exchange.sendResponseHeaders(403, err.length);
-                    try (OutputStream os = exchange.getResponseBody()) {
-                        os.write(err);
+                    RoomInfo room = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
+                    // 安全修复：token 比较改常量时间（防 HTTP 接口 timing 侧信道逐字节猜测房间令牌）
+                    boolean tokenValid = room != null && token != null
+                            && MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), room.getToken().getBytes(StandardCharsets.UTF_8));
+                    if (!tokenValid) {
+                        byte[] err = "{\"error\":\"unauthorized\"}".getBytes(StandardCharsets.UTF_8);
+                        exchange.getResponseHeaders().set("Content-Type", "application/json");
+                        exchange.sendResponseHeaders(403, err.length);
+                        try (OutputStream os = exchange.getResponseBody()) {
+                            os.write(err);
+                        }
+                        return;
                     }
-                    return;
-                }
-                JsonObject info = buildInfo();
-                byte[] data = GSON.toJson(info).getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.sendResponseHeaders(200, data.length);
-                try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(data);
-                }
-            });
-            httpServer.start();
-            port = httpServer.getAddress().getPort();
-            refreshCache();
-            LOGGER.info("Peer server started, port {}", port);
-            return port;
-        } catch (IOException e) {
-            LOGGER.error("Peer server start failed: {}", e.getMessage());
+                    JsonObject info = buildInfo();
+                    byte[] data = GSON.toJson(info).getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, data.length);
+                    try (OutputStream os = exchange.getResponseBody()) {
+                        os.write(data);
+                    }
+                });
+                httpServer.start();
+                port = httpServer.getAddress().getPort();
+                refreshCache();
+                result[0] = port;
+                LOGGER.info("Peer server started, port {}", port);
+            } catch (IOException e) {
+                LOGGER.error("Peer server start failed: {}", e.getMessage());
+                result[0] = -1;
+            } finally {
+                ready.countDown();
+            }
+        }, "voxlink-peer-starter");
+        creator.setDaemon(true);
+        creator.start();
+        try {
+            if (!ready.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                LOGGER.error("Peer server start timed out");
+                return -1;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             return -1;
         }
+        return result[0];
     }
 
     public static synchronized void stop() {

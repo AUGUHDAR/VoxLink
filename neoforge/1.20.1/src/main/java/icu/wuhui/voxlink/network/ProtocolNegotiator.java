@@ -22,7 +22,13 @@ public final class ProtocolNegotiator {
    public static final String CAP_OVERLAY_AUTH_V1 = "overlayAuthV1";
    /** ModSync v1：房主支持在创建房间后发布"必装 Mod 清单"，房客打洞前拉取。 */
    public static final String CAP_MOD_SYNC_V1 = "modSyncV1";
-   public static final Set<String> CURRENT_CAPABILITIES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList("relay", "ice_restart", "continuous_retry", CAP_PUNCH_AUTH_V1, CAP_OVERLAY_AUTH_V1, CAP_MOD_SYNC_V1)));
+   /**
+    * 标准 TURN v1（RFC 5766）：双方均声明时 TURN 中继走节点 :3478 标准协议
+    * （各自 Allocate + 信令交换 relay 地址 + ChannelBind/ChannelData）；
+    * 任一端旧版自动回落自定义协议 v1（:37000 BIND/DATA），线上字节格式互不影响。
+    */
+   public static final String CAP_STD_TURN_V1 = "stdTurnV1";
+   public static final Set<String> CURRENT_CAPABILITIES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList("relay", "ice_restart", "continuous_retry", CAP_PUNCH_AUTH_V1, CAP_OVERLAY_AUTH_V1, CAP_MOD_SYNC_V1, CAP_STD_TURN_V1)));
 
    private ProtocolNegotiator() {
    }
@@ -51,6 +57,11 @@ public final class ProtocolNegotiator {
    /** 房主侧能力是否声明 punchAuthV1（加入方视角）。 */
    public static boolean hostSupportsPunchAuth(RoomInfo room) {
       return room != null && !room.isHostLegacy() && room.getHostCapabilities().contains(CAP_PUNCH_AUTH_V1);
+   }
+
+   /** 房主侧能力是否声明 stdTurnV1（加入方视角，决定 TURN 走标准协议还是自定义协议）。 */
+   public static boolean hostSupportsStdTurn(RoomInfo room) {
+      return room != null && !room.isHostLegacy() && room.getHostCapabilities().contains(CAP_STD_TURN_V1);
    }
 
    /** 对端是否声明 overlayAuthV1。 */
