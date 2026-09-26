@@ -2961,7 +2961,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
       if (this.connectionWon.get() || this.connectionCycleActive.get()) {
          this.applyLocalNatClass(this.classifyLocalNat(), "probe_done");
-         this.applyRemoteNatClass(this.classifyRemoteNat(state), "probe_done");
+         this.applyRemoteNatClass(this.classifyRemoteNatLogged(state), "probe_done");
          PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
          this.switchPunchProfile(recommended, "probe_done_" + this.localNatClass + "x" + this.remoteNatClass);
 
@@ -4344,7 +4344,7 @@ private volatile long lastProfileSwitchMs = 0L;
                       if (this.localNatClass != newLocal) {
                          VoxLinkMod.LOGGER.info("[HostPunchInfo] Update localNat {} -> {} (multi-socket symmetric detected, delta={})", new Object[]{this.localNatClass, newLocal, hostPunchSocketDelta});
                          if (this.applyLocalNatClass(newLocal, "multi_socket_sym")) {
-                            this.applyRemoteNatClass(this.classifyRemoteNat(fState), "multi_socket_sym");
+                            this.applyRemoteNatClass(this.classifyRemoteNatLogged(fState), "multi_socket_sym");
                          }
 
                          // 用新 NAT 类重算硬场景档位，确保硬档仍走 V100 而非被降级为 AGGRESSIVE/DEFAULT
@@ -5338,7 +5338,7 @@ private volatile long lastProfileSwitchMs = 0L;
                                  VoxLinkMod.LOGGER
                                     .info("[ReversePunch] Update localNat {} -> {} (reverse socket symmetric detected)", this.localNatClass, newLocal);
                                  if (this.applyLocalNatClass(newLocal, "reverse_socket_sym")) {
-                                    this.applyRemoteNatClass(this.classifyRemoteNat(fState), "reverse_socket_sym");
+                                    this.applyRemoteNatClass(this.classifyRemoteNatLogged(fState), "reverse_socket_sym");
                                  }
 
                                  // 用新 NAT 类重算硬场景档位，确保硬档仍走 V100 而非被降级为 AGGRESSIVE/DEFAULT
@@ -6367,6 +6367,47 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
 
+   // 对端"自报的 NAT 串"与"我们自己观测到的 NatClass"不一致时留一条痕（只记录，不参与任何判定）。
+   // 为什么不直接把自报串接进 classifyRemoteNat：那是别人客户端给的数，一旦谎报 full_cone，
+   // recommendProfile 就会从 AGGRESSIVE 掉到 FAST_LANE（6s 超时 / 15 轮 / range 20）—— 实打实的连通率退步。
+   // 先让 1.1.9 自己量出"报对 / 报错"的比例，再决定要不要按"观测优先、自报只兜底"接进去。
+   private final Set<String> remoteNatMismatchLogged = new HashSet<>();
+
+   private NatClass classifyRemoteNatLogged(RoomManager.RoomState state) {
+      NatClass observed = this.classifyRemoteNat(state);
+      if (state != null && state.roomInfo != null) {
+         NatClass reported = reportedNatClass(state.roomInfo.getNatType());
+         if (reported != observed && this.remoteNatMismatchLogged.add(reported + "->" + observed)) {
+            // 同一 (自报->观测) 组合本局只报一次：classifyRemoteNat 在探测/轮询/反向打洞多处被调
+            VoxLinkMod.LOGGER.info(
+               "[NatClass] remote report differs: reported={} (raw={}) observed={} — 模板选择仍按观测",
+               new Object[]{reported, state.roomInfo.getNatType(), observed}
+            );
+         }
+      }
+
+      return observed;
+   }
+
+   // 只认无歧义的探测值。open/moderate/strict 这类早期 API 串一律算 UNKNOWN：
+   // moderate 既可能是受限锥也可能是对称，猜错方向的代价由打洞策略承担，不在这里替它下结论。
+   private static NatClass reportedNatClass(String raw) {
+      if (raw != null && !raw.isEmpty()) {
+         String k = raw.toLowerCase(java.util.Locale.ROOT);
+         if (k.endsWith("_cone")) {
+            return NatClass.CONE;
+         } else if (k.startsWith("symmetric_easy")) {
+            return NatClass.EASY_SYM;
+         } else if (k.equals("symmetric")) {
+            return NatClass.HARD_SYM;
+         } else {
+            return NatClass.UNKNOWN;
+         }
+      } else {
+         return NatClass.UNKNOWN;
+      }
+   }
+
    private NatClass classifyRemoteNat(RoomManager.RoomState state) {
 
       if (state != null && state.roomInfo != null) {
@@ -6551,7 +6592,7 @@ private volatile long lastProfileSwitchMs = 0L;
                }
 
                this.applyLocalNatClass(this.classifyLocalNat(), "cycle_start");
-               this.applyRemoteNatClass(this.classifyRemoteNat(state), "cycle_start");
+               this.applyRemoteNatClass(this.classifyRemoteNatLogged(state), "cycle_start");
 
                PunchProfile recommended;
 
@@ -7533,7 +7574,7 @@ private volatile long lastProfileSwitchMs = 0L;
             NatClass newLocal = this.stunProbeResult != null && this.stunProbeResult.natType.isEasySymmetric() ? NatClass.EASY_SYM : NatClass.HARD_SYM;
             VoxLinkMod.LOGGER.info("[Connection] Update localNat {} -> {} (punch socket symmetric detected)", this.localNatClass, newLocal);
             if (this.applyLocalNatClass(newLocal, "punch_socket_sym")) {
-               this.applyRemoteNatClass(this.classifyRemoteNat(state), "punch_socket_sym");
+               this.applyRemoteNatClass(this.classifyRemoteNatLogged(state), "punch_socket_sym");
             }
 
             PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
