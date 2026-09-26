@@ -973,6 +973,13 @@ public class ConnectionManager {
 
          if (this.lastProfileSwitchMs != 0L && now - this.lastProfileSwitchMs < 20000L) {
 
+            // 节流丢弃必须留痕：28 个会话日志里 recommendProfile 命中 108 次，
+            // 却只有 54 次 Instance switch —— 差值全被这里静默 return 吞掉，
+            // 于是"模板有没有生效"从日志上根本区分不出是判定不给力还是被节流挡住。
+            VoxLinkMod.LOGGER.info(
+               "[PunchProfile] switch dropped by 20s throttle: wanted {}, {}ms left in cooldown, staying on {}",
+               new Object[]{target.name, 20000L - (now - this.lastProfileSwitchMs), this.activePunchProfile.name}
+            );
             return;
 
          }

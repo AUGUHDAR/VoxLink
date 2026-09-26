@@ -273,15 +273,90 @@ public final class PunchProfile {
          + ")";
    }
 
+   // 打洞日志里唯一能看到"本次实际生效参数"的字段（UdpHolePuncher / ConnectionManager 共 10 处调用），
+   // 原来只报 timeout/cycles/range 三项，改完模板是否真的换了配方看不出来。
+   // 现在列全部与 DEFAULT 不同的字段：与 DEFAULT 完全一致的模板只输出 "=DEFAULT"，
+   // 一眼就能看出这次跑的到底是配方不同的模板，还是一个没被拆开的副本。
    public String describeInstance() {
-      return this.name
-         + "(timeout="
-         + this.punchTimeoutMs
-         + "ms, cycles="
-         + this.firewallDetectCycles
-         + ", range="
-         + this.portPredictionMaxRange
-         + ")";
+      StringBuilder d = new StringBuilder();
+      diff(d, "timeoutMs", this.punchTimeoutMs, DEFAULT.punchTimeoutMs);
+      diff(d, "detectCycles", this.firewallDetectCycles, DEFAULT.firewallDetectCycles);
+      diff(d, "range", this.portPredictionMaxRange, DEFAULT.portPredictionMaxRange);
+      diff(d, "progRanges", java.util.Arrays.toString(this.progressiveRanges), java.util.Arrays.toString(DEFAULT.progressiveRanges));
+      diff(d, "cyclesPerRange", this.cyclesPerRange, DEFAULT.cyclesPerRange);
+      diff(d, "easySymDualSockets", this.easySymDualSocketCount, DEFAULT.easySymDualSocketCount);
+      diff(d, "easySymDualRange", this.easySymDualPortRange, DEFAULT.easySymDualPortRange);
+      diff(d, "defaultRange", this.defaultPortRange, DEFAULT.defaultPortRange);
+      diff(d, "wideRange", this.widePortRange, DEFAULT.widePortRange);
+      diff(d, "maxRange", this.maxPortRange, DEFAULT.maxPortRange);
+      diff(d, "minRange", this.minPortRange, DEFAULT.minPortRange);
+      diff(d, "easySymRange", this.easySymPortRange, DEFAULT.easySymPortRange);
+      diff(d, "hostMultiSockets", this.hostMultiSocketCount, DEFAULT.hostMultiSocketCount);
+      diff(d, "hostMultiMinSockets", this.hostMultiMinSocketCount, DEFAULT.hostMultiMinSocketCount);
+      diff(d, "hostMultiBaseSockets", this.hostMultiBaseSocketCount, DEFAULT.hostMultiBaseSocketCount);
+      diff(d, "hardSymSockets", this.hardSymSocketCount, DEFAULT.hardSymSocketCount);
+      diff(d, "birthdaySockets", this.birthdaySocketCount, DEFAULT.birthdaySocketCount);
+      diff(d, "joinerSymSockets", this.joinerSymSocketCount, DEFAULT.joinerSymSocketCount);
+      diff(d, "relaySockets", this.relaySocketCount, DEFAULT.relaySocketCount);
+      diff(d, "joinerMultiRange", this.joinerMultiPortRange, DEFAULT.joinerMultiPortRange);
+      diff(d, "easySymMutualSockets", this.easySymMutualSocketCount, DEFAULT.easySymMutualSocketCount);
+      diff(d, "easySymMutualRetrySockets", this.easySymMutualRetrySocketCount, DEFAULT.easySymMutualRetrySocketCount);
+      diff(d, "coneBackupRange", this.coneBackupPortRange, DEFAULT.coneBackupPortRange);
+      diff(d, "stunSockets", this.socketStunCount, DEFAULT.socketStunCount);
+      diff(d, "sockCreateGapMs", this.socketCreateIntervalMs, DEFAULT.socketCreateIntervalMs);
+      diff(d, "hostRoundTimeoutMs", this.hostRoundTimeoutMs, DEFAULT.hostRoundTimeoutMs);
+      diff(d, "reverseWindowSec", this.reverseWindowSec, DEFAULT.reverseWindowSec);
+      diff(d, "connTimeoutSec", this.connectionTimeoutSec, DEFAULT.connectionTimeoutSec);
+      diff(d, "symConnTimeoutSec", this.symmetricConnectionTimeoutSec, DEFAULT.symmetricConnectionTimeoutSec);
+      diff(d, "maxAttempts", this.punchMaxAttempts, DEFAULT.punchMaxAttempts);
+      diff(d, "retryDelayMs", this.punchRetryDelayMs, DEFAULT.punchRetryDelayMs);
+      diff(d, "maxCycles", this.maxCycles, DEFAULT.maxCycles);
+      diff(d, "maxSymCycles", this.maxSymCycles, DEFAULT.maxSymCycles);
+      diff(d, "fallbackCycles", this.fallbackCycles, DEFAULT.fallbackCycles);
+      diff(d, "send.intervalMs", this.send.intervalMs, DEFAULT.send.intervalMs);
+      diff(d, "send.sockTimeoutMs", this.send.socketTimeoutMs, DEFAULT.send.socketTimeoutMs);
+      diff(d, "send.extraWaitMs", this.send.extraWaitMs, DEFAULT.send.extraWaitMs);
+      diff(d, "send.extraWaitLongMs", this.send.extraWaitLongMs, DEFAULT.send.extraWaitLongMs);
+      diff(d, "send.jitterBaseMs", this.send.jitterBaseMs, DEFAULT.send.jitterBaseMs);
+      diff(d, "send.jitterRangeMs", this.send.jitterRangeMs, DEFAULT.send.jitterRangeMs);
+      diff(d, "send.minRounds", this.send.minRounds, DEFAULT.send.minRounds);
+      diff(d, "send.minPass", this.send.minPass, DEFAULT.send.minPass);
+      diff(d, "send.sleepShortMs", this.send.sleepShortMs, DEFAULT.send.sleepShortMs);
+      diff(d, "send.sleepLongMs", this.send.sleepLongMs, DEFAULT.send.sleepLongMs);
+      diff(d, "send.sweepWindow", this.send.sweepWindowSize, DEFAULT.send.sweepWindowSize);
+      // 构造函数里每个模板的 sym 都被赋成同一个 RECIPE，所以这一段恒等于 SHARED_RECIPE：
+      // 这就是"8 个模板共用一份对称喷洒配方"的现场证据，拆开后这里才会开始出差异。
+      if (this.sym == DEFAULT.sym) {
+         if (d.length() > 0) d.append(", ");
+         d.append("sym=SHARED_RECIPE");
+      } else {
+         diff(d, "sym.easySymBombSockets", this.sym.easySymBombSockets, DEFAULT.sym.easySymBombSockets);
+         diff(d, "sym.easySymBombWindow", this.sym.easySymBombWindow, DEFAULT.sym.easySymBombWindow);
+         diff(d, "sym.easySymRoundMs", this.sym.easySymRoundIntervalMs, DEFAULT.sym.easySymRoundIntervalMs);
+         diff(d, "sym.easySymBombDurMs", this.sym.easySymBombDurationMs, DEFAULT.sym.easySymBombDurationMs);
+         diff(d, "sym.sprayPortMin", this.sym.hardSymSprayPortMin, DEFAULT.sym.hardSymSprayPortMin);
+         diff(d, "sym.sprayPortMax", this.sym.hardSymSprayPortMax, DEFAULT.sym.hardSymSprayPortMax);
+         diff(d, "sym.packetsPerPort", this.sym.hardSymPacketsPerPort, DEFAULT.sym.hardSymPacketsPerPort);
+         diff(d, "sym.portIntervalMs", this.sym.hardSymPortIntervalMs, DEFAULT.sym.hardSymPortIntervalMs);
+         diff(d, "sym.decayNumerator", this.sym.hardSymDecayNumerator, DEFAULT.sym.hardSymDecayNumerator);
+         diff(d, "sym.decayFloor", this.sym.hardSymDecayFloor, DEFAULT.sym.hardSymDecayFloor);
+         diff(d, "sym.maxPps", this.sym.maxPps, DEFAULT.sym.maxPps);
+      }
+      return this.name + "(" + (d.length() == 0 ? "=DEFAULT" : d.toString()) + ")";
+   }
+
+   private static void diff(StringBuilder d, String key, int value, int base) {
+      if (value != base) {
+         if (d.length() > 0) d.append(", ");
+         d.append(key).append('=').append(value);
+      }
+   }
+
+   private static void diff(StringBuilder d, String key, String value, String base) {
+      if (!value.equals(base)) {
+         if (d.length() > 0) d.append(", ");
+         d.append(key).append('=').append(value);
+      }
    }
 
    public static final class SendParams {
