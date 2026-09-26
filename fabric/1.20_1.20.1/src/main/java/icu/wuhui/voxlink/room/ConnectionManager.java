@@ -10900,38 +10900,10 @@ private volatile long lastProfileSwitchMs = 0L;
 
             if (requestingPeer != null && requestingPeer.mappedIp != null && requestingPeer.mappedPort > 0) {
 
-               List<RoomInfo.PeerInfo> candidates = new ArrayList<>();
-
-
-
-               for (RoomInfo.PeerInfo p : state.roomInfo.getPeers()) {
-
-                  if (!p.clientId.equals(requestingClientId)
-
-                     && p.mappedIp != null
-
-                     && p.mappedPort > 0
-
-                     && this.activeUdpTransports.get(p.clientId) != null
-
-                     && !this.isRelayPeerFailed(p.clientId)) {
-
-                     String nt = p.natType;
-
-                     if (nt != null && !nt.contains("sym") && !nt.contains("strict") && !nt.equals("unknown") && ProtocolNegotiator.supportsRelay(p)) {
-
-                        candidates.add(p);
-
-                     }
-
-                  }
-
-               }
-
-
-
                // 候选池=本房间以外开了中继且非对称 NAT 的人（2026-09-26 裁决）：
-               // 自家成员不再互为中继，上面的同房筛选结果一律不用，统一取全局池
+               // 自家成员不再互为中继，统一取全局池。
+               // 这里原本还留着一段"同房成员筛候选"的循环——它的唯一消费者是当年
+               // `if (candidates.isEmpty())` 那个分支，改成纯跨房后结果再没人读，属于白算，删掉。
                this.fetchGlobalRelayCandidates(state, requestingClientId, requestingPeer);
 
             } else {

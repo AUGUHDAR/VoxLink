@@ -465,12 +465,15 @@ public class ReliableUdpTransport implements AutoCloseable {
          }
 
          byte type = buf[2];
+         // 源地址重绑只看 packet.getAddress()/getPort()，不碰帧体，所以放在长度门之外：
+         // 原来它跟着 frameMinLen 走，11~12B 的 DATA、11~13B 的 FEC_XOR 就不再更新对端地址，
+         // 玩家中途被 CGNAT 重映射端口时会白等一轮超时。
+         this.maybeRebindRemote(packet, path);
          if (type != 1 && type != 2) {
             // 帧长下界按类型取：DATA 含 payloadLen(需 13B)、FEC_XOR 还含 count(需 14B)。
             // 一律用 11B 会让短帧越界读，TURN 路径抛异常即被判死整条隧道（11 字节裸包=远程拆链）。
             int frameMinLen = type == 9 ? 14 : (type == 3 ? 13 : 11);
             if (packetLen >= frameMinLen) {
-               this.maybeRebindRemote(packet, path);
                int seq = readInt32(buf, 3);
                int ack = readInt32(buf, 7);
                switch (type) {
@@ -526,7 +529,8 @@ public class ReliableUdpTransport implements AutoCloseable {
                }
             }
          } else {
-            this.maybeRebindRemote(packet, path);
+            // 这里原来还有一次 maybeRebindRemote：上一步已经把它提到长度门之外、
+            // 对每种帧型统一调一次，留着就是同一包重绑两次。
             this.lastRecvTime = System.currentTimeMillis();
             path.rxCount++;
             path.lastRxMs = System.currentTimeMillis();
