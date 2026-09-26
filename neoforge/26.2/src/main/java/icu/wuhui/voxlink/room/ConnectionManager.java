@@ -2962,7 +2962,7 @@ private volatile long lastProfileSwitchMs = 0L;
       if (this.connectionWon.get() || this.connectionCycleActive.get()) {
          this.applyLocalNatClass(this.classifyLocalNat(), "probe_done");
          this.applyRemoteNatClass(this.classifyRemoteNat(state), "probe_done");
-         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
          this.switchPunchProfile(recommended, "probe_done_" + this.localNatClass + "x" + this.remoteNatClass);
 
          VoxLinkMod.LOGGER
@@ -3277,7 +3277,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                }
 
-               PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+               PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                if (recommended != this.punchProfile()) {
 
@@ -4361,7 +4361,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                          }
 
-                         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+                         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                          this.switchPunchProfile(recommended, "host_punch_sym_" + this.localNatClass + "x" + this.remoteNatClass);
 
@@ -5355,7 +5355,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                                  }
 
-                                 PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+                                 PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                                  this.switchPunchProfile(recommended, "reverse_socket_" + this.localNatClass + "x" + this.remoteNatClass);
 
@@ -6565,7 +6565,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                this.scenarioTier = ScenarioTier.classify(tierLocalSym, tierRemoteSym, tierLowReach, false, false);
 
-               recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+               recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                this.switchPunchProfile(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass);
 
@@ -7536,7 +7536,7 @@ private volatile long lastProfileSwitchMs = 0L;
                this.applyRemoteNatClass(this.classifyRemoteNat(state), "punch_socket_sym");
             }
 
-            PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+            PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
             this.switchPunchProfile(recommended, "punch_socket_sym_" + this.localNatClass + "x" + this.remoteNatClass);
 

@@ -2961,7 +2961,7 @@ public class ConnectionManager {
       if (this.connectionWon.get() || this.connectionCycleActive.get()) {
          this.applyLocalNatClass(this.classifyLocalNat(), "probe_done");
          this.applyRemoteNatClass(this.classifyRemoteNat(state), "probe_done");
-         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
          this.switchPunchProfile(recommended, "probe_done_" + this.localNatClass + "x" + this.remoteNatClass);
 
          VoxLinkMod.LOGGER
@@ -3276,7 +3276,7 @@ public class ConnectionManager {
 
                }
 
-               PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+               PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                if (recommended != this.punchProfile()) {
 
@@ -4362,7 +4362,7 @@ public class ConnectionManager {
 
                          }
 
-                         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+                         PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                          this.switchPunchProfile(recommended, "host_punch_sym_" + this.localNatClass + "x" + this.remoteNatClass);
 
@@ -5359,7 +5359,7 @@ public class ConnectionManager {
 
                                  }
 
-                                 PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+                                 PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                                  this.switchPunchProfile(recommended, "reverse_socket_" + this.localNatClass + "x" + this.remoteNatClass);
 
@@ -6569,7 +6569,7 @@ public class ConnectionManager {
 
                this.scenarioTier = ScenarioTier.classify(tierLocalSym, tierRemoteSym, tierLowReach, false, false);
 
-               recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+               recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
                this.switchPunchProfile(recommended, "nat_matrix_" + this.localNatClass + "x" + this.remoteNatClass);
 
@@ -7539,7 +7539,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.tcp_fallback");
                this.applyRemoteNatClass(this.classifyRemoteNat(state), "punch_socket_sym");
             }
 
-            PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass, this.scenarioTier);
+            PunchProfile recommended = NatClass.recommendProfile(this.localNatClass, this.remoteNatClass);
 
             this.switchPunchProfile(recommended, "punch_socket_sym_" + this.localNatClass + "x" + this.remoteNatClass);
 
