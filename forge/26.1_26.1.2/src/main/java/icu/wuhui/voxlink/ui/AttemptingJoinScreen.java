@@ -4,6 +4,7 @@ import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.network.ConnectionHelper;
 import icu.wuhui.voxlink.network.LogUploadManager;
 import icu.wuhui.voxlink.network.NatClass;
+import icu.wuhui.voxlink.network.NatLabels;
 import icu.wuhui.voxlink.room.ConnectionManager;
 import icu.wuhui.voxlink.room.RoomInfo;
 import java.util.ArrayList;
@@ -1004,8 +1005,13 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       }
 
       boolean anyUnknown = local == NatClass.UNKNOWN || remote == NatClass.UNKNOWN;
-      String opponentText = this.natCnName(remote);
-      String mineText = this.natCnName(local);
+      // NatClass 只在"对称"时才归类, 锥型一律落 UNKNOWN -> 左上角常年显示未知。
+      // 这里补一次显示层归一(原始 NAT 串 -> lang 键), 只影响文案, 不参与打洞判定。
+      RoomInfo natRoom = VoxLinkMod.getRoomManager() != null ? VoxLinkMod.getRoomManager().getCurrentRoom() : null;
+      String remoteRawNat = natRoom != null && !natRoom.isHost() ? natRoom.getNatType() : null;
+      String localRawNat = NatLabels.rawKey(cm.getStunProbeResult());
+      String opponentText = NatLabels.displayName(remote, remoteRawNat);
+      String mineText = NatLabels.displayName(local, localRawNat);
       String difficultyText = Component.translatable(cm.getConnectionDifficultyKey()).getString();
       if (anyUnknown) {
          difficultyText = difficultyText + Component.translatable("voxlink.nat.doubt").getString();
@@ -1023,19 +1029,6 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          String hm = ri.getHostModVersion();
          String shown = hm.isEmpty() ? Component.translatable("voxlink.host_version_unknown").getString() : hm;
          this.drawString(graphics, Component.translatable("voxlink.host_version_label").getString() + ": " + shown, x, y + line * 3, VoxLinkColors.MUTED);
-      }
-   }
-
-   private String natCnName(NatClass nat) {
-      switch (nat) {
-         case CONE:
-            return Component.translatable("voxlink.nat.cone").getString();
-         case EASY_SYM:
-            return Component.translatable("voxlink.nat.easy_sym").getString();
-         case HARD_SYM:
-            return Component.translatable("voxlink.nat.hard_sym").getString();
-         default:
-            return Component.translatable("voxlink.nat.unknown").getString();
       }
    }
 

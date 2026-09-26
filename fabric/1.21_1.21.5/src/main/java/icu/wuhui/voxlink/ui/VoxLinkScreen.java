@@ -2,6 +2,7 @@ package icu.wuhui.voxlink.ui;
 
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.config.LogUploadState;
+import icu.wuhui.voxlink.network.NatLabels;
 import icu.wuhui.voxlink.network.PunchProfile;
 import icu.wuhui.voxlink.room.ConnectionManager;
 import icu.wuhui.voxlink.room.ConnectionState;
@@ -425,8 +426,8 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                   }
 
                   String natType = currentRoom.getNatType();
-                  if (natType != null && (natType.contains("symmetric") || natType.contains("sym"))) {
-                     detail.append(" | ").append(natType);
+                  if (NatLabels.isSpecific(natType)) {
+                     detail.append(" | ").append(NatLabels.nameOfRaw(natType));
                   }
 
                   this.drawCenteredClipped(graphics, detail.toString(), centerX, modeY + 11, VoxLinkColors.MUTED, maxWidth);
