@@ -2146,7 +2146,7 @@ public class ConnectionManager {
 
                if (fIsSymmetricOrUnknown && m1 != null && m2 != null) {
 
-                  int birthdayCount = PunchProfile.HARDSYM.hardSymSocketCount;
+                  int birthdayCount = this.punchProfile().hardSymSocketCount;
 
                   VoxLinkMod.LOGGER.info("[RoomManager] Symmetric NAT, pre-create {} birthday sockets into holepunch_offer", birthdayCount);
 
@@ -4001,7 +4001,7 @@ public class ConnectionManager {
 
          if (isHostSym && joinerSym) {
 
-            HOST_MULTI_COUNT = PunchProfile.HARDSYM.hardSymSocketCount;
+            HOST_MULTI_COUNT = this.punchProfile().hardSymSocketCount;
 
             this.switchPunchProfile(PunchProfile.HARDSYM, "Sym×Sym");
 
@@ -4015,9 +4015,9 @@ public class ConnectionManager {
 
             HOST_MULTI_COUNT = hardTier
 
-               ? PunchProfile.HARDSYM.hardSymSocketCount
+               ? this.punchProfile().hardSymSocketCount
 
-               : Math.max(PunchProfile.HARDSYM.hostMultiMinSocketCount, this.punchProfile().hostMultiSocketCount);
+               : Math.max(this.punchProfile().hostMultiMinSocketCount, this.punchProfile().hostMultiSocketCount);
 
          } else if (portUnreachable) {
 
@@ -4390,11 +4390,11 @@ public class ConnectionManager {
 
                   // 对称host生日攻击需足量多源端口(第八/九轮实证84可撞锥端), 探测出对称后补够再统一开打
 
-                  if (hostPunchSocketSymmetric && hostPunchers.size() < PunchProfile.HARDSYM.hardSymSocketCount) {
+                  if (hostPunchSocketSymmetric && hostPunchers.size() < this.punchProfile().hardSymSocketCount) {
 
                      int before = hostPunchers.size();
 
-                     int targetCount = PunchProfile.HARDSYM.hardSymSocketCount;
+                     int targetCount = this.punchProfile().hardSymSocketCount;
 
 
 
