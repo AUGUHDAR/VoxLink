@@ -452,6 +452,8 @@
     "voxlink.ticket.attach_count": "%s 件のファイルを添付",
     "voxlink.ticket.attach_prefix": "添付: ",
     "voxlink.ticket.delete": "チケット削除",
+    "voxlink.ticket.retract": "取り消す",
+    "voxlink.ticket.retracted": "取り消しました",
     "voxlink.ticket.err_empty": "内容が空です",
     "voxlink.ticket.err_failed": "送信に失敗しました",
     "voxlink.ticket.rate_limited": "送信が頻繁すぎます。後でもう一度お試しください",

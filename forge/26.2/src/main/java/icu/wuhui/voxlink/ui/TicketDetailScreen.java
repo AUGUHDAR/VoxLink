@@ -36,8 +36,10 @@ public class TicketDetailScreen extends VoxLinkScreenBase {
    private int page = 0;
    private EditBox replyBox;
    private Button sendButton;
+   private Button retractButton;
    private final List<java.nio.file.Path> replyAttachments = new CopyOnWriteArrayList<>();
    private boolean sending = false;
+   private boolean retracting = false;
    private long rateLimitedUntilMs = 0L;
    private String statusMessage = "";
    private int statusColor = VoxLinkColors.GRAY;
@@ -80,16 +82,67 @@ public class TicketDetailScreen extends VoxLinkScreenBase {
             .bounds(centerX + 4, rowY, 106, 20)
             .build()
       );
+      // 底行从 2 颗变 3 颗（删除 / 撤回我的上一条 / 返回）：各 70 宽、留 5px 间隙，
+      // 仍然落在 centerX±110 这一列里，不新增行高，避免把按钮挤出屏幕下沿。
+      this.retractButton = Button.builder(Component.translatable("voxlink.ticket.retract"), button -> this.retractLastOwn())
+         .bounds(centerX - 35, rowY + 22, 70, 20)
+         .build();
       this.addRenderableWidget(
          Button.builder(Component.translatable("voxlink.ticket.delete"), button -> this.deleteTicket())
-            .bounds(centerX - 110, rowY + 22, 106, 20)
+            .bounds(centerX - 110, rowY + 22, 70, 20)
             .build()
       );
+      this.addRenderableWidget(this.retractButton);
       this.addRenderableWidget(
          Button.builder(Component.translatable("voxlink.back"), button -> this.onClose())
-            .bounds(centerX + 4, rowY + 22, 106, 20)
+            .bounds(centerX + 40, rowY + 22, 70, 20)
             .build()
       );
+      this.updateRetractButton();
+   }
+
+   /** 自己发的最后一条（有服务端 id 的）才是可撤的那条。 */
+   private String lastOwnMessageId() {
+      if (this.detail == null) {
+         return null;
+      }
+      for (int i = this.detail.messages.size() - 1; i >= 0; --i) {
+         TicketClient.Msg m = this.detail.messages.get(i);
+         if (m != null && !"admin".equals(m.from) && m.id != null && !m.id.isEmpty()) {
+            return m.id;
+         }
+      }
+      return null;
+   }
+
+   private void updateRetractButton() {
+      if (this.retractButton != null) {
+         this.retractButton.active = !this.retracting && this.lastOwnMessageId() != null;
+      }
+   }
+
+   private void retractLastOwn() {
+      String msgId = this.lastOwnMessageId();
+      if (msgId == null || this.retracting) {
+         return;
+      }
+      this.retracting = true;
+      this.updateRetractButton();
+      this.statusMessage = "";
+      String url = VoxLinkMod.getConfig().getServerUrl();
+      TicketClient.retract(url, this.ticketId, msgId, result -> Minecraft.getInstance().execute(() -> {
+         this.retracting = false;
+         if (result.success) {
+            this.setStatus("voxlink.ticket.retracted", VoxLinkColors.SUCCESS);
+            this.detail = null; // 条数变了，本地那份不能再信，重新拉
+            this.refresh();
+         } else {
+            this.statusMessage = Component.translatable("voxlink.ticket.err_failed").getString()
+               + " (" + result.errorCode + ")";
+            this.statusColor = VoxLinkColors.ERROR;
+            this.updateRetractButton();
+         }
+      }));
    }
 
    private void refresh() {
@@ -104,6 +157,7 @@ public class TicketDetailScreen extends VoxLinkScreenBase {
          if (this.detail != null) {
             TicketClient.markViewed(url, this.ticketId);
          }
+         this.updateRetractButton();
       }));
    }
 

@@ -455,6 +455,8 @@
     "voxlink.ticket.attach_count": "%s file(s) attached",
     "voxlink.ticket.attach_prefix": "Files: ",
     "voxlink.ticket.delete": "Delete ticket",
+    "voxlink.ticket.retract": "Retract",
+    "voxlink.ticket.retracted": "Message retracted",
     "voxlink.ticket.err_empty": "Content cannot be empty",
     "voxlink.ticket.err_failed": "Send failed",
     "voxlink.ticket.rate_limited": "Too frequent, try again later",

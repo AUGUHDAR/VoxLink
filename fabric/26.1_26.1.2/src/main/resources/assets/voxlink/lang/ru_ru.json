@@ -452,6 +452,8 @@
     "voxlink.ticket.attach_count": "Файлов: %s",
     "voxlink.ticket.attach_prefix": "Файлы: ",
     "voxlink.ticket.delete": "Удалить тикет",
+    "voxlink.ticket.retract": "Отозвать",
+    "voxlink.ticket.retracted": "Сообщение отозвано",
     "voxlink.ticket.err_empty": "Содержимое не может быть пустым",
     "voxlink.ticket.err_failed": "Ошибка отправки",
     "voxlink.ticket.rate_limited": "Слишком часто, попробуйте позже",

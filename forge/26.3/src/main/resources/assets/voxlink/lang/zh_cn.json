@@ -455,6 +455,8 @@
     "voxlink.ticket.attach_count": "已添加 %s 个附件",
     "voxlink.ticket.attach_prefix": "附件: ",
     "voxlink.ticket.delete": "删除工单",
+    "voxlink.ticket.retract": "撤回上一条",
+    "voxlink.ticket.retracted": "已撤回",
     "voxlink.ticket.err_empty": "内容不能为空",
     "voxlink.ticket.err_failed": "发送失败",
     "voxlink.ticket.rate_limited": "发送太频繁，请稍后再试",

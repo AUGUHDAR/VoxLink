@@ -452,6 +452,8 @@
         "voxlink.ticket.attach_count": "已增附件 %s",
         "voxlink.ticket.attach_prefix": "附件: ",
         "voxlink.ticket.delete": "刪工單",
+        "voxlink.ticket.retract": "撤前言",
+        "voxlink.ticket.retracted": "已撤之",
         "voxlink.ticket.err_empty": "辭不可空",
         "voxlink.ticket.err_failed": "發之不成",
         "voxlink.ticket.rate_limited": "發之太頻，稍候再試",

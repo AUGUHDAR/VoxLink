@@ -455,6 +455,8 @@
     "voxlink.ticket.attach_count": "%s ملف مرفق",
     "voxlink.ticket.attach_prefix": "الملفات: ",
     "voxlink.ticket.delete": "حذف التذكرة",
+    "voxlink.ticket.retract": "سحب",
+    "voxlink.ticket.retracted": "تم سحب الرسالة",
     "voxlink.ticket.err_empty": "لا يمكن أن يكون المحتوى فارغًا",
     "voxlink.ticket.err_failed": "فشل الإرسال",
     "voxlink.ticket.rate_limited": "مرات كثيرة، حاول لاحقًا",

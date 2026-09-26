@@ -452,6 +452,8 @@
     "voxlink.ticket.attach_count": "파일 %s개 첨부됨",
     "voxlink.ticket.attach_prefix": "첨부: ",
     "voxlink.ticket.delete": "티켓 삭제",
+    "voxlink.ticket.retract": "취소",
+    "voxlink.ticket.retracted": "취소됨",
     "voxlink.ticket.err_empty": "내용을 입력하세요",
     "voxlink.ticket.err_failed": "전송 실패",
     "voxlink.ticket.rate_limited": "너무 자주 보냈습니다. 잠시 후 다시 시도하세요",

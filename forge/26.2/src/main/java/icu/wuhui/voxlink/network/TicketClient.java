@@ -58,6 +58,8 @@ public final class TicketClient {
    }
 
    public static final class Msg {
+      /** 服务端消息主键，撤回要按它定位；老服务端没这个字段时为 null（撤回入口自动禁用）。 */
+      public String id;
       public String from;
       public long timeMs;
       public String text;
@@ -381,6 +383,36 @@ public final class TicketClient {
       });
    }
 
+   /**
+    * 撤回自己发出的某一条追问。服务端只允许撤回 From=player 且归属凭证相符的消息，
+    * 撤管理员的消息会回 TICKET_FORBIDDEN。msgId 来自 {@link Msg#id}；
+    * 老服务端不返回 id 时调用方拿不到 id，界面上撤回入口是禁用的，不会发这种请求。
+    */
+   public static void retract(String serverUrl, String ticketId, String msgId, Consumer<Result> callback) {
+      String url = normalize(serverUrl, "/ticket/retract");
+      if (url == null) {
+         callback.accept(new Result(false, "BAD_SERVER_URL", 0, null));
+         return;
+      }
+      if (msgId == null || msgId.isEmpty()) {
+         callback.accept(new Result(false, "NO_MESSAGE_ID", 0, null));
+         return;
+      }
+      JsonObject body = new JsonObject();
+      body.addProperty("id", ticketId);
+      body.addProperty("msg", msgId);
+      body.addProperty("secret", secretOf(ticketId));
+      postJson(url, body, resp -> {
+         if (resp == null) {
+            callback.accept(new Result(false, "NETWORK_ERROR", 0, null));
+         } else if (resp.success) {
+            callback.accept(Result.ok(ticketId));
+         } else {
+            callback.accept(new Result(false, resp.error, resp.retryAfter, null));
+         }
+      });
+   }
+
    /** 拉取工单详情。回调在 HttpClient 线程触发（UI 需自行切主线程）。 */
    public static void fetchDetail(String serverUrl, String ticketId, Consumer<Detail> callback) {
       String sec = secretOf(ticketId);
@@ -482,6 +514,7 @@ public final class TicketClient {
                }
                var mo = e.getAsJsonObject();
                Msg m = new Msg();
+               m.id = str(mo, "id");
                m.from = str(mo, "from");
                m.timeMs = longval(mo, "time") * 1000L;
                m.text = str(mo, "text");
