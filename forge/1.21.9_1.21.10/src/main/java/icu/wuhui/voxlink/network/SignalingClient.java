@@ -416,8 +416,13 @@ public class SignalingClient {
       return this.post(this.buildPath("relay_register"), body);
    }
 
-   public CompletableFuture<SignalingClient.ApiResponse> getRelayCandidates() {
-      return this.get(this.buildGetPath("relay_candidates", null));
+   public CompletableFuture<SignalingClient.ApiResponse> getRelayCandidates(String excludeRoom) {
+      // 候选池只收"本房间以外"的人。排除项由请求方自报：谎报只会改变自己的候选数量，伤不到别人。
+      // 房间号形如 ^[A-Z0-9]+$，这里再限一次字符类，避免把任意串拼进查询串。
+      String query = excludeRoom != null && excludeRoom.matches("^[A-Za-z0-9]+$")
+         ? "excludeRoom=" + excludeRoom
+         : null;
+      return this.get(this.buildGetPath("relay_candidates", query));
    }
 
    /** TURN 总控：中继功能开关（打洞 20s 后客户端据此决定是否显示"使用中继"）。 */

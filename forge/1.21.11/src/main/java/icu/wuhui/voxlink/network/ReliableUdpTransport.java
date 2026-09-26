@@ -193,6 +193,10 @@ public class ReliableUdpTransport implements AutoCloseable {
       LOGGER.warn("[ReliableUdp] peer sends unauthenticated frames x{}, TURN interop downgrade to plaintext", this.consecutiveAuthDrops);
       this.authKeyBytes = null;
       this.authMac = null;
+      // 降级与心跳判死同拍竞速会差毫秒级把刚建立的明文链路判死：
+      // 这里重置判死锚点，给明文通道一个完整的心跳窗口。
+      this.heartbeatFailStreak = 0;
+      this.lastRecvTime = System.currentTimeMillis();
    }
 
    /** 出帧统一出口：认证模式追加 MAC，否则原样返回（旧线上格式）。 */
@@ -461,7 +465,10 @@ public class ReliableUdpTransport implements AutoCloseable {
 
          byte type = buf[2];
          if (type != 1 && type != 2) {
-            if (packetLen >= 11) {
+            // 帧长下界按类型取：DATA 含 payloadLen(需 13B)、FEC_XOR 还含 count(需 14B)。
+            // 一律用 11B 会让短帧越界读，TURN 路径抛异常即被判死整条隧道（11 字节裸包=远程拆链）。
+            int frameMinLen = type == 9 ? 14 : (type == 3 ? 13 : 11);
+            if (packetLen >= frameMinLen) {
                this.maybeRebindRemote(packet, path);
                int seq = readInt32(buf, 3);
                int ack = readInt32(buf, 7);

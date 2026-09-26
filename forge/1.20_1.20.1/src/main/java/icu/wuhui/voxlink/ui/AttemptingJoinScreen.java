@@ -153,7 +153,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       int centerX = this.width / 2;
       int btnY = this.height / 2 + 45;
       // 首次 init 且即将走门控时，本屏就是"正在获取房主必装清单"页：给出不等清单的出口
-      boolean gatePending = !this.joinApiDone && !this.modSyncChecked
+      boolean gatePending = (this.modSyncChecking || !this.joinApiDone) && !this.modSyncChecked
          && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
          && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
          && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode);
@@ -261,7 +261,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    private void goBack() {
       if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
-         VoxLinkMod.getRoomManager().leaveRoom();
+         VoxLinkMod.getRoomManager().leaveRoom("返回上一界面");
       }
 
       Minecraft.getInstance().setScreen(this.parent);
@@ -278,7 +278,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       // 玩家"取消了还上传日志"
       icu.wuhui.voxlink.network.LogUploadManager.disarm();
       this.active = false;
-      VoxLinkMod.getRoomManager().leaveRoom();
+      VoxLinkMod.getRoomManager().leaveRoom("取消加入");
       Minecraft.getInstance().setScreen(this.parent);
    }
 
@@ -359,7 +359,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          () -> mc0.execute(() -> mc0.setScreen(new AttemptingJoinScreen(self.parent, self.roomCode, self.password, true))),
          () -> mc0.execute(() -> {
             if (VoxLinkMod.getRoomManager().getCurrentRoom() != null) {
-               VoxLinkMod.getRoomManager().leaveRoom();
+               VoxLinkMod.getRoomManager().leaveRoom("清单检查取消");
             }
 
             mc0.setScreen(self.parent);
@@ -815,7 +815,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
       // 中央状态行 = 日志总线最新一条（玩家语言进行时叙述, 如"正在尝试直连…"）;
       // 右下角面板才是完整历史。总线为空时回落到原连接模式文本
-      String latest = UiLogBus.latestMessage();
+      // 门控选择页例外：中央必须显示"请选择同步范围"提示。WS 预热暖机的"已连接到服务器"
+      // 是最新一条 UiLogBus 消息，若不排除会压住选择提示，玩家误以为"已连接但没动静"
+      String latest = this.modSyncChecking ? "" : UiLogBus.latestMessage();
       int lv = UiLogBus.latestLevel();
       if (!latest.isEmpty()) {
          int lvColor = lv == 3 ? VoxLinkColors.ERROR : lv == 1 ? VoxLinkColors.SUCCESS : lv == 2 ? VoxLinkColors.WARNING : this.voxlinkStatusColor;

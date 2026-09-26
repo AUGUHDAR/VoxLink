@@ -64,20 +64,6 @@ public class VoxLinkMod {
 
     private static void onRegisterCommands(RegisterCommandsEvent event) {
         var dispatcher = event.getDispatcher();
-        dispatcher.register(literal("voxlink")
-                .then(literal("leave").executes(ctx -> {
-                    if (roomManager != null) roomManager.leaveRoom("/voxlink leave 命令");
-                    return 1;
-                }))
-                .then(literal("close").executes(ctx -> {
-                    if (roomManager != null) roomManager.closeRoom("/voxlink close 命令");
-                    return 1;
-                }))
-                .then(literal("info").executes(ctx -> {
-                    if (roomManager != null) roomManager.showRoomInfo(ctx.getSource());
-                    return 1;
-                }))
-        );
         //debounce 房主管理访客命令 LAN模式下host始终可用
         LanCommandRegistry.register(dispatcher);
     }

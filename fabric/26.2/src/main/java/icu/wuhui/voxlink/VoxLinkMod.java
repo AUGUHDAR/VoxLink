@@ -153,30 +153,6 @@ public class VoxLinkMod implements ModInitializer {
       CommandRegistrationCallback.EVENT
          .register(
             (CommandRegistrationCallback)(dispatcher, registryAccess, environment) -> {
-               dispatcher.register(
-                  (LiteralArgumentBuilder)((LiteralArgumentBuilder)((LiteralArgumentBuilder)Commands.literal("voxlink")
-                           .then(Commands.literal("leave").executes(ctx -> {
-                              if (roomManager != null) {
-                                 roomManager.leaveRoom();
-                              }
-
-                              return 1;
-                           })))
-                        .then(Commands.literal("close").executes(ctx -> {
-                           if (roomManager != null) {
-                              roomManager.closeRoom();
-                           }
-
-                           return 1;
-                        })))
-                     .then(Commands.literal("info").executes(ctx -> {
-                        if (roomManager != null) {
-                           roomManager.showRoomInfo((CommandSourceStack)ctx.getSource());
-                        }
-
-                        return 1;
-                     }))
-               );
                LanCommandRegistry.register(dispatcher);
             }
          );

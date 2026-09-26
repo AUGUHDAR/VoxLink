@@ -110,13 +110,25 @@ public class VoxLinkClient {
     public static void onClientPlayerLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
         //debounce 进世界时检查一次更新
         UpdateChecker.checkOnce();
+        // LoggingOut 防御锚点：只有真正进过世界，之后的 LoggingOut 才视为"退出世界"。
+        // 加入流程（主界面→attempting→连接中）里 MC connection 生命周期的边缘态也会
+        // 触发 LoggingOut，曾把刚 GuestOK 的陶瓦进程 shutdown 掉，导致连接 refused。
+        wasInWorld = true;
     }
+
+    private static volatile boolean wasInWorld = false;
 
     @SubscribeEvent
     public static void onClientPlayerLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        if (!wasInWorld) {
+            // 加入流程中的幽灵 LoggingOut：没进过世界就谈不上"退出世界"，什么都不清
+            return;
+        }
+
+        wasInWorld = false;
         RoomManager rm = VoxLinkMod.getRoomManager();
         if (rm != null && rm.isInRoom()) {
-            rm.leaveRoom();
+            rm.leaveRoom("退出世界");
         }
         //debounce 兜底杀陶瓦 防止退出世界后残留
         try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
@@ -144,7 +156,7 @@ public class VoxLinkClient {
             if (autoLeaveTicks >= AUTO_LEAVE_DELAY_TICKS) {
                 VoxLinkMod.LOGGER.info("MC exited world, auto leave room (after {} ticks)", autoLeaveTicks);
                 autoLeaveTicks = 0;
-                rmRef.leaveRoom();
+                rmRef.leaveRoom("检测到已退出世界，自动离开");
             }
         } else {
             autoLeaveTicks = 0;

@@ -63,7 +63,7 @@ public abstract class DirectConnectMixin extends Screen {
             } else {
                rm.joinRoom(code, null).thenAccept(roomInfo -> mc.execute(() -> {
                   if (!(mc.screen instanceof DirectJoinServerScreen)) {
-                     VoxLinkMod.getRoomManager().leaveRoom();
+                     VoxLinkMod.getRoomManager().leaveRoom("直接连接界面已切换");
                   } else {
                      if (mc.player != null) {
                         mc.player.sendSystemMessage(Component.translatable("voxlink.chat.joined_waiting_host"));
@@ -137,7 +137,7 @@ public abstract class DirectConnectMixin extends Screen {
                                  );
                            }
 
-                           VoxLinkMod.getRoomManager().leaveRoom();
+                           VoxLinkMod.getRoomManager().leaveRoom("直连监控：房间已不存在");
                         }
                      );
                   }

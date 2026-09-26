@@ -465,7 +465,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          case CANCELLED -> {
             this.closeLan();
             try {
-               VoxLinkMod.getRoomManager().leaveRoom();
+               VoxLinkMod.getRoomManager().leaveRoom("创建房间流程取消");
             } catch (Exception e) {
                VoxLinkMod.LOGGER.debug("cancelled flow cleanup: {}", e.getMessage());
             }

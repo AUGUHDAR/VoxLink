@@ -33,6 +33,8 @@ public final class TicketClient {
    /** 本地工单记录（voxlink_tickets.json 的一行）。 */
    public static final class LocalTicket {
       public String id;
+      /** 提交时服务端签发的一次性归属凭证（明文只出现这一次），随查询/追问/删除回传。 */
+      public String secret = "";
       public long timeMs;
       public boolean deleted;
       public boolean hasUnread;
@@ -104,6 +106,7 @@ public final class TicketClient {
                   var o = e.getAsJsonObject();
                   LocalTicket t = new LocalTicket();
                   t.id = str(o, "id");
+                  t.secret = str(o, "secret");
                   t.timeMs = o.has("timeMs") ? o.get("timeMs").getAsLong() : 0L;
                   t.deleted = o.has("deleted") && o.get("deleted").getAsBoolean();
                   t.hasUnread = o.has("hasUnread") && o.get("hasUnread").getAsBoolean();
@@ -128,6 +131,7 @@ public final class TicketClient {
             for (LocalTicket t : LOCAL) {
                JsonObject o = new JsonObject();
                o.addProperty("id", t.id);
+               o.addProperty("secret", t.secret == null ? "" : t.secret);
                o.addProperty("timeMs", t.timeMs);
                o.addProperty("deleted", t.deleted);
                o.addProperty("hasUnread", t.hasUnread);
@@ -167,16 +171,37 @@ public final class TicketClient {
       return false;
    }
 
-   private static void upsertLocal(String id, long timeMs) {
+   /** 取本地保存的工单归属凭证；未知/老记录返回空串（服务端对老工单继续放行）。 */
+   private static String secretOf(String ticketId) {
+      load();
+      if (ticketId == null) {
+         return "";
+      }
+      synchronized (LOCAL) {
+         for (LocalTicket t : LOCAL) {
+            if (t.id.equals(ticketId)) {
+               return t.secret == null ? "" : t.secret;
+            }
+         }
+      }
+      return "";
+   }
+
+   private static void upsertLocal(String id, long timeMs, String secret) {
       load();
       synchronized (LOCAL) {
          for (LocalTicket t : LOCAL) {
             if (t.id.equals(id)) {
+               if (secret != null && !secret.isEmpty() && (t.secret == null || t.secret.isEmpty())) {
+                  t.secret = secret;
+                  save();
+               }
                return;
             }
          }
          LocalTicket t = new LocalTicket();
          t.id = id;
+         t.secret = secret == null ? "" : secret;
          t.timeMs = timeMs;
          t.lastTimeMs = timeMs;
          LOCAL.add(t);
@@ -256,6 +281,24 @@ public final class TicketClient {
                }
                save();
             }
+            // 服务端已经删掉的单号（管理员硬删/90 天保留期清理）：本地连一次性 secret 一起丢弃，
+            // 否则列表里永远躺着一张点不开的僵尸单
+            if (data != null && data.has("removed") && data.get("removed").isJsonArray()) {
+               final JsonArray gone = data.getAsJsonArray("removed");
+               if (gone.size() > 0) {
+                  synchronized (LOCAL) {
+                     LOCAL.removeIf(t -> {
+                        for (var r : gone) {
+                           if (r.isJsonPrimitive() && r.getAsString().equals(t.id)) {
+                              return true;
+                           }
+                        }
+                        return false;
+                     });
+                  }
+                  save();
+               }
+            }
          }
          if (onDone != null) {
             onDone.run();
@@ -292,8 +335,9 @@ public final class TicketClient {
             return;
          }
          if (resp.success) {
-            String id = str(resp.root.getAsJsonObject("data"), "id");
-            upsertLocal(id, System.currentTimeMillis());
+            JsonObject tkData = resp.root.getAsJsonObject("data");
+            String id = str(tkData, "id");
+            upsertLocal(id, System.currentTimeMillis(), str(tkData, "ticketSecret"));
             callback.accept(Result.ok(id));
          } else {
             callback.accept(new Result(false, resp.error, resp.retryAfter, null));
@@ -312,6 +356,7 @@ public final class TicketClient {
       String boundary = "----VoxLinkTK" + UUID.randomUUID().toString().replace("-", "");
       List<HttpRequest.BodyPublisher> parts = new ArrayList<>();
       parts.add(textPart(boundary, "id", ticketId));
+      parts.add(textPart(boundary, "secret", secretOf(ticketId)));
       parts.add(textPart(boundary, "text", text));
       long[] total = new long[]{0L};
       List<Path> files = FeedbackUploader.mergeFiles(attachments, null, total);
@@ -338,7 +383,10 @@ public final class TicketClient {
 
    /** 拉取工单详情。回调在 HttpClient 线程触发（UI 需自行切主线程）。 */
    public static void fetchDetail(String serverUrl, String ticketId, Consumer<Detail> callback) {
-      String url = normalize(serverUrl, "/ticket/detail?id=" + ticketId);
+      String sec = secretOf(ticketId);
+      // 只能拼在 query 段：normalize 把 route 塞进 "?route=..."，query 混进去服务端就找不到接口了
+      String base = normalize(serverUrl, "/ticket/detail");
+      String url = base == null ? null : base + "&id=" + ticketId + (sec.isEmpty() ? "" : "&secret=" + sec);
       if (url == null) {
          callback.accept(null);
          return;
@@ -372,6 +420,7 @@ public final class TicketClient {
       }
       JsonObject body = new JsonObject();
       body.addProperty("id", ticketId);
+      body.addProperty("secret", secretOf(ticketId));
       postJson(url, body, resp -> {
       });
    }
@@ -395,6 +444,7 @@ public final class TicketClient {
       }
       JsonObject body = new JsonObject();
       body.addProperty("id", ticketId);
+      body.addProperty("secret", secretOf(ticketId));
       postJson(url, body, resp -> {
       });
    }

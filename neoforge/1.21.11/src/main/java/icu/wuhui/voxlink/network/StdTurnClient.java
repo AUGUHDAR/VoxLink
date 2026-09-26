@@ -306,12 +306,17 @@ public class StdTurnClient {
          InetSocketAddress serverAddr = new InetSocketAddress(InetAddress.getByName(host), port);
 
          // 第一轮：无凭证 → 401 + REALM + NONCE
-         MsgBuilder probe = new MsgBuilder(MT_ALLOCATE_REQ);
-         probe.putUint32(AT_REQUESTED_TRANSPORT, TRANSPORT_UDP << 24);
-         probe.putStr(AT_SOFTWARE, "voxlink");
-         DatagramSocket probeSock = socket;
-         StdTurnSession tmp = new StdTurnSession(probeSock, serverAddr, username, null);
-         StunMessage challenge = transact(tmp, probe, null, timeoutMs);
+         // 探包只发一次 = 一次 UDP 丢包就把整条标准 TURN 判死（实测 CGNAT 下会偶发全丢）：
+         // 改成最多 3 发、每发预算压到 3s，成功仍然只花一个往返
+         StunMessage challenge = null;
+         for (int probeTry = 0; probeTry < 3 && challenge == null; probeTry++) {
+            MsgBuilder probe = new MsgBuilder(MT_ALLOCATE_REQ);
+            probe.putUint32(AT_REQUESTED_TRANSPORT, TRANSPORT_UDP << 24);
+            probe.putStr(AT_SOFTWARE, "voxlink");
+            StdTurnSession tmp = new StdTurnSession(socket, serverAddr, username, null);
+            challenge = transact(tmp, probe, null, Math.min(timeoutMs, 3000));
+         }
+
          if (challenge == null) {
             LOGGER.warn("[StdTurn] allocate probe no response from {}:{}", host, port);
             socket.close();
@@ -492,6 +497,9 @@ public class StdTurnClient {
       body.addProperty("nodeId", nodeId);
       return sc.relayStdTurnCred(body).thenApply(r -> {
          if (!r.success || r.data == null) {
+            // 错误码是定位中继故障的唯一线索（MISSING_FIELDS / INVALID_TOKEN / NODE_OFFLINE / RATE_LIMITED），
+            // 吞掉它就只能看到一个无信息量的 std_cred_failed
+            LOGGER.warn("[StdTurn] cred rejected: error={} message={}", r.error, r.message);
             return null;
          }
          com.google.gson.JsonObject d = r.data;
@@ -502,6 +510,8 @@ public class StdTurnClient {
          c.password = d.has("password") ? d.get("password").getAsString() : "";
          c.expire = d.has("expire") ? d.get("expire").getAsLong() : 0L;
          if (c.host.isEmpty() || c.port <= 0 || c.username.isEmpty() || c.password.isEmpty()) {
+            LOGGER.warn("[StdTurn] cred incomplete: host={} port={} username?{} password?{}",
+               c.host, c.port, !c.username.isEmpty(), !c.password.isEmpty());
             return null;
          }
          return c;

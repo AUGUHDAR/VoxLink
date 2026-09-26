@@ -466,7 +466,10 @@ public class ReliableUdpTransport implements AutoCloseable {
 
          byte type = buf[2];
          if (type != 1 && type != 2) {
-            if (packetLen >= 11) {
+            // 帧长下界按类型取：DATA 含 payloadLen(需 13B)、FEC_XOR 还含 count(需 14B)。
+            // 一律用 11B 会让短帧越界读，TURN 路径抛异常即被判死整条隧道（11 字节裸包=远程拆链）。
+            int frameMinLen = type == 9 ? 14 : (type == 3 ? 13 : 11);
+            if (packetLen >= frameMinLen) {
                this.maybeRebindRemote(packet, path);
                int seq = readInt32(buf, 3);
                int ack = readInt32(buf, 7);

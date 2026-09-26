@@ -1033,28 +1033,6 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       this.leaveRoom(detail);
    }
 
-   public void showRoomInfo(CommandSourceStack source) {
-      RoomManager.RoomState state = this.currentRoom.get();
-      if (state != null && state != PENDING) {
-         RoomInfo info = state.roomInfo;
-         source.sendSuccess(
-            () -> Component.translatable(
-               "voxlink.room_info_detail",
-               new Object[]{
-                  info.getName(),
-                  info.getCode(),
-                  info.getCurrentPlayers(),
-                  info.getMaxPlayers(),
-                  info.getNatType(),
-                  info.isHost() ? Component.translatable("voxlink.yes").getString() : Component.translatable("voxlink.no").getString()
-               }
-            ),
-            false
-         );
-      } else {
-         source.sendSuccess(() -> Component.translatable("voxlink.error.not_in_room"), false);
-      }
-   }
 
    public RoomInfo getCurrentRoom() {
       RoomManager.RoomState state = this.currentRoom.get();
@@ -1816,6 +1794,25 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
          String from = signal.get("from").getAsString();
          JsonObject data = signal.has("data") && signal.get("data").isJsonObject() ? signal.getAsJsonObject("data") : new JsonObject();
          VoxLinkMod.LOGGER.debug("Received signal: type={}, from={}", type, from);
+         // 信令来源门控（1.1.9，与 server-go/signal_auth.go 的服务端矩阵配套的第二道防线）：
+         // 服务端把 from 绑成 token 推导出的真实身份 —— 房主发出的信令 from 恒为 "host"、
+         // 房客恒为其 clientId、服务端注入恒为 "server"，三者客户端都无法伪造。
+         // 修复前同房间任一成员发 host_closing 即可让全房（含房主）拆线；发
+         // turn_alloc / relay_setup / peer_port / tcp_punch_info 即可把本端出连目标
+         // 改写成它指定的地址，再把承载 MC 流量的隧道桥过去。
+         RoomManager.RoomState sigState = this.currentRoom.get();
+         if (sigState != null && sigState != PENDING) {
+            boolean fromOk = "host".equals(from) || "server".equals(from);
+            if (!fromOk && sigState.roomInfo.isHost()) {
+               // 房主侧：新房客由 join_request 引入（此时尚未登记），其余必须是自家在册房客
+               fromOk = "join_request".equals(type) || sigState.roomInfo.getPeer(from) != null;
+            }
+            if (!fromOk) {
+               VoxLinkMod.LOGGER.warn("[Security] Discarded signal from unexpected source: type={}, from={}", type, from);
+               return;
+            }
+         }
+
          switch (type) {
             case "join_request":
                this.connectionManager.handleJoinRequest(from, data);

@@ -477,7 +477,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          case CANCELLED -> {
             this.closeLan();
             try {
-               VoxLinkMod.getRoomManager().leaveRoom();
+               VoxLinkMod.getRoomManager().leaveRoom("创建房间流程取消");
             } catch (Exception e) {
                VoxLinkMod.LOGGER.debug("cancelled flow cleanup: {}", e.getMessage());
             }
@@ -551,7 +551,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          if (mc.player != null) {
             mc.player.sendSystemMessage(Component.translatable("voxlink.chat.creating_room"));
          }
-   
+
          // 自动收起（默认关）：开启则点了创建直接回世界，后台跑信令+打洞
          if (VoxLinkMod.getConfig().isAutoCollapseCreateUi()) {
             Minecraft.getInstance().gui.setScreen(null);

@@ -97,6 +97,16 @@ public final class ConnectionHelper {
       mc.execute(
          () -> {
             if (localPort > 0) {
+               // 竞态防御：连接回调落地时房间可能已被拆除（如陶瓦 GuestOK 后 leaveRoom 抢先：
+               // 陶瓦进程被 shutdown、EasyTier 端口转发消失）。此时继续发起 MC 连接
+               // 只会得到 "Connection refused" 弹窗，表现为连接莫名其妙失败。
+               if (VoxLinkMod.getRoomManager() == null || VoxLinkMod.getRoomManager().getCurrentRoom() == null) {
+                  connecting.set(false);
+                  clearConnectInitiated();
+                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] Room already left before MC connect, skip (port={})", localPort);
+                  return;
+               }
+
                if (!connecting.compareAndSet(false, true)) {
                   VoxLinkMod.LOGGER.warn("[ConnectionHelper] Already connecting, ignore duplicate call");
                   return;

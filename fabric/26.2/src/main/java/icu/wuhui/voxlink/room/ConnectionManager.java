@@ -2048,7 +2048,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
       boolean isSymmetricOrUnknown = StunDetector.isNatTypeSymmetric(natType);
 
-      if (this.stunProbeResult != null && state.roomInfo.getClientId() != null) {
+      if (this.stunProbeResult != null && (state.roomInfo.getClientId() != null || state.roomInfo.isHost())) {
 
          String hostMappedIp = null;
 
@@ -2080,7 +2080,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                .registerRelayPeer(
 
-                  state.roomInfo.getClientId(), state.roomInfo.getCode(), this.stunProbeResult.natType.key, hostMappedIp, hostMappedPort, relayOk
+                  relayPeerId(state), state.roomInfo.getCode(), this.stunProbeResult.natType.key, hostMappedIp, hostMappedPort, relayOk
 
                );
 
@@ -7937,7 +7937,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
             VoxLinkMod.LOGGER.info("[Connection] My mapped address: {}:{} (attempt{})", new Object[]{myMappedAddr.ip(), myMappedAddr.port(), attempt});
 
-            if (state.roomInfo.getClientId() != null && attempt == 1) {
+            if ((state.roomInfo.getClientId() != null || state.roomInfo.isHost()) && attempt == 1) {
 
                String myNatType = this.stunProbeResult != null ? this.stunProbeResult.natType.key : "unknown";
 
@@ -7945,7 +7945,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                this.signalingClient
 
-                  .registerRelayPeer(state.roomInfo.getClientId(), state.roomInfo.getCode(), myNatType, myMappedAddr.ip(), myMappedAddr.port(), relayOk);
+                  .registerRelayPeer(relayPeerId(state), state.roomInfo.getCode(), myNatType, myMappedAddr.ip(), myMappedAddr.port(), relayOk);
 
                this.scheduleRelayRegistrationRenewal(state, myNatType, myMappedAddr.ip(), myMappedAddr.port());
 
@@ -11105,6 +11105,7 @@ private volatile long lastProfileSwitchMs = 0L;
                   setup.addProperty("targetIp", symPeer.mappedIp);
 
                   setup.addProperty("targetPort", symPeer.mappedPort);
+                  setup.addProperty("replyHostId", relayPeerId(state));
 
                   this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_setup", setup, relay.clientId);
 
@@ -11270,15 +11271,9 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
 
-               if (candidates.isEmpty()) {
-
-                  this.fetchGlobalRelayCandidates(state, requestingClientId, requestingPeer);
-
-               } else {
-
-                  this.dispatchRelaySetup(state, candidates, requestingClientId, requestingPeer);
-
-               }
+               // 候选池=本房间以外开了中继且非对称 NAT 的人（2026-09-26 裁决）：
+               // 自家成员不再互为中继，上面的同房筛选结果一律不用，统一取全局池
+               this.fetchGlobalRelayCandidates(state, requestingClientId, requestingPeer);
 
             } else {
 
@@ -11300,7 +11295,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
       this.signalingClient
 
-         .getRelayCandidates()
+         .getRelayCandidates(state.roomInfo.getCode())
 
          .thenAccept(
 
@@ -11344,7 +11339,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                   String nt = c.has("natType") ? c.get("natType").getAsString() : "unknown";
 
-                  if (cid == null || cid.equals(requestingClientId) || cid.equals(state.roomInfo.getClientId())) {
+                  if (cid == null || cid.equals(requestingClientId) || cid.equals(relayPeerId(state))) {
 
                      continue;
 
@@ -11439,6 +11434,7 @@ private volatile long lastProfileSwitchMs = 0L;
       setup.addProperty("targetIp", requestingPeer.mappedIp);
 
       setup.addProperty("targetPort", requestingPeer.mappedPort);
+      setup.addProperty("replyHostId", relayPeerId(state));
 
       this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_setup", setup, relay.clientId);
 
@@ -11790,6 +11786,18 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
 
+   /**
+    * 本端在 relay_peers 里的身份。房客=自己的 clientId；房主没有 clientId，
+    * 由服务端验过 hostToken 后派生 host-&lt;房间号&gt;（客户端自报该形态一律被拒，冒充不了别人）。
+    */
+   private String relayPeerId(RoomManager.RoomState state) {
+      String cid = state != null ? state.roomInfo.getClientId() : null;
+      if (cid != null && !cid.isEmpty()) {
+         return cid;
+      }
+      return state != null && state.roomInfo.isHost() ? "host-" + state.roomInfo.getCode() : null;
+   }
+
    private void scheduleRelayRegistrationRenewal(RoomManager.RoomState state, String natType, String ip, int port) {
 
       this.scheduler
@@ -11798,7 +11806,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
             () -> {
 
-               if (this.roomManager.currentRoom.get() == state && !this.connectionWon.get() && state.roomInfo.getClientId() != null) {
+               if (this.roomManager.currentRoom.get() == state && !this.connectionWon.get() && relayPeerId(state) != null) {
 
                   if (ip != null && port > 0) {
 
@@ -11806,7 +11814,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                      this.signalingClient
 
-                        .registerRelayPeer(state.roomInfo.getClientId(), state.roomInfo.getCode(), natType, ip, port, relayOk)
+                        .registerRelayPeer(relayPeerId(state), state.roomInfo.getCode(), natType, ip, port, relayOk)
 
                         .thenRun(() -> this.scheduleRelayRegistrationRenewal(state, natType, ip, port))
 
@@ -13023,6 +13031,19 @@ private volatile long lastProfileSwitchMs = 0L;
    // ================= END TURN 中继状态机 =================
 
    public void handleRelaySetup(String from, JsonObject data) {
+      // 候选者若本身就是房主，它没有"自家房主"可回执：只能按 relay_setup 里的 replyHostId
+      // 直投请求方房主（服务端把 to=host-<CODE> 落到对方房间并归一成该房房主的 pollerID）
+      RoomManager.RoomState setupState = this.roomManager.currentRoom.get();
+      final boolean setupAsHost = setupState != null
+         && setupState != RoomManager.PENDING
+         && setupState.roomInfo.isHost();
+      final String setupReplyTo = setupAsHost && data.has("replyHostId")
+         ? data.get("replyHostId").getAsString()
+         : "host";
+      if (setupAsHost && "host".equals(setupReplyTo)) {
+         VoxLinkMod.LOGGER.warn("[Relay] 被选为候选但对方未留 replyHostId（旧版房主），回执可能落到本房房主");
+      }
+
 
       if (!VoxLinkMod.getConfig().isRelayEnabled()) {
 
@@ -13030,7 +13051,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
          if (state != null && state != RoomManager.PENDING) {
 
-            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), from);
+            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), setupAsHost, "relay_declined", new JsonObject(), setupAsHost ? setupReplyTo : from);
 
          }
 
@@ -13190,7 +13211,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                                     reply.addProperty("forClientId", fTargetClientId != null ? fTargetClientId : "sym");
 
-                                    this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_accept", reply, "host");
+                                    this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), setupAsHost, "relay_accept", reply, setupReplyTo);
 
                                  }
 
@@ -13254,7 +13275,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
                         this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("relay_to_sym_"));
 
-                        this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_declined", new JsonObject(), "host");
+                        this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), setupAsHost, "relay_declined", new JsonObject(), setupReplyTo);
 
                      }
 
@@ -13898,17 +13919,12 @@ private volatile long lastProfileSwitchMs = 0L;
 
             state.roomInfo.clearPeers();
 
-            if (!inConnection) {
-
+            // "对端全走光"不是"本机连接失败"：一律回 IDLE 继续等人。
+            // 修复前这里在 inConnection 分支走"连接失败终态"→ leaveRoom，
+            // 于是房客加入失败离开，会把房主自己的房间关掉。
                this.connectionCycleActive.set(false);
 
                ConnectionState.transitionTo(ConnectionState.IDLE, "对方离开,回等待");
-
-            } else {
-
-               this.showConnectFailedFinal(state, "voxlink.connection.peer_left");
-
-            }
 
          }
 
@@ -14500,7 +14516,10 @@ private volatile long lastProfileSwitchMs = 0L;
 
                   dualResult.complete(null);
 
-                  this.resetDualRaceState();
+                  // 此处不得复位竞态状态：terracottaWon/voxlinkSideDisabled 一旦被清，
+                  // 随后到达的 turn_ready 会绕过互斥守卫再发起一次 connectToServer，
+                  // 表现为"闪一下（25565 refused）又连上（TURN 端口）"两层叠加。
+                  // 竞态字段统一由 leaveRoom 与新会话入口清理。
 
                } catch (Exception ex) {
 
@@ -14575,6 +14594,10 @@ private volatile long lastProfileSwitchMs = 0L;
          ConnectionState.transitionTo(ConnectionState.TRANSPORT_SETUP, "陶瓦guest-ok port=" + localPort);
 
          roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_setup"));
+
+         // 陶瓦通道必须同样激活 handoff 宽限：P2P 的四条桥路径都调了，唯独这里漏了，
+         // 于是 GuestOK 后 26ms 到达的幽灵 leaveRoom 能把刚建好的桥拆掉（表现为 Connection refused）。
+         this.markConnectionEstablished();
 
          ConnectionHelper.connectToServer(localPort, roomInfo);
 

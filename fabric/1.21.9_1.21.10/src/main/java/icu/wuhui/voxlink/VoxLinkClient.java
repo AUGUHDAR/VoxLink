@@ -97,7 +97,7 @@ public class VoxLinkClient implements ClientModInitializer {
                         if (this.autoLeaveTicks >= 40) {
                            VoxLinkMod.LOGGER.info("MC exited world, auto leave room (after {} ticks)", this.autoLeaveTicks);
                            this.autoLeaveTicks = 0;
-                           rmRef.leaveRoom();
+                           rmRef.leaveRoom("检测到已退出世界，自动离开");
                         }
                      } else {
                         this.autoLeaveTicks = 0;

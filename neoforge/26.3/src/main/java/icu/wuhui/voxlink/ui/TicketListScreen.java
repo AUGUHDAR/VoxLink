@@ -33,6 +33,8 @@ public class TicketListScreen extends VoxLinkScreenBase {
    protected void init() {
       super.init();
       this.rows = TicketClient.snapshot();
+      // 玩家在客户端删除只表示"本地不再关心"，删掉后就不该还占一行
+      this.rows.removeIf(t -> t.deleted);
       this.rebuild();
    }
 

@@ -63,20 +63,6 @@ public class VoxLinkMod {
 
     private static void onRegisterCommands(RegisterCommandsEvent event) {
         var dispatcher = event.getDispatcher();
-        dispatcher.register(literal("voxlink")
-                .then(literal("leave").executes(ctx -> {
-                    if (roomManager != null) roomManager.leaveRoom();
-                    return 1;
-                }))
-                .then(literal("close").executes(ctx -> {
-                    if (roomManager != null) roomManager.closeRoom();
-                    return 1;
-                }))
-                .then(literal("info").executes(ctx -> {
-                    if (roomManager != null) roomManager.showRoomInfo(ctx.getSource());
-                    return 1;
-                }))
-        );
         //debounce 房主管理访客命令 LAN模式下host始终可用
         LanCommandRegistry.register(dispatcher);
     }
@@ -86,7 +72,7 @@ public class VoxLinkMod {
             VoxLinkMod.LOGGER.info("Built-in server stopped, leaving room (network kept)");
             LanHostRegistry.clear();
             if (roomManager != null && roomManager.isInRoom()) {
-                roomManager.leaveRoom();
+                roomManager.leaveRoom("集成服务器停止");
             }
         }
     }
