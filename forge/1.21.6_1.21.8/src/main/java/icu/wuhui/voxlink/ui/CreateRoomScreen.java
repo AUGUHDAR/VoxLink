@@ -494,7 +494,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                default -> Component.literal(this.simplifyError(d));
             };
             if (mc.player != null) {
-               mc.player.displayClientMessage(msg.copy().withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)), true);
+               mc.player.displayClientMessage(msg.copy().withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)), false);
             }
 
             if (viewingPopup) {
