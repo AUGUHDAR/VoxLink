@@ -11966,6 +11966,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.retry_round", round);
                .fetchCred(this.signalingClient, state.roomInfo.getCode(), state.roomInfo.getClientId(), state.roomInfo.getToken(), nodeId)
                .join();
          } catch (Exception e) {
+            VoxLinkMod.LOGGER.warn("[Turn] stdTurn host cred fetch (node={}) exception: {}", nodeId, String.valueOf(e));
             cred = null;
          }
          if (cred == null) {
