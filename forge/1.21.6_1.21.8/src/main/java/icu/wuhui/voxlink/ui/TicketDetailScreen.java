@@ -352,6 +352,6 @@ public class TicketDetailScreen extends VoxLinkScreenBase {
    }
 
    public boolean shouldCloseOnEsc() {
-      return !this.sending;
+      return !this.sending && !this.retracting;
    }
 }
