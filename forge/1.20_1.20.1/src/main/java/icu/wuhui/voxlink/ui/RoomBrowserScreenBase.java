@@ -398,7 +398,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                               r.has("hasPassword") && r.get("hasPassword").getAsBoolean(),
                               r.has("natType") ? r.get("natType").getAsString() : "unknown",
                               r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
-                              r.has("gameVersion") ? r.get("gameVersion").getAsString() : ""));
+                              r.has("gameVersion") ? r.get("gameVersion").getAsString() : "",
+                              r.has("source") ? r.get("source").getAsString() : ""));
                         }
                      }
                   }
@@ -504,7 +505,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                                                       r.has("hasPassword") && r.get("hasPassword").getAsBoolean(),
                                                       r.has("natType") ? r.get("natType").getAsString() : "unknown",
                                                       r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
-                                                      r.has("gameVersion") ? r.get("gameVersion").getAsString() : ""
+                                                      r.has("gameVersion") ? r.get("gameVersion").getAsString() : "",
+                                                      r.has("source") ? r.get("source").getAsString() : ""
                                                    )
                                                 );
                                              existingCodes.add(code);
@@ -904,7 +906,8 @@ return this.handleClick(mouseX, mouseY, button) ? true : super.mouseClicked(mous
       boolean hasPassword,
       String natType,
       int protocolVersion,
-      String gameVersion
+      String gameVersion,
+      String source
    ) {
    }
 

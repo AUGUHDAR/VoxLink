@@ -10293,6 +10293,34 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
 
+   public void connectFed(RoomManager.RoomState state) {
+      String addr = state.roomInfo.getFedAddress();
+      int sep = addr == null ? -1 : addr.lastIndexOf(':');
+      if (sep <= 0 || sep == addr.length() - 1) {
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+         return;
+      }
+      String host = addr.substring(0, sep);
+      int port;
+      try {
+         port = Integer.parseInt(addr.substring(sep + 1));
+      } catch (NumberFormatException e) {
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+         return;
+      }
+      state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_setup"));
+      P2PBridge.connectToHost(host, port).thenAccept(localPort -> {
+         if (localPort > 0) {
+            this.connectionWon.set(true);
+            this.markConnectionEstablished();
+            ConnectionHelper.connectToServer(localPort, state.roomInfo);
+         } else {
+            ConnectionHelper.resetConnecting();
+            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+         }
+      });
+   }
+
    public void handleConnectViaBridgeFailed(RoomManager.RoomState state) {
 
       this.leaveRoomOnFailure(state);

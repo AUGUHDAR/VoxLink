@@ -49,6 +49,29 @@ public class RoomInfo {
    private volatile RoomInfo.PortStatus ipv4Status = RoomInfo.PortStatus.UNKNOWN;
    private volatile RoomInfo.PortStatus ipv6Status = RoomInfo.PortStatus.UNKNOWN;
    private volatile boolean nameApproved = true;
+   // 互通：中继直连房来源与地址
+   private volatile String fedSource = "";
+   private volatile String fedAddress = "";
+
+   public boolean isHappyLink() {
+      return "happylink".equals(this.fedSource);
+   }
+
+   public String getFedSource() {
+      return this.fedSource;
+   }
+
+   public void setFedSource(String source) {
+      this.fedSource = source == null ? "" : source;
+   }
+
+   public String getFedAddress() {
+      return this.fedAddress;
+   }
+
+   public void setFedAddress(String address) {
+      this.fedAddress = address == null ? "" : address;
+   }
    private volatile boolean visible = true;
    private volatile boolean sameCgnat = false;
    private volatile boolean guestOp = false;

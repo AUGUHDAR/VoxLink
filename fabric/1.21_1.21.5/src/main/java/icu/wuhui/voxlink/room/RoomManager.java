@@ -751,6 +751,13 @@ public class RoomManager {
                         roomInfo.setLoader(roomData.get("loader").getAsString());
                      }
 
+                     if (roomData.has("source") && !roomData.get("source").isJsonNull()) {
+                        roomInfo.setFedSource(roomData.get("source").getAsString());
+                     }
+                     if (roomData.has("fedAddress") && !roomData.get("fedAddress").isJsonNull()) {
+                        roomInfo.setFedAddress(roomData.get("fedAddress").getAsString());
+                     }
+
                      if (roomData.has("authType") && !roomData.get("authType").isJsonNull()) {
                         roomInfo.setAuthType(roomData.get("authType").getAsString());
                      }
@@ -805,6 +812,10 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
                         this.startHeartbeat();
                         this.startSignalPoll();
                         this.topologyClient.onRoomJoined(normalizedCode, clientToken, false, clientId, 0);
+                        if (roomInfo.isHappyLink()) {
+                           VoxLinkMod.LOGGER.info("[joinRoom] Relay-tunnel room: fedAddress={}", roomInfo.getFedAddress());
+                           this.connectionManager.connectFed(state);
+                        }
                         return roomInfo;
                      }
                   }
