@@ -3,6 +3,17 @@
 
 Play with your friends, or find new ones in the lobby :D
 
+## Links
+
+| | |
+|---|---|
+| Official Website | https://p2p.wuhui.icu/ |
+| MC Wiki (mcmod.cn) | https://www.mcmod.cn/class/28295.html |
+| Modrinth | https://modrinth.com/mod/voxlink |
+| CurseForge | https://www.curseforge.com/minecraft/mc-mods/voxlink |
+| QQ Group | https://qm.qq.com/cgi-bin/qm/qr?k=OEkk9L8m8jdFMkbGDhKZs0u2U0azLAPo&jump_from=webapi |
+| Discord | https://discord.gg/XaAFxvzPDS |
+
 ---
 
 ## How to play
@@ -62,6 +73,17 @@ Website: `https://p2p.wuhui.icu/`
 # VoxLink
 
 与好友快速联机，或在大厅寻找志同道合的伙伴 :D
+
+## 相关链接
+
+| | |
+|---|---|
+| 官网 | https://p2p.wuhui.icu/ |
+| MC百科 | https://www.mcmod.cn/class/28295.html |
+| Modrinth | https://modrinth.com/mod/voxlink |
+| CurseForge | https://www.curseforge.com/minecraft/mc-mods/voxlink |
+| QQ群 | https://qm.qq.com/cgi-bin/qm/qr?k=OEkk9L8m8jdFMkbGDhKZs0u2U0azLAPo&jump_from=webapi |
+| Discord | https://discord.gg/XaAFxvzPDS |
 
 ---
 
