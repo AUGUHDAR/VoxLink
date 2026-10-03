@@ -10300,7 +10300,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.reverse");
       String addr = state.roomInfo.getFedAddress();
       int sep = addr == null ? -1 : addr.lastIndexOf(':');
       if (sep <= 0 || sep == addr.length() - 1) {
-         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_failed"), true);
          return;
       }
       String host = addr.substring(0, sep);
@@ -10308,10 +10308,10 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.reverse");
       try {
          port = Integer.parseInt(addr.substring(sep + 1));
       } catch (NumberFormatException e) {
-         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_failed"), true);
          return;
       }
-      state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_setup"));
+      state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_setup"));
       P2PBridge.connectToHost(host, port).thenAccept(localPort -> {
          if (localPort > 0) {
             this.connectionWon.set(true);
@@ -10319,7 +10319,7 @@ icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.reverse");
             ConnectionHelper.connectToServer(localPort, state.roomInfo);
          } else {
             ConnectionHelper.resetConnecting();
-            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_failed"), true);
          }
       });
    }

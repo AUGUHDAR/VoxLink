@@ -72,6 +72,48 @@ public class RoomInfo {
    public void setFedAddress(String address) {
       this.fedAddress = address == null ? "" : address;
    }
+
+   // 互通（双向）：房主侧 HL 镜像隧道凭据（create 回包 fed 字段）
+   private volatile String fedHost = "";
+   private volatile int fedTunnelPort = 0;
+   private volatile String fedToken = "";
+   private volatile int fedPort = 0;
+
+   public boolean isFedMirror() {
+      return this.fedPort > 0 && !this.fedToken.isEmpty();
+   }
+
+   public String getFedHost() {
+      return this.fedHost;
+   }
+
+   public void setFedHost(String host) {
+      this.fedHost = host == null ? "" : host;
+   }
+
+   public int getFedTunnelPort() {
+      return this.fedTunnelPort;
+   }
+
+   public void setFedTunnelPort(int port) {
+      this.fedTunnelPort = port;
+   }
+
+   public String getFedToken() {
+      return this.fedToken;
+   }
+
+   public void setFedToken(String token) {
+      this.fedToken = token == null ? "" : token;
+   }
+
+   public int getFedPort() {
+      return this.fedPort;
+   }
+
+   public void setFedPort(int port) {
+      this.fedPort = port;
+   }
    private volatile boolean visible = true;
    private volatile boolean sameCgnat = false;
    private volatile boolean guestOp = false;

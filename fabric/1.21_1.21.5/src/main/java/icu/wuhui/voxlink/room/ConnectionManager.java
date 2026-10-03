@@ -10301,7 +10301,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
       if (sep <= 0 || sep == addr.length() - 1) {
 
-         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_failed"), true);
 
          return;
 
@@ -10317,13 +10317,13 @@ private volatile long lastProfileSwitchMs = 0L;
 
       } catch (NumberFormatException e) {
 
-         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+         state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_failed"), true);
 
          return;
 
       }
 
-      state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_setup"));
+      state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_setup"));
 
       P2PBridge.connectToHost(host, port).thenAccept(localPort -> {
 
@@ -10339,7 +10339,7 @@ private volatile long lastProfileSwitchMs = 0L;
 
             ConnectionHelper.resetConnecting();
 
-            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_start_failed"), true);
+            state.roomInfo.setConnectionMode(Component.translatable("voxlink.connection.fed_failed"), true);
 
          }
 

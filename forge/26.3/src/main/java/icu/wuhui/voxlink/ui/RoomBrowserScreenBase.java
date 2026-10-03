@@ -696,6 +696,13 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             this.drawString(graphics, this.truncate(roomName, cardW / 6), textX, textY, VoxLinkColors.WHITE);
             this.drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + 11, VoxLinkColors.MUTED);
             this.drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + 22, VoxLinkColors.TEXT_LIGHT);
+            // 互通：Happy Link 来源房标签（玩家行右侧徽章）
+            if ("happylink".equals(r.source)) {
+               String fedTag = Component.translatable("voxlink.browser.source_happylink").getString();
+               int fedW = this.fontWidth(fedTag) + 4;
+               graphics.fill(x + cardW - fedW - 3, y + 24, x + cardW - 3, y + 34, COLOR_CAT_BADGE_BG);
+               this.drawString(graphics, ChatFormatting.GOLD.toString() + fedTag, x + cardW - fedW - 1, y + 25, VoxLinkColors.CAT_BADGE_TEXT);
+            }
             String catLabel = this.getCategoryLabel(r.category);
             int catW = this.fontWidth(catLabel) + 4;
             graphics.fill(x + cardW - catW - 3, y + 3, x + cardW - 3, y + 13, COLOR_CAT_BADGE_BG);

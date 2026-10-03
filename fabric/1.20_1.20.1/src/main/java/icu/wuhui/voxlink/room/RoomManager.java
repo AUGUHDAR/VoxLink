@@ -10,6 +10,7 @@ import icu.wuhui.voxlink.compat.GeyserCompat;
 import icu.wuhui.voxlink.compat.ViaCompat;
 import icu.wuhui.voxlink.network.ConnectionFallback;
 import icu.wuhui.voxlink.network.ConnectionHelper;
+import icu.wuhui.voxlink.network.FedTunnelClient;
 import icu.wuhui.voxlink.network.LogUploadManager;
 import icu.wuhui.voxlink.network.P2PBridge;
 import icu.wuhui.voxlink.network.PeerServer;
@@ -354,6 +355,17 @@ public class RoomManager {
                   roomInfo.setBedrockPort(ctx.geyserPort > 0 ? ctx.geyserPort : -1);
                   roomInfo.setCategory(category);
                   roomInfo.setVisible(visible);
+                  // 互通（双向）：服务端开通了 HL 镜像则启动房主侧隧道（凭据来自 create 回包 fed 字段）
+                  if (response.data.has("fed") && response.data.get("fed").isJsonObject()) {
+                     JsonObject fed = response.data.getAsJsonObject("fed");
+                     roomInfo.setFedHost(fed.has("host") && !fed.get("host").isJsonNull() ? fed.get("host").getAsString() : "");
+                     roomInfo.setFedTunnelPort(fed.has("tunnelPort") ? fed.get("tunnelPort").getAsInt() : 0);
+                     roomInfo.setFedToken(fed.has("token") && !fed.get("token").isJsonNull() ? fed.get("token").getAsString() : "");
+                     roomInfo.setFedPort(fed.has("port") ? fed.get("port").getAsInt() : 0);
+                     if (roomInfo.isFedMirror()) {
+                        this.startFedTunnel(roomInfo, ctx.port);
+                     }
+                  }
                   RoomManager.RoomState state = new RoomManager.RoomState(roomInfo);
                   if (!this.currentRoom.compareAndSet(PENDING, state)) {
                      VoxLinkMod.LOGGER.warn("[createRoom] State cleared (timeout?), discard late result");
@@ -1087,8 +1099,41 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       // 离开房间/关闭时清理 WS 推送监听器
       this.signalingClient.setSignalPushHandler(null);
       this.connectionManager.stopAllConnectionWork();
+      // 互通（双向）：房主侧 HL 镜像隧道随房间拆解一并停止
+      this.stopFedTunnel();
       // 任何完整拆解（主动离开/权威掉线）都应复位降级状态，避免影响下一房间
       this.signalingDegraded = false;
+   }
+
+   // 互通（双向）：房主侧 HL 镜像隧道（建房开通，退房/关房即停）
+   private volatile FedTunnelClient fedTunnel;
+
+   private synchronized void startFedTunnel(RoomInfo roomInfo, int localPort) {
+      this.stopFedTunnel();
+      Minecraft mc = Minecraft.getInstance();
+      this.fedTunnel = new FedTunnelClient(
+         roomInfo.getFedHost(), roomInfo.getFedTunnelPort(), roomInfo.getCode(), roomInfo.getFedToken(), localPort,
+         () -> mc != null && mc.getSingleplayerServer() != null && mc.level != null,
+         () -> {
+            IntegratedServer s = mc == null ? null : mc.getSingleplayerServer();
+            return s == null ? 0 : s.getPlayerCount();
+         },
+         (msg, fatal) -> {
+            if (fatal) {
+               VoxLinkMod.LOGGER.warn("[fed-tunnel] {}", msg);
+            }
+         });
+      this.fedTunnel.start();
+      VoxLinkMod.LOGGER.info("[fed-tunnel] started code={} host={} tunnelPort={} localPort={}",
+         roomInfo.getCode(), roomInfo.getFedHost(), roomInfo.getFedTunnelPort(), localPort);
+   }
+
+   public synchronized void stopFedTunnel() {
+      FedTunnelClient t = this.fedTunnel;
+      this.fedTunnel = null;
+      if (t != null) {
+         t.stop();
+      }
    }
 
    private synchronized void handleNameModerationUpdate(RoomManager.RoomState state, String status, String reason, String newName, boolean approved) {
