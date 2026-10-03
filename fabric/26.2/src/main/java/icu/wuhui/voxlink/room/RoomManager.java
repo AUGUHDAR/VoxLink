@@ -362,6 +362,7 @@ public class RoomManager {
                      roomInfo.setFedTunnelPort(fed.has("tunnelPort") ? fed.get("tunnelPort").getAsInt() : 0);
                      roomInfo.setFedToken(fed.has("token") && !fed.get("token").isJsonNull() ? fed.get("token").getAsString() : "");
                      roomInfo.setFedPort(fed.has("port") ? fed.get("port").getAsInt() : 0);
+                     roomInfo.setFedCode(fed.has("code") && !fed.get("code").isJsonNull() ? fed.get("code").getAsString() : "");
                      if (roomInfo.isFedMirror()) {
                         this.startFedTunnel(roomInfo, ctx.port);
                      }
@@ -1110,8 +1111,9 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
    private synchronized void startFedTunnel(RoomInfo roomInfo, int localPort) {
       this.stopFedTunnel();
       Minecraft mc = Minecraft.getInstance();
+      String fedCode = roomInfo.getFedCode().isEmpty() ? roomInfo.getCode() : roomInfo.getFedCode();
       this.fedTunnel = new FedTunnelClient(
-         roomInfo.getFedHost(), roomInfo.getFedTunnelPort(), roomInfo.getCode(), roomInfo.getFedToken(), localPort,
+         roomInfo.getFedHost(), roomInfo.getFedTunnelPort(), fedCode, roomInfo.getFedToken(), localPort,
          () -> mc != null && mc.getSingleplayerServer() != null && mc.level != null,
          () -> {
             IntegratedServer s = mc == null ? null : mc.getSingleplayerServer();

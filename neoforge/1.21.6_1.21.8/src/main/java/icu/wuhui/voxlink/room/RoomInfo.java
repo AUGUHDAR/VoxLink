@@ -78,6 +78,7 @@ public class RoomInfo {
    private volatile int fedTunnelPort = 0;
    private volatile String fedToken = "";
    private volatile int fedPort = 0;
+   private volatile String fedCode = "";
 
    public boolean isFedMirror() {
       return this.fedPort > 0 && !this.fedToken.isEmpty();
@@ -113,6 +114,14 @@ public class RoomInfo {
 
    public void setFedPort(int port) {
       this.fedPort = port;
+   }
+
+   public String getFedCode() {
+      return this.fedCode;
+   }
+
+   public void setFedCode(String code) {
+      this.fedCode = code == null ? "" : code;
    }
    private volatile boolean visible = true;
    private volatile boolean sameCgnat = false;
