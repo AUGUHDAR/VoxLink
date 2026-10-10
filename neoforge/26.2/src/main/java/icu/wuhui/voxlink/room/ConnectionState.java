@@ -27,13 +27,13 @@ public enum ConnectionState {
 
    public boolean canTransitionTo(ConnectionState next) {
       return switch (this) {
-         case IDLE -> next == STUN_PROBE || next == DISCONNECTED || next == UDP_PUNCH || next == TRANSPORT_SETUP;
-         case STUN_PROBE -> next == SIGNAL_EXCHANGE || next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED;
-         case SIGNAL_EXCHANGE -> next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED || next == TRANSPORT_SETUP;
-         case UDP_PUNCH -> next == TRANSPORT_SETUP || next == TCP_FALLBACK || next == FAILED || next == CONNECTED || next == IDLE || next == STUN_PROBE || next == SIGNAL_EXCHANGE;
-         case TCP_FALLBACK -> next == TRANSPORT_SETUP || next == FAILED || next == CONNECTED || next == STUN_PROBE || next == UDP_PUNCH || next == IDLE;
-         case TRANSPORT_SETUP -> next == CONNECTED || next == FAILED || next == UDP_PUNCH || next == IDLE;
-         case CONNECTED -> next == DISCONNECTED || next == UDP_PUNCH || next == IDLE;
+         case IDLE -> next == STUN_PROBE || next == DISCONNECTED || next == UDP_PUNCH || next == TRANSPORT_SETUP || next == CONNECTED;
+         case STUN_PROBE -> next == SIGNAL_EXCHANGE || next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED || next == CONNECTED || next == DISCONNECTED;
+         case SIGNAL_EXCHANGE -> next == UDP_PUNCH || next == TCP_FALLBACK || next == FAILED || next == TRANSPORT_SETUP || next == CONNECTED || next == DISCONNECTED;
+         case UDP_PUNCH -> next == TRANSPORT_SETUP || next == TCP_FALLBACK || next == FAILED || next == CONNECTED || next == IDLE || next == STUN_PROBE || next == SIGNAL_EXCHANGE || next == DISCONNECTED;
+         case TCP_FALLBACK -> next == TRANSPORT_SETUP || next == FAILED || next == CONNECTED || next == STUN_PROBE || next == UDP_PUNCH || next == IDLE || next == DISCONNECTED;
+         case TRANSPORT_SETUP -> next == CONNECTED || next == FAILED || next == UDP_PUNCH || next == IDLE || next == DISCONNECTED;
+         case CONNECTED -> next == DISCONNECTED || next == UDP_PUNCH || next == IDLE || next == STUN_PROBE;
          case DISCONNECTED, FAILED -> next == IDLE || next == STUN_PROBE || next == UDP_PUNCH;
       };
    }

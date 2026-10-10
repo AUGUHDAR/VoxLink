@@ -11,6 +11,8 @@ base {
 
 repositories {
     mavenCentral()
+    // // e4mc 封存(2026-10-05): Skye 拒绝外部使用其基础设施, 待自建 quiclime 兼容中继后启用; 启用步骤见记忆 voxlink-e4mc-propagation-landmines
+    // maven { url 'https://maven.is-quite.gay/' }
 }
 
 loom {
@@ -37,7 +39,27 @@ jar {
     exclude 'android/**'
 }
 
+// e4mc 封存: 待自建 quiclime 中继后启用
+sourceSets {
+    main {
+        java {
+            exclude 'icu/wuhui/voxlink/e4mc/**'
+            exclude 'icu/wuhui/voxlink/mixin/E4mcServerConnectionMixin.java'
+        }
+    }
+}
+
 dependencies {
+    // e4mc 封存(2026-10-05): Skye 拒绝外部使用其基础设施, 待自建 quiclime 兼容中继后启用; 启用步骤见记忆 voxlink-e4mc-propagation-landmines
+    /*
+    // e4mc 逃生通道: Skye 补丁版 QUIC 嵌包, native 由 natives.e4mc.link 运行时下发
+    implementation("io.netty.incubator:netty-incubator-codec-classes-quic:0.0.74.Final.e4mc") {
+        transitive = false
+    }
+    include("io.netty.incubator:netty-incubator-codec-classes-quic:0.0.74.Final.e4mc") {
+        transitive = false
+    }
+    */
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.fabric_loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"

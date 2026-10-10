@@ -366,7 +366,7 @@ public class P2PBridge {
       });
    }
 
-   /** 打洞胜利socket: joiner直建本地桥 */
+   /** TCP 打洞胜利 socket 交棒：joiner 侧直接建本地桥，不再二次 connect。 */
    public static synchronized CompletableFuture<Integer> connectToHostPreconnected(Socket punched, String hostIp, int hostPort) {
       cancelled.set(false);
       tcpJoinerBridgeConnectedV4.set(false);
@@ -422,7 +422,7 @@ public class P2PBridge {
       }, getOrCreateExecutor());
    }
 
-   /** 打洞胜利socket: host直桥MC */
+   /** TCP 打洞胜利 socket 交棒：host 侧直桥本地 MC（等价 accept 后处理）。 */
    public static synchronized boolean bridgePunchedHostSocket(Socket punched, int minecraftPort) {
       if (punched == null || punched.isClosed() || minecraftPort <= 0) {
          return false;
@@ -772,6 +772,7 @@ public class P2PBridge {
       LOGGER.info("[P2PBridge] disconnect called from {}", caller);
       cancelled.set(true);
       running.set(false);
+      joinerSessionAlive = false;
 
       for (P2PBridge.BridgePair pair : activePairs) {
          pair.close();
@@ -872,6 +873,7 @@ public class P2PBridge {
    public static synchronized int startUdpJoinerBridge(ReliableUdpTransport transport) {
       cancelled.set(false);
       joinerBridgeConnected.set(false);
+      resetJoinerDownlink();
       boolean hasActiveUdp = activeUdpTransports.stream().anyMatch(t -> t.isConnected());
       if (running.get() && joinerPort > 0 && hasActiveUdp) {
          return joinerPort;
@@ -885,7 +887,9 @@ public class P2PBridge {
          joinerServer = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
          joinerPort = joinerServer.getLocalPort();
          running.set(true);
+         joinerSessionAlive = true;
          activeUdpTransports.add(transport);
+         joinerCarrier = transport;
          transport.start();
          getOrCreateExecutor().execute(() -> acceptUdpJoinerConnections(joinerServer, transport));
          icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.bridge_connecting");
@@ -904,6 +908,171 @@ public class P2PBridge {
          joinerServer = null;
          joinerPort = -1;
          return -1;
+      }
+   }
+
+   // ===== joiner 侧载具热切（自动中继换道 / 后台直连升级共用） =====
+   // MC 客户端的 TCP 连接与本地桥端口全程不动，只换背后承载的 RUDP 传输。
+   // 字节流零丢失的锁纪律：上行泵写出口必须在 JOINER_SWAP_LOCK 内且暂停时 wait；
+   // 热切=暂停泵→排干旧出口积压→锁内二次排干+原子换引用→唤醒泵。
+   private static volatile ReliableUdpTransport joinerCarrier;
+   private static volatile boolean joinerPumpPaused;
+   /** joiner 会话存活标志：startUdpJoinerBridge 置 true，disconnect() 置 false；
+    * accept 循环在首个 MC 连接后清理 joinerServer/joinerPort，不能用它们当存活判据。 */
+   private static volatile boolean joinerSessionAlive;
+   private static final Object JOINER_SWAP_LOCK = new Object();
+   // 下行首包标志：中继"真连接验证"用——服务器经中继回包到达即算该道活
+   private static volatile boolean joinerDownlinkSeen = false;
+
+   public static void markJoinerDownlink() {
+      joinerDownlinkSeen = true;
+   }
+
+   public static boolean hasJoinerDownlink() {
+      return joinerDownlinkSeen;
+   }
+
+   public static void resetJoinerDownlink() {
+      joinerDownlinkSeen = false;
+   }
+
+   // ===== 连接期上行日志（中继换道重放用） =====
+   // 从 MC 客户端读出的每一个字节都记账，直到"真连接验证"通过（下行首包/进世界）。
+   // 换道时整段重放到新载具：旧道未送达的握手字节不丢，MC 服务器看到完整全新握手。
+   // 验证通过后停止记账（活会话不允许重放语义）；上限 256KB 防失控。
+   private static final int JOURNAL_MAX_BYTES = 262144;
+   private static final Object JOURNAL_LOCK = new Object();
+   private static java.io.ByteArrayOutputStream joinerUplinkJournal;
+   private static volatile boolean joinerJournalActive;
+   private static volatile boolean joinerJournalOverflow;
+
+   public static void startJoinerJournal() {
+      synchronized (JOURNAL_LOCK) {
+         joinerUplinkJournal = new java.io.ByteArrayOutputStream();
+         joinerJournalActive = true;
+         joinerJournalOverflow = false;
+      }
+   }
+
+   public static void stopJoinerJournal() {
+      joinerJournalActive = false;
+   }
+
+   /** 取走当前日志快照（不停止记账；换道后由 startJoinerJournal 重置）。 */
+   public static byte[] takeJoinerUplinkJournal() {
+      synchronized (JOURNAL_LOCK) {
+         if (joinerJournalOverflow || joinerUplinkJournal == null) {
+            return joinerJournalOverflow ? null : new byte[0];
+         }
+         return joinerUplinkJournal.toByteArray();
+      }
+   }
+
+   private static void journalUplink(byte[] buf, int off, int len) {
+      if (!joinerJournalActive) {
+         return;
+      }
+      synchronized (JOURNAL_LOCK) {
+         if (!joinerJournalActive || joinerUpstreamOverflowed()) {
+            return;
+         }
+         if (joinerUplinkJournal.size() + len > JOURNAL_MAX_BYTES) {
+            joinerJournalOverflow = true;
+            joinerJournalActive = false;
+            LOGGER.warn("[Bridge] joiner uplink journal overflow ({}B), relay swap disabled this session", JOURNAL_MAX_BYTES);
+            return;
+         }
+         joinerUplinkJournal.write(buf, off, len);
+      }
+   }
+
+   private static boolean joinerUpstreamOverflowed() {
+      return joinerJournalOverflow;
+   }
+
+   /** joiner 桥当前承载（无桥=null）。 */
+   public static ReliableUdpTransport getJoinerCarrier() {
+      return joinerCarrier;
+   }
+
+   /**
+    * 热切 joiner 桥承载：排干旧传输出口积压 → 原子换载具 → 种子重放 → 关旧开新。
+    * seedJournal（连接期上行日志）必须在泵解除暂停前、在临界区内写入新载具——
+    * 否则泵恢复后先写未读字节，种子后到，字节序倒置即流损坏（本地实验实证）。
+    * 前置：本地桥已在跑（joinerPort>0）。返回是否成功。
+    */
+   public static boolean swapJoinerCarrier(ReliableUdpTransport newTransport, byte[] seedJournal) {
+      if (newTransport == null) {
+         return false;
+      }
+      synchronized (JOINER_SWAP_LOCK) {
+         if (joinerServer == null || joinerServer.isClosed() || joinerPort <= 0) {
+            return false;
+         }
+         ReliableUdpTransport oldT = joinerCarrier;
+         if (oldT == newTransport) {
+            return true;
+         }
+         // 阶段1：暂停泵（锁内置位，泵在锁内写出口，此刻不可能有在途写）
+         joinerPumpPaused = true;
+      }
+
+      // 阶段2：锁外排干旧出口积压（泵已暂停；ack 由网络线程推进无需锁）
+      ReliableUdpTransport oldT = joinerCarrier;
+      if (oldT != null && oldT.isConnected() && oldT.hasPendingOutbound()) {
+         long ackDeadline = System.currentTimeMillis() + 3000L;
+         while (oldT.isConnected() && oldT.hasPendingOutbound() && System.currentTimeMillis() < ackDeadline) {
+            try {
+               Thread.sleep(20L);
+            } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               break;
+            }
+         }
+      }
+
+      synchronized (JOINER_SWAP_LOCK) {
+         // 阶段3：锁内二次排干（防阶段2结束后最后一批写入）→ 原子换引用
+         oldT = joinerCarrier;
+         if (oldT != null && oldT != newTransport && oldT.isConnected() && oldT.hasPendingOutbound()) {
+            long ackDeadline2 = System.currentTimeMillis() + 1000L;
+            while (oldT.isConnected() && oldT.hasPendingOutbound() && System.currentTimeMillis() < ackDeadline2) {
+               try {
+                  JOINER_SWAP_LOCK.wait(20L);
+               } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  break;
+               }
+            }
+         }
+         activeUdpTransports.add(newTransport);
+         joinerCarrier = newTransport;
+         newTransport.start();
+         // 种子重放：泵仍处暂停态，新载具上字节序 = 旧载具已交付流 + 种子 + 泵后续写入
+         if (seedJournal != null && seedJournal.length > 0) {
+            try {
+               newTransport.getOutputStream().write(seedJournal);
+               newTransport.getOutputStream().flush();
+               LOGGER.info("[Bridge] joiner carrier seeded with {} journal bytes", seedJournal.length);
+            } catch (Exception e) {
+               LOGGER.warn("[Bridge] journal seed write failed: {}", e.getMessage());
+            }
+         }
+         // 换道即重启 journal(此刻泵仍被 JOINER_SWAP_LOCK 暂停, 无竞态):
+         // 不重启的话二次换道 take 会把旧快照+已交付字节整段重放=字节重复流损坏
+         startJoinerJournal();
+         ReliableUdpTransport closed = oldT != null && oldT != newTransport ? oldT : null;
+         joinerPumpPaused = false;
+         JOINER_SWAP_LOCK.notifyAll();
+         if (closed != null) {
+            activeUdpTransports.remove(closed);
+            try {
+               closed.close();
+            } catch (Exception e) {
+            }
+         }
+         LOGGER.info("[Bridge] joiner carrier swapped (old pending drained)");
+         return true;
       }
    }
 
@@ -955,8 +1124,8 @@ public class P2PBridge {
             joinerBridgeConnected.set(true);
             LOGGER.info("UDP: MC client connected to joiner bridge");
             ExecutorService exec = getOrCreateExecutor();
-            exec.submit(() -> bridgeUdpToMc(transport, mcClient, null));
-            bridgeMcToUdp(transport, mcClient, null);
+            exec.submit(() -> bridgeCarrierToMcJoiner(mcClient));
+            bridgeMcToCarrierJoiner(mcClient);
          } catch (IOException e) {
             if (running.get() && !js.isClosed()) {
                LOGGER.warn("UDP joiner bridge accept error: {}", e.getMessage());
@@ -979,10 +1148,226 @@ public class P2PBridge {
       }
    }
 
+   /** joiner 下行泵：中继/host → MC 客户端。旧载具 EOF/异常时若桥仍存活则等待换道（15s 上限），换载续搬。 */
+   private static void bridgeCarrierToMcJoiner(Socket mcSocket) {
+
+      try {
+         java.io.OutputStream mcOut = mcSocket.getOutputStream();
+         byte[] buffer = new byte[32768];
+         long carrierDeadSince = 0L;
+
+         while (running.get() && !mcSocket.isClosed()) {
+            ReliableUdpTransport t = joinerCarrier;
+            if (t == null) {
+               try {
+                  Thread.sleep(50L);
+               } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  return;
+               }
+               continue;
+            }
+
+            int bytesRead;
+            try {
+               bytesRead = t.getInputStream().read(buffer);
+            } catch (IOException swapE) {
+               bytesRead = -1;
+            }
+            if (bytesRead == -1) {
+               if (t != joinerCarrier) {
+                  carrierDeadSince = 0L;
+                  continue;
+               }
+               // 当前载具死亡：若桥还活着，可能是换道挂起中——等新载具
+               if (carrierDeadSince == 0L) {
+                  carrierDeadSince = System.currentTimeMillis();
+               }
+               if (System.currentTimeMillis() - carrierDeadSince < 15_000L
+                  && running.get() && joinerSessionAlive) {
+                  try {
+                     Thread.sleep(100L);
+                  } catch (InterruptedException e) {
+                     Thread.currentThread().interrupt();
+                     return;
+                  }
+                  continue;
+               }
+               LOGGER.info("UDP->MC joiner pump end: carrier dead, no swap in 15s");
+               return;
+            }
+            carrierDeadSince = 0L;
+            if (bytesRead > 0) {
+               markJoinerDownlink();
+               mcOut.write(buffer, 0, bytesRead);
+               mcOut.flush();
+            }
+         }
+      } catch (IOException e) {
+         if (running.get()) {
+            LOGGER.info("UDP->MC joiner pump closed: {}", e.getMessage());
+         }
+      } finally {
+         try {
+            mcSocket.shutdownOutput();
+         } catch (IOException ignored) {
+         }
+      }
+   }
+
+   /** joiner 上行泵：MC 客户端 → 中继/host。写出口在热切锁内进行（暂停时 wait），热切换载续搬。 */
+   private static void bridgeMcToCarrierJoiner(Socket mcSocket) {
+
+      try {
+         java.io.InputStream mcIn = mcSocket.getInputStream();
+         byte[] buffer = new byte[32768];
+
+         readLoop:
+         while (running.get() && !mcSocket.isClosed()) {
+            int bytesRead = mcIn.read(buffer);
+            if (bytesRead == -1) {
+               LOGGER.info("MC->UDP joiner pump end: MC closed");
+               ReliableUdpTransport t2 = joinerCarrier;
+               if (t2 != null) {
+                  try {
+                     t2.close();
+                  } catch (Exception ignored) {
+                  }
+               }
+               return;
+            }
+            if (bytesRead <= 0) {
+               continue;
+            }
+
+            journalUplink(buffer, 0, bytesRead);
+
+            synchronized (JOINER_SWAP_LOCK) {
+               while (joinerPumpPaused && running.get()) {
+                  try {
+                     JOINER_SWAP_LOCK.wait(200L);
+                  } catch (InterruptedException e) {
+                     Thread.currentThread().interrupt();
+                     return;
+                  }
+               }
+               ReliableUdpTransport t = joinerCarrier;
+               if (t == null) {
+                  continue readLoop;
+               }
+               try {
+                  t.getOutputStream().write(buffer, 0, bytesRead);
+                  t.getOutputStream().flush();
+               } catch (IOException e) {
+                  if (t != joinerCarrier) {
+                     // 热切竞速：绝不向新载具重发本段——journal 在写入前已记账，
+                     // 换道重放会完整补上；此处重发会与重放产生字节重复
+                     continue readLoop;
+                  }
+                  // 当前载具死亡：字节已在 journal 里（写入前记账），换道重放会补上。
+                  // 桥还活着=可能换道挂起中，等待换载；15s 无换道=真死亡，退出。
+                  long waitStart = System.currentTimeMillis();
+                  while (System.currentTimeMillis() - waitStart < 15_000L
+                     && running.get() && joinerCarrier == t && joinerSessionAlive) {
+                     try {
+                        JOINER_SWAP_LOCK.wait(200L);
+                     } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                     }
+                  }
+                  if (joinerCarrier != t) {
+                     continue readLoop; // 换载成功, 本段由 journal 重放覆盖
+                  }
+                  LOGGER.info("MC->UDP joiner pump end: {}", e.getMessage());
+                  return;
+               }
+            }
+         }
+      } catch (IOException e) {
+         if (running.get()) {
+            LOGGER.info("MC->UDP joiner pump closed: {}", e.getMessage());
+         }
+      }
+   }
+
    public static synchronized void startUdpHostBridgeForClient(String clientId, ReliableUdpTransport transport, int mcPort, Runnable onClose) {
       cancelled.set(false);
       activeUdpTransports.add(transport);
       transport.start();
+      running.set(true);
+      // legacy 载体：整传输承载一条会话，桥死即关传输
+      startHostBridgeCore(clientId, new HostBridgeCarrier() {
+         @Override
+         public InputStream input() {
+            return transport.getInputStream();
+         }
+
+         @Override
+         public OutputStream output() {
+            return transport.getOutputStream();
+         }
+
+         @Override
+         public boolean alive() {
+            return transport.isConnected();
+         }
+
+         @Override
+         public void shutdown() {
+            activeUdpTransports.remove(transport);
+            try {
+               transport.close();
+            } catch (Exception e) {
+            }
+         }
+      }, mcPort, onClose);
+   }
+
+   /**
+    * 玩家中继 v2（mux 子通道）host 侧桥：被中继房客的会话承载在候选者传输的子通道上。
+    * 桥死只关子通道（EOF 标记），绝不关父传输——候选者自己的会话不能被连坐。
+    */
+   public static synchronized void startUdpHostBridgeForRelayedClient(String relayedClientId, ReliableUdpTransport parentTransport, int muxChan, int mcPort, Runnable onClose) {
+      startHostBridgeCore("relay:" + relayedClientId, new HostBridgeCarrier() {
+         @Override
+         public InputStream input() {
+            return parentTransport.getSubstreamInput(muxChan);
+         }
+
+         @Override
+         public OutputStream output() {
+            return parentTransport.getSubstreamOutput(muxChan);
+         }
+
+         @Override
+         public boolean alive() {
+            return parentTransport.isConnected();
+         }
+
+         @Override
+         public void shutdown() {
+            try {
+               parentTransport.closeSubstream(muxChan);
+            } catch (Exception e) {
+            }
+         }
+      }, mcPort, onClose);
+   }
+
+   /** host 侧桥载体：一条会话的来往流 + 存活判定 + 会话级收尾（不动承载它的传输全局生命）。 */
+   private interface HostBridgeCarrier {
+      InputStream input();
+
+      OutputStream output();
+
+      boolean alive();
+
+      void shutdown();
+   }
+
+   private static void startHostBridgeCore(String clientId, HostBridgeCarrier carrier, int mcPort, Runnable onClose) {
+      cancelled.set(false);
       running.set(true);
       getOrCreateExecutor()
          .execute(
@@ -993,7 +1378,7 @@ public class P2PBridge {
                AtomicBoolean failureHandled = new AtomicBoolean(false);
 
                try {
-                  InputStream udpIn = transport.getInputStream();
+                  InputStream udpIn = carrier.input();
                   byte[] firstBuf = new byte[32768];
                   Thread firstPacketWatchdog = new Thread(() -> {
                      try {
@@ -1001,26 +1386,26 @@ public class P2PBridge {
                         // 若其他传输路径已活跃（TCP 直连桥对存在）或会话已在其他通道生效，
                         // 说明竞争已被别的路径获胜，本桥已落选——不触发 ICE restart、不发错误广播
                         Thread.sleep(FIRST_PACKET_WATCHDOG_MS);
-                        if (firstPacketArrived.get() || !transport.isConnected() || !running.get()) {
+                        if (firstPacketArrived.get() || !carrier.alive() || !running.get()) {
                            return;
                         }
 
                         if (!activePairs.isEmpty()) {
                            LOGGER.info(
-                              "[BridgeWatchdog] UDP host bridge for client {} idle {}s, TCP direct path active ({} pair(s)), skip",
+                              "[BridgeWatchdog] UDP host bridge for {} idle {}s, TCP direct path active ({} pair(s)), skip",
                               new Object[]{clientId, FIRST_PACKET_WATCHDOG_MS / 1000, activePairs.size()}
                            );
                            return;
                         }
 
                         if (ConnectionState.getCurrent() == ConnectionState.CONNECTED) {
-                           LOGGER.info("UDP host bridge for client {} idle {}s, session active on other channel, skip ICE restart", clientId, FIRST_PACKET_WATCHDOG_MS / 1000);
+                           LOGGER.info("UDP host bridge for {} idle {}s, session active on other channel, skip ICE restart", clientId, FIRST_PACKET_WATCHDOG_MS / 1000);
                            return;
                         }
 
                         // 不再直接触发 ICE restart：仅记录 WARN 并进入延长观察窗口
                         LOGGER.warn(
-                           "UDP host bridge for client {} first packet timeout ({}s), extended observation {}s before teardown",
+                           "UDP host bridge for {} first packet timeout ({}s), extended observation {}s before teardown",
                            clientId, FIRST_PACKET_WATCHDOG_MS / 1000, FIRST_PACKET_WATCHDOG_MS / 1000
                         );
 
@@ -1028,16 +1413,16 @@ public class P2PBridge {
                         long extendedDeadlineMs = System.currentTimeMillis() + (long)FIRST_PACKET_WATCHDOG_MS;
                         while (System.currentTimeMillis() < extendedDeadlineMs) {
                            if (firstPacketArrived.get()) {
-                              LOGGER.info("[BridgeWatchdog] UDP host bridge for client {} received traffic, extended observation revoked", clientId);
+                              LOGGER.info("[BridgeWatchdog] UDP host bridge for {} received traffic, extended observation revoked", clientId);
                               return;
                            }
 
-                           if (!transport.isConnected() || !running.get()) {
+                           if (!carrier.alive() || !running.get()) {
                               return;
                            }
 
                            if (!activePairs.isEmpty()) {
-                              LOGGER.info("[BridgeWatchdog] UDP host bridge for client {} other path took over, extended observation revoked", clientId);
+                              LOGGER.info("[BridgeWatchdog] UDP host bridge for {} other path took over, extended observation revoked", clientId);
                               return;
                            }
 
@@ -1045,14 +1430,14 @@ public class P2PBridge {
                         }
 
                         // 连续两个窗口零流量且本桥仍是唯一路径时才走断开回调
-                        if (!firstPacketArrived.get() && transport.isConnected() && running.get() && activePairs.isEmpty() && ConnectionState.getCurrent() != ConnectionState.CONNECTED) {
+                        if (!firstPacketArrived.get() && carrier.alive() && running.get() && activePairs.isEmpty() && ConnectionState.getCurrent() != ConnectionState.CONNECTED) {
                            LOGGER.warn(
-                              "[BridgeWatchdog] UDP host bridge for client {} zero traffic for 2 consecutive windows ({}s each), closing bridge",
+                              "[BridgeWatchdog] UDP host bridge for {} zero traffic for 2 consecutive windows ({}s each), closing bridge",
                               clientId, FIRST_PACKET_WATCHDOG_MS / 1000
                            );
-                           teardownUdpHostBridge(transport, null, failureHandled, onCloseFinal);
+                           teardownCarrierHostBridge(carrier, null, failureHandled, onCloseFinal);
                         } else {
-                           LOGGER.info("[BridgeWatchdog] UDP host bridge for client {} extended observation finished, bridge kept", clientId);
+                           LOGGER.info("[BridgeWatchdog] UDP host bridge for {} extended observation finished, bridge kept", clientId);
                         }
                      } catch (InterruptedException var3) {
                      }
@@ -1064,13 +1449,13 @@ public class P2PBridge {
                   // 不立即判死，在宽限期内周期性重试读取；期间保持 P2P 传输存活
                   if (firstLen <= 0) {
                      LOGGER.warn(
-                        "UDP host bridge for client {} stream closed before first packet (read={}), grace period {}ms before failing",
+                        "UDP host bridge for {} stream closed before first packet (read={}), grace period {}ms before failing",
                         new Object[]{clientId, firstLen, FIRST_PACKET_EOF_GRACE_MS}
                      );
                      long eofGraceDeadlineMs = System.currentTimeMillis() + (long)FIRST_PACKET_EOF_GRACE_MS;
                      while (firstLen <= 0 && System.currentTimeMillis() < eofGraceDeadlineMs && running.get()) {
                         Thread.sleep((long)MC_CONNECT_RETRY_INTERVAL_MS);
-                        if (transport.isConnected()) {
+                        if (carrier.alive()) {
                            firstLen = udpIn.read(firstBuf);
                         }
                      }
@@ -1092,7 +1477,7 @@ public class P2PBridge {
                   mcOut.write(firstBuf, 0, firstLen);
                   mcOut.flush();
                   LOGGER.info(
-                     "UDP host bridge for client {} connected to MC server on port {} (lazy, first packet {} bytes)", new Object[]{clientId, mcPort, firstLen}
+                     "UDP host bridge for {} connected to MC server on port {} (lazy, first packet {} bytes)", new Object[]{clientId, mcPort, firstLen}
                   );
                   ExecutorService exec = getOrCreateExecutor();
                   Socket mcSocketFinal = mcSocket;
@@ -1104,17 +1489,117 @@ public class P2PBridge {
                         onCloseFinal.run();
                      }
                   };
-                  exec.submit(() -> bridgeUdpToMc(transport, mcSocketFinal, onCloseOnce));
-                  bridgeMcToUdp(transport, mcSocketFinal, onCloseOnce);
+                  exec.submit(() -> bridgeCarrierToMc(carrier, mcSocketFinal, onCloseOnce));
+                  bridgeMcToCarrier(carrier, mcSocketFinal, onCloseOnce);
                } catch (IOException e) {
-                  LOGGER.error("UDP host bridge for client {} failed to connect to MC server: {}", clientId, e.getMessage());
-                  teardownUdpHostBridge(transport, mcSocket, failureHandled, onCloseFinal);
+                  LOGGER.error("UDP host bridge for {} failed to connect to MC server: {}", clientId, e.getMessage());
+                  teardownCarrierHostBridge(carrier, mcSocket, failureHandled, onCloseFinal);
                } catch (InterruptedException e) {
                   Thread.currentThread().interrupt();
-                  teardownUdpHostBridge(transport, mcSocket, failureHandled, onCloseFinal);
+                  teardownCarrierHostBridge(carrier, mcSocket, failureHandled, onCloseFinal);
                }
             }
          );
+   }
+
+   /** UDP host 桥失败收尾（幂等）：关闭本地 MC 套接字并回调 onClose；watchdog 与主流程并发触发只执行一次。 */
+   private static void teardownCarrierHostBridge(HostBridgeCarrier carrier, Socket mcSocket, AtomicBoolean failureHandled, Runnable onClose) {
+      if (!failureHandled.compareAndSet(false, true)) {
+         return;
+      }
+
+      try {
+         carrier.shutdown();
+      } catch (Exception var7) {
+      }
+
+      if (mcSocket != null) {
+         try {
+            mcSocket.close();
+         } catch (IOException var6) {
+         }
+      }
+
+      if (onClose != null) {
+         onClose.run();
+      }
+   }
+
+   private static void bridgeCarrierToMc(HostBridgeCarrier carrier, Socket mcSocket, Runnable onClose) {
+      InputStream udpIn = carrier.input();
+      OutputStream mcOut = null;
+      int bytesRead = 0;
+
+      try {
+         mcOut = mcSocket.getOutputStream();
+         byte[] buffer = new byte[32768];
+
+         while (running.get() && carrier.alive() && !mcSocket.isClosed() && (bytesRead = udpIn.read(buffer)) != -1) {
+            mcOut.write(buffer, 0, bytesRead);
+            mcOut.flush();
+         }
+
+         LOGGER.info(
+            "UDP->MC exit: running={} conn={} mcClosed={} read={}", new Object[]{running.get(), carrier.alive(), mcSocket.isClosed(), bytesRead}
+         );
+      } catch (IOException e) {
+         if (running.get()) {
+            LOGGER.info("UDP->MC bridge closed: {}", e.getMessage());
+         }
+      } finally {
+         try {
+            mcSocket.shutdownOutput();
+         } catch (IOException var18) {
+         }
+
+         try {
+            mcSocket.close();
+         } catch (IOException var17) {
+         }
+
+         if (onClose != null) {
+            onClose.run();
+         }
+      }
+   }
+
+   private static void bridgeMcToCarrier(HostBridgeCarrier carrier, Socket mcSocket, Runnable onClose) {
+      InputStream mcIn = null;
+      OutputStream udpOut = null;
+      int bytesRead = 0;
+
+      try {
+         mcIn = mcSocket.getInputStream();
+         udpOut = carrier.output();
+         byte[] buffer = new byte[32768];
+
+         while (running.get() && carrier.alive() && !mcSocket.isClosed() && (bytesRead = mcIn.read(buffer)) != -1) {
+            udpOut.write(buffer, 0, bytesRead);
+            udpOut.flush();
+         }
+
+         LOGGER.info(
+            "MC->UDP exit: running={} conn={} mcClosed={} read={}", new Object[]{running.get(), carrier.alive(), mcSocket.isClosed(), bytesRead}
+         );
+      } catch (IOException e) {
+         if (running.get()) {
+            LOGGER.info("MC->UDP bridge closed: {}", e.getMessage());
+         }
+      } finally {
+         try {
+            mcSocket.close();
+         } catch (IOException var18) {
+         }
+
+         try {
+            carrier.shutdown();
+         } catch (Exception var17) {
+         }
+
+         if (onClose != null) {
+            onClose.run();
+         }
+      }
    }
 
    /**
@@ -1167,30 +1652,6 @@ public class P2PBridge {
             Thread.currentThread().interrupt();
             return null;
          }
-      }
-   }
-
-   /** UDP host 桥失败收尾（幂等）：关闭本地 MC 套接字与 P2P 传输并回调 onClose；watchdog 与主流程并发触发只执行一次。 */
-   private static void teardownUdpHostBridge(ReliableUdpTransport transport, Socket mcSocket, AtomicBoolean failureHandled, Runnable onClose) {
-      if (!failureHandled.compareAndSet(false, true)) {
-         return;
-      }
-
-      try {
-         transport.close();
-      } catch (Exception var7) {
-      }
-
-      if (mcSocket != null) {
-         try {
-            mcSocket.close();
-         } catch (IOException var6) {
-         }
-      }
-
-      activeUdpTransports.remove(transport);
-      if (onClose != null) {
-         onClose.run();
       }
    }
 

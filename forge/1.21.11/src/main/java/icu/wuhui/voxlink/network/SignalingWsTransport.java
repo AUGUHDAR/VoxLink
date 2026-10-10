@@ -300,6 +300,10 @@ public final class SignalingWsTransport {
          try {
 icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.signaling_connecting");
             WebSocket.Builder builder = wsHttpClient().newWebSocketBuilder()
+               // 版本头必须随 WS 握手带上：服务端把 WS 帧按握手请求头克隆后内部分发，
+               // /room/list 的 HL 展示闸与 /room/join 的 allowHostPeers 都读这个头；
+               // 缺了即按旧端处理，HL 房在 WS 模式下永远不可见（1.2.0 互通实跑实测）。
+               .header("X-VoxLink-Version", VoxLinkMod.MOD_VERSION)
                .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS));
             builder.buildAsync(URI.create(this.wsUrl), new WsListener())
                .orTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)

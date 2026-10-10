@@ -73,7 +73,9 @@ public class VoxLinkClient implements ClientModInitializer {
          UPnPManager.tryMapAtStartup();
       }
 
-      ClientPlayConnectionEvents.JOIN.register((Join)(handler, sender, client) -> UpdateChecker.checkOnce());
+      ClientPlayConnectionEvents.JOIN.register((Join)(handler, sender, client) -> {
+         UpdateChecker.checkOnce();
+      });
       ClientTickEvents.END_CLIENT_TICK
          .register(
             (EndTick)client -> {

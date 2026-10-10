@@ -86,9 +86,39 @@ repositories {
         url = 'https://repo.spongepowered.org/repository/maven-public/'
     }
     mavenCentral()
+    // // e4mc 封存(2026-10-05): Skye 拒绝外部使用其基础设施, 待自建 quiclime 兼容中继后启用; 启用步骤见记忆 voxlink-e4mc-propagation-landmines
+    // maven { url 'https://maven.is-quite.gay/' }
+}
+
+/*
+// e4mc 封存(2026-10-05): Skye 拒绝外部使用其基础设施, 待自建 quiclime 兼容中继后启用; 启用步骤见记忆 voxlink-e4mc-propagation-landmines
+// e4mc 逃生通道: QUIC classes 解包嵌入 mod jar
+configurations {
+    e4mcQuic
+}
+
+*/
+// e4mc 封存: 待自建 quiclime 中继后启用
+sourceSets {
+    main {
+        java {
+            exclude 'icu/wuhui/voxlink/e4mc/**'
+            exclude 'icu/wuhui/voxlink/mixin/E4mcServerConnectionMixin.java'
+        }
+    }
 }
 
 dependencies {
+    // e4mc 封存(2026-10-05): Skye 拒绝外部使用其基础设施, 待自建 quiclime 兼容中继后启用; 启用步骤见记忆 voxlink-e4mc-propagation-landmines
+    /*
+    // e4mc 逃生通道: Skye 补丁版 QUIC, forge/neoforge 无 loom include 故解包嵌入 jar
+    implementation("io.netty.incubator:netty-incubator-codec-classes-quic:0.0.74.Final.e4mc") {
+        transitive = false
+    }
+    e4mcQuic("io.netty.incubator:netty-incubator-codec-classes-quic:0.0.74.Final.e4mc") {
+        transitive = false
+    }
+    */
     minecraft "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
@@ -129,3 +159,11 @@ jar {
     }
     from("../../LICENSE") {}
 }
+
+/*
+jar {
+    from({ configurations.e4mcQuic.collect { zipTree(it) } }) {
+        exclude 'META-INF/**'
+    }
+}
+*/

@@ -72,6 +72,9 @@ public class ReliableUdpTransport implements AutoCloseable {
    // 旧版行为掐断任何可能自愈的链路, 主要收益是清理对端已死后的僵尸重传。
    private static final int DEAD_PEER_BREAKER_ROUNDS = 20;
    private static final long DEAD_PEER_BREAKER_MIN_SILENCE_MS = 23000L;
+   // 熔断救援: 清窗不丢数据, 转慢速重传直至 ack 覆盖或轮次耗尽
+   private static final long DEAD_PEER_RESCUE_INTERVAL_MS = 6000L;
+   private static final int DEAD_PEER_RESCUE_MAX_ROUNDS = 8;
    private volatile long srtt = -1L;
    private volatile long rttvar = 0L;
    private volatile long rto = 200L;
@@ -101,6 +104,12 @@ public class ReliableUdpTransport implements AutoCloseable {
    // streakStartMs 锚定到本段连续重传起点, 期间任何对端收包都会使 lastRecvTime 前移从而整体复位
    private int deadPeerRetransmitRounds = 0;
    private long deadPeerStreakStartMs = 0L;
+   // 救援队列(sendLock 内访问): 熔断清出的积压。对端恢复后按其 nextExpectedSeq 无损续流;
+   // 直接丢弃会让接收侧卡在 seq 空洞(keepalive 照常流动, 两条判死规则全失效), 数据面静默死亡
+   private final ConcurrentSkipListMap<Integer, ReliableUdpTransport.PendingPacket> deadPeerRescueMap = new ConcurrentSkipListMap<>();
+   private int deadPeerRescueLastSeq = -1;
+   private int deadPeerRescueRounds = 0;
+   private long deadPeerRescueLastResendMs = 0L;
    // 单向死检测(仅scheduler线程)
    private long lastHeartbeatMs = System.currentTimeMillis();
    private int heartbeatFailStreak = 0;
@@ -139,6 +148,190 @@ public class ReliableUdpTransport implements AutoCloseable {
    private volatile int pendingRebindPort = -1;
    private volatile long lastCurrentPortRecvMs = 0L;
    private volatile long pendingRebindTime = 0L;
+
+   // ================= 多路复用子通道（玩家中继 v2 数据面） =================
+   // mux 模式下 DATA 载荷 = [1字节chan][数据]；chan0=本连接自有流（兼容旧读者），
+   // 1..15=中继子通道。仅双方声明 relayMuxV1 时启用；
+   // 未启用时线上字节与历史版本逐字节一致（互操作零影响）。
+   // 共享同一可靠序号空间/窗口/重传：子通道获得与主流一致的可靠有序语义。
+   private volatile boolean muxEnabled = false;
+   private final ConcurrentHashMap<Integer, ReliableUdpTransport.SubChannel> subChannels = new ConcurrentHashMap<>();
+
+   /** 必须在 start() 之前调用；由连接建立时的能力协商结果驱动。 */
+   public void enableMux() {
+      this.muxEnabled = true;
+   }
+
+   public boolean isMuxEnabled() {
+      return this.muxEnabled;
+   }
+
+   public InputStream getSubstreamInput(int chan) {
+      return this.subChannel(chan).getInput();
+   }
+
+   public OutputStream getSubstreamOutput(int chan) {
+      return this.subChannel(chan).getOutput();
+   }
+
+   /** 子通道是否已被对端正常关闭（EOF 到达且缓冲读干）。 */
+   public boolean isSubstreamEof(int chan) {
+      ReliableUdpTransport.SubChannel sc = this.subChannels.get(chan);
+      return sc == null || sc.eof;
+   }
+
+   private ReliableUdpTransport.SubChannel subChannel(int chan) {
+      return this.subChannels.computeIfAbsent(chan, k -> new ReliableUdpTransport.SubChannel());
+   }
+
+   /**
+    * 收到完整 DATA 载荷后的统一投递口：mux 模式按首字节 chan 路由，
+    * 载荷长度 1（仅 chan 字节）= 该子通道对端关闭（EOF）。
+    */
+   private void deliverPayload(byte[] payload) {
+      if (!this.muxEnabled) {
+         this.inputStream.writeBuffer(payload);
+         return;
+      }
+      if (payload.length == 0) {
+         return;
+      }
+      int chan = payload[0] & 0xFF;
+      if (payload.length == 1) {
+         ReliableUdpTransport.SubChannel sc = this.subChannels.get(chan);
+         if (sc != null) {
+            sc.markEof();
+         } else if (chan == 0) {
+            this.inputStream.markEof();
+         } else if (chan >= 1 && chan <= 7) {
+            // 早到 EOF(对端先关而本端子通道未建): 落位标记让读侧即刻见 -1,
+            // 不再把等待方挂到传输级判死; >7 视为垃圾不落位
+            this.subChannel(chan).markEof();
+         }
+         return;
+      }
+      byte[] inner = java.util.Arrays.copyOfRange(payload, 1, payload.length);
+      if (chan == 0) {
+         this.inputStream.writeBuffer(inner);
+      } else {
+         this.subChannel(chan).writeBuffer(inner);
+      }
+   }
+
+   private class SubChannel {
+      private final java.util.concurrent.ConcurrentLinkedQueue<byte[]> chunks = new java.util.concurrent.ConcurrentLinkedQueue<>();
+      private volatile boolean eof = false;
+
+      void writeBuffer(byte[] data) {
+         this.chunks.offer(data);
+      }
+
+      void markEof() {
+         this.eof = true;
+      }
+
+      InputStream getInput() {
+         return new InputStream() {
+            private byte[] currentChunk = null;
+            private int currentPos = 0;
+
+            @Override
+            public int read() throws IOException {
+               byte[] b = new byte[1];
+               int n = this.read(b, 0, 1);
+               return n <= 0 ? -1 : b[0] & 0xFF;
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+               if (len == 0) {
+                  return 0;
+               }
+               synchronized (ReliableUdpTransport.this.recvLock) {
+                  while (this.currentChunk == null || this.currentPos >= this.currentChunk.length) {
+                     this.currentChunk = SubChannel.this.chunks.poll();
+                     this.currentPos = 0;
+                     if (this.currentChunk != null) {
+                        if (ReliableUdpTransport.this.bufferedChunks > 0) {
+                           ReliableUdpTransport.this.bufferedChunks--;
+                        }
+                     } else {
+                        if (SubChannel.this.eof
+                           || !ReliableUdpTransport.this.running
+                           || ReliableUdpTransport.this.closed.get()) {
+                           return -1;
+                        }
+                        try {
+                           ReliableUdpTransport.this.recvLock.wait(500L);
+                        } catch (InterruptedException e) {
+                           Thread.currentThread().interrupt();
+                           throw new IOException("Interrupted");
+                        }
+                     }
+                  }
+                  if (this.currentChunk == null) {
+                     return -1;
+                  }
+                  int avail = this.currentChunk.length - this.currentPos;
+                  int toRead = Math.min(len, avail);
+                  System.arraycopy(this.currentChunk, this.currentPos, b, off, toRead);
+                  this.currentPos += toRead;
+                  if (this.currentPos >= this.currentChunk.length) {
+                     this.currentChunk = null;
+                     this.currentPos = 0;
+                  }
+                  return toRead;
+               }
+            }
+         };
+      }
+
+      OutputStream getOutput() {
+         return new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+               this.write(new byte[]{(byte)b}, 0, 1);
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+               ReliableUdpTransport.this.sendBytes(b, off, len, SubChannel.this.chanId());
+            }
+
+            @Override
+            public void close() throws IOException {
+               ReliableUdpTransport.this.closeSubstream(SubChannel.this.chanId());
+            }
+         };
+      }
+
+      int chanId() {
+         for (java.util.Map.Entry<Integer, ReliableUdpTransport.SubChannel> e : ReliableUdpTransport.this.subChannels.entrySet()) {
+            if (e.getValue() == this) {
+               return e.getKey();
+            }
+         }
+         return 0;
+      }
+   }
+
+   /**
+    * 本端主动关闭子通道：发送仅含 chan 字节的 1 字节载荷（mux 模式下即 EOF 标记），
+    * 作为可靠 DATA 帧走重传保障。chan 的读侧收到 EOF 且缓冲读干后 read() 返回 -1。
+    */
+   public void closeSubstream(int chan) {
+      if (!this.muxEnabled) {
+         return;
+      }
+      synchronized (this.sendLock) {
+         if (!this.running || this.closed.get()) {
+            return;
+         }
+         int seq = this.nextSendSeq++;
+         this.pendingAcks.put(seq, new ReliableUdpTransport.PendingPacket(new byte[]{(byte)chan}, System.currentTimeMillis(), 0));
+         this.sendDataPacket(seq, new byte[]{(byte)chan}, false);
+      }
+   }
 
    public ReliableUdpTransport(DatagramSocket socket, InetSocketAddress remoteAddress) {
       this(socket, remoteAddress, null);
@@ -193,9 +386,8 @@ public class ReliableUdpTransport implements AutoCloseable {
       LOGGER.warn("[ReliableUdp] peer sends unauthenticated frames x{}, TURN interop downgrade to plaintext", this.consecutiveAuthDrops);
       this.authKeyBytes = null;
       this.authMac = null;
-      // 降级竞速修复：auth 模式期间一直在丢对端帧，heartbeatFailStreak 可能已逼近/达到判死阈值，
-      // 若不重置，降级生效的同一拍就会被 One-way dead 判死（实证 68UFAY/WHFJNB：降级与判死仅差毫秒级）。
-      // 明文通道刚建立，给它一个完整的心跳窗口重新计数。
+      // 降级与心跳判死同拍竞速会差毫秒级把刚建立的明文链路判死：
+      // 这里重置判死锚点，给明文通道一个完整的心跳窗口。
       this.heartbeatFailStreak = 0;
       this.lastRecvTime = System.currentTimeMillis();
    }
@@ -241,6 +433,11 @@ public class ReliableUdpTransport implements AutoCloseable {
 
    public boolean isConnected() {
       return this.connected.get() && this.running;
+   }
+
+   /** 载具热切排干用：是否还有未被确认的出口数据（含积压重传队列）。 */
+   public boolean hasPendingOutbound() {
+      return !this.pendingAcks.isEmpty();
    }
 
    /** 热备线路保活用：对外暴露 keepalive 帧发送（不改变连接状态机）。 */
@@ -591,13 +788,13 @@ public class ReliableUdpTransport implements AutoCloseable {
                   return;
                }
 
-               this.inputStream.writeBuffer(payload);
+               this.deliverPayload(payload);
                this.bufferedChunks++;
                this.nextExpectedSeq.getAndIncrement();
 
                while (this.recvBuffer.containsKey(this.nextExpectedSeq.get()) && this.bufferedChunks < 512) {
                   byte[] cached = this.recvBuffer.remove(this.nextExpectedSeq.get());
-                  this.inputStream.writeBuffer(cached);
+                  this.deliverPayload(cached);
                   this.bufferedChunks++;
                   this.nextExpectedSeq.getAndIncrement();
                }
@@ -691,7 +888,7 @@ public class ReliableUdpTransport implements AutoCloseable {
 
                while (this.bufferedChunks < 512 && this.recvBuffer.containsKey(this.nextExpectedSeq.get())) {
                   byte[] cached = this.recvBuffer.remove(this.nextExpectedSeq.get());
-                  this.inputStream.writeBuffer(cached);
+                  this.deliverPayload(cached);
                   this.bufferedChunks++;
                   this.nextExpectedSeq.getAndIncrement();
                }
@@ -765,6 +962,12 @@ public class ReliableUdpTransport implements AutoCloseable {
             this.oldestUnackedSeq++;
             this.consecutiveFailures = 0;
             this.recordLoss(false);
+         }
+
+         // 救援完成: 累计 ack 越过救援段末尾=整段已被接收, 停止救援重传
+         if (!this.deadPeerRescueMap.isEmpty() && this.deadPeerRescueLastSeq >= 0 && seqAfter(ack, this.deadPeerRescueLastSeq)) {
+            this.deadPeerRescueMap.clear();
+            LOGGER.info("[ReliableUdp] rescue queue fully acked, stop rescue retransmit");
          }
 
          if (this.writeState == 1) {
@@ -942,6 +1145,7 @@ public class ReliableUdpTransport implements AutoCloseable {
          this.heartbeatEverRx = true;
       } else if (this.heartbeatEverRx && ++this.heartbeatFailStreak >= HEARTBEAT_FAIL_LIMIT) {
          LOGGER.warn("[ReliableUdp] One-way dead: {} heartbeats no rx, restart & re-punch", this.heartbeatFailStreak);
+         LogUploadManager.onLinkDead();
          this.sendRestart();
          this.triggerIceRestart();
          this.close();
@@ -967,11 +1171,13 @@ public class ReliableUdpTransport implements AutoCloseable {
 
          if (!this.closed.get() && silenceMs > 60000L) {
             LOGGER.warn("[ReliableUdp] No data received for {}s, connection dead", 60);
+            LogUploadManager.onLinkDead();
             this.sendRestart();
             this.triggerIceRestart();
             this.close();
          } else if (!this.closed.get() && !this.pendingAcks.isEmpty() && silenceMs > 24000L) {
             LOGGER.warn("[ReliableUdp] No packets received for {}ms, {} packets pending, peer probably dead", 24000L, this.pendingAcks.size());
+            LogUploadManager.onLinkDead();
             this.sendRestart();
             this.triggerIceRestart();
             this.close();
@@ -997,6 +1203,7 @@ public class ReliableUdpTransport implements AutoCloseable {
                            "[ReliableUdp] seq {} retry {} times exceeded limit (unacked:{})",
                            new Object[]{entry.getKey(), maxRetransmits, this.pendingAcks.size()}
                         );
+                        LogUploadManager.onLinkDead();
                         this.close();
                         return;
                      }
@@ -1021,12 +1228,18 @@ public class ReliableUdpTransport implements AutoCloseable {
                   long silenceNowMs = now - this.lastRecvTime;
                   if (silenceNowMs > DEAD_PEER_BREAKER_MIN_SILENCE_MS && this.deadPeerRetransmitRounds >= DEAD_PEER_BREAKER_ROUNDS) {
                      LOGGER.warn(
-                        "[ReliableUdp] Peer unresponsive ({}ms no rx, {} retransmits), dropping {} pending packets",
+                        "[ReliableUdp] Peer unresponsive ({}ms no rx, {} retransmits), rescuing {} pending packets",
                         silenceNowMs, this.deadPeerRetransmitRounds, this.pendingAcks.size()
                      );
-                     this.pendingAcks.clear();
+                     // 熔断不清数据: 积压转入救援队列慢速重传(见 deadPeerRescueMap 注释)
+                     this.deadPeerRescueMap.clear();
+                     this.deadPeerRescueMap.putAll(this.pendingAcks);
+                     this.deadPeerRescueLastSeq = this.nextSendSeq - 1;
+                     this.deadPeerRescueRounds = 0;
+                     this.deadPeerRescueLastResendMs = 0L;
                      // 队列清空后必须推进基序号, 否则 sendBytes 的窗口判定(oldestUnackedSeq)
                      // 永远阻塞, 写侧 30s 后必然 transport stuck
+                     this.pendingAcks.clear();
                      this.oldestUnackedSeq = this.nextSendSeq;
                      this.consecutiveFailures = 0;
                      this.dupAckCount = 0;
@@ -1034,19 +1247,45 @@ public class ReliableUdpTransport implements AutoCloseable {
                      this.deadPeerStreakStartMs = 0L;
                   }
                }
+
+               // 救援慢速重传: 对端恢复即无损续流(ack 覆盖救援段末尾即停); 真死则数轮后放弃,
+               // 收敛行为与旧"直接丢弃"一致。首轮随熔断即发, 后续每 6s 一轮直至 ack 覆盖或 8 轮耗尽。
+               // 必须放在 didRetransmit 块之外: 熔断清空 pendingAcks 后该块不再进入,
+               // 放在里面会让轮次 2..8 成为死代码(行为测试 pcap 实证), 救援只剩一次机会
+               if (!this.deadPeerRescueMap.isEmpty() && this.deadPeerRescueRounds < DEAD_PEER_RESCUE_MAX_ROUNDS
+                  && now - this.deadPeerRescueLastResendMs >= DEAD_PEER_RESCUE_INTERVAL_MS) {
+                  this.deadPeerRescueLastResendMs = now;
+                  this.deadPeerRescueRounds++;
+                  for (Entry<Integer, ReliableUdpTransport.PendingPacket> rescueEntry : this.deadPeerRescueMap.entrySet()) {
+                     this.sendDataPacket(rescueEntry.getKey(), rescueEntry.getValue().data, false);
+                  }
+                  LOGGER.info("[ReliableUdp] rescue retransmit round {} ({} packets)", this.deadPeerRescueRounds, this.deadPeerRescueMap.size());
+               }
             }
          }
       }
    }
 
    private void sendBytes(byte[] data, int offset, int length) throws IOException {
+      this.sendBytes(data, offset, length, 0);
+   }
+
+   /** mux 模式下每个分块载荷前缀 chan 字节；非 mux 模式 chan 忽略（线上格式不变）。 */
+   private void sendBytes(byte[] data, int offset, int length, int chan) throws IOException {
       if (this.running && this.connected.get()) {
          int pos = offset;
 
          while (pos < offset + length) {
             int chunkLen = Math.min(this.currentMaxSendChunk(), offset + length - pos);
-            byte[] chunk = new byte[chunkLen];
-            System.arraycopy(data, pos, chunk, 0, chunkLen);
+            byte[] chunk;
+            if (this.muxEnabled) {
+               chunk = new byte[chunkLen + 1];
+               chunk[0] = (byte)chan;
+               System.arraycopy(data, pos, chunk, 1, chunkLen);
+            } else {
+               chunk = new byte[chunkLen];
+               System.arraycopy(data, pos, chunk, 0, chunkLen);
+            }
             pos += chunkLen;
             synchronized (this.sendLock) {
                long stuckStartMs = -1L;
@@ -1316,9 +1555,14 @@ public class ReliableUdpTransport implements AutoCloseable {
       private final ConcurrentLinkedQueue<byte[]> chunks = new ConcurrentLinkedQueue<>();
       private byte[] currentChunk = null;
       private int currentPos = 0;
+      private volatile boolean eof = false;
 
       void writeBuffer(byte[] data) {
          this.chunks.offer(data);
+      }
+
+      void markEof() {
+         this.eof = true;
       }
 
       @Override
@@ -1343,7 +1587,7 @@ public class ReliableUdpTransport implements AutoCloseable {
                      ReliableUdpTransport.this.bufferedChunks--;
                   }
                } else {
-                  if (!ReliableUdpTransport.this.running && this.chunks.isEmpty()) {
+                  if ((!ReliableUdpTransport.this.running && this.chunks.isEmpty()) || this.eof) {
                      return -1;
                   }
 

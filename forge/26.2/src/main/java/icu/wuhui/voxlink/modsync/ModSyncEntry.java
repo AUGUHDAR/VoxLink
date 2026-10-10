@@ -15,6 +15,14 @@ public final class ModSyncEntry {
    public String sha1 = "";
    public String sha512 = "";
    public long size = 0L;
+   /** MR 项目图标 URL（空则界面回退色块图标）。 */
+   public String iconUrl = "";
+   /** 解析来源："mr"/"cf"（不序列化，仅分组展示用）。 */
+   public String foundOn = "";
+   /** resolver 用：本端文件的 MR required 前置 project_id（不序列化）。 */
+   public java.util.List<String> depProjectIds = new java.util.ArrayList<>();
+   /** resolver 用：CF required 前置 modId:fileId（不序列化）。 */
+   public java.util.List<String> cfDepIds = new java.util.ArrayList<>();
    /** 该版本支持的加载器与 MC 版本（供房客侧判断能否直接用该文件）。 */
    public java.util.List<String> loaders = new java.util.ArrayList<>();
    public java.util.List<String> gameVersions = new java.util.ArrayList<>();
@@ -32,6 +40,7 @@ public final class ModSyncEntry {
       if (project != null) {
          e.slug = str(project, "slug");
          e.title = str(project, "title");
+         e.iconUrl = str(project, "icon_url");
       }
 
       JsonObject file = ModrinthClient.primaryFile(version);
@@ -77,6 +86,65 @@ public final class ModSyncEntry {
       return s;
    }
 
+   /** unknownMods 文件名 → 手动安装条目：无可下载信息，仅名称/原名供展示与复制。 */
+   public static ModSyncEntry fromFileName(String fileName) {
+      ModSyncEntry e = new ModSyncEntry();
+      e.fileName = fileName == null ? "" : fileName;
+      String guess = guessTitleFromFileName(e.fileName);
+      if (guess.isEmpty()) {
+         String bare = e.fileName;
+         int i = bare.toLowerCase(java.util.Locale.ROOT).lastIndexOf(".jar");
+         if (i > 0) {
+            bare = bare.substring(0, i);
+         }
+
+         guess = bare;
+      }
+
+      e.title = guess;
+      return e;
+   }
+
+   /** 手动条目 MR 兜底：搜索 hit 或 project 元数据 → 条目；version 为 null 时仅元数据。 */
+   public static ModSyncEntry fromMetaAndVersion(JsonObject meta, JsonObject version) {
+      ModSyncEntry e = new ModSyncEntry();
+      if (meta == null) {
+         return e;
+      }
+
+      e.projectId = str(meta, "project_id");
+      if (e.projectId.isEmpty()) {
+         e.projectId = str(meta, "id");
+      }
+
+      e.slug = str(meta, "slug");
+      e.title = str(meta, "title");
+      e.iconUrl = str(meta, "icon_url");
+      if (version != null) {
+         e.versionNumber = str(version, "version_number");
+         e.loaders = strList(version, "loaders");
+         e.gameVersions = strList(version, "game_versions");
+         JsonObject file = ModrinthClient.primaryFile(version);
+         if (file != null) {
+            e.fileName = str(file, "filename");
+            e.downloadUrl = str(file, "url");
+            e.size = file.has("size") && file.get("size").isJsonPrimitive() ? file.get("size").getAsLong() : 0L;
+            if (file.has("hashes") && file.getAsJsonObject("hashes").isJsonObject()) {
+               JsonObject hashes = file.getAsJsonObject("hashes");
+               if (hashes.has("sha1") && !hashes.get("sha1").isJsonNull()) {
+                  e.sha1 = hashes.get("sha1").getAsString();
+               }
+
+               if (hashes.has("sha512") && !hashes.get("sha512").isJsonNull()) {
+                  e.sha512 = hashes.get("sha512").getAsString();
+               }
+            }
+         }
+      }
+
+      return e;
+   }
+
    public JsonObject toJson() {
       JsonObject o = new JsonObject();
       o.addProperty("projectId", projectId);
@@ -87,6 +155,7 @@ public final class ModSyncEntry {
       o.addProperty("url", downloadUrl);
       o.addProperty("sha1", sha1);
       o.addProperty("sha512", sha512);
+      o.addProperty("iconUrl", iconUrl);
       o.addProperty("size", size);
       JsonArray ld = new JsonArray();
       loaders.forEach(ld::add);
@@ -111,6 +180,7 @@ public final class ModSyncEntry {
       e.downloadUrl = str(o, "url");
       e.sha1 = str(o, "sha1");
       e.sha512 = str(o, "sha512");
+      e.iconUrl = str(o, "iconUrl");
       e.size = o.has("size") && o.get("size").isJsonPrimitive() ? o.get("size").getAsLong() : 0L;
       e.loaders = strList(o, "loaders");
       e.gameVersions = strList(o, "gameVersions");

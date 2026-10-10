@@ -8,8 +8,8 @@
         "PauseMenuMixin",
         "TitleScreenMixin",
         "IntegratedServerMixin",
-        "DirectConnectMixin"
-    ],
+        "DirectConnectMixin",
+            ],
     "mixins": [
         "UUIDUtilMixin",
         "CommandNodeAccessor"

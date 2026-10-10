@@ -28,7 +28,14 @@ public final class ProtocolNegotiator {
     * 任一端旧版自动回落自定义协议 v1（:37000 BIND/DATA），线上字节格式互不影响。
     */
    public static final String CAP_STD_TURN_V1 = "stdTurnV1";
-   public static final Set<String> CURRENT_CAPABILITIES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList("relay", "ice_restart", "continuous_retry", CAP_PUNCH_AUTH_V1, CAP_OVERLAY_AUTH_V1, CAP_MOD_SYNC_V1, CAP_STD_TURN_V1)));
+   /**
+    * 玩家中继 v2 数据面（relayMuxV1）：候选者↔host 传输启用 mux 子通道承载被中继会话，
+    * 根治 1.0.x 起两条 MC 会话串流进同一条字节流的架构病。
+    * 仅当候选者与 host 双方都声明该能力时，候选者侧传输才在建立时进入 mux 模式；
+    * 任一端旧版时线上字节格式与历史版本完全一致，且不通过该候选者做玩家中继。
+    */
+   public static final String CAP_RELAY_MUX_V1 = "relayMuxV1";
+   public static final Set<String> CURRENT_CAPABILITIES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList("relay", "ice_restart", "continuous_retry", CAP_PUNCH_AUTH_V1, CAP_OVERLAY_AUTH_V1, CAP_MOD_SYNC_V1, CAP_STD_TURN_V1, CAP_RELAY_MUX_V1)));
 
    private ProtocolNegotiator() {
    }
@@ -67,6 +74,21 @@ public final class ProtocolNegotiator {
    /** 对端是否声明 overlayAuthV1。 */
    public static boolean supportsOverlayAuth(RoomInfo.PeerInfo peer) {
       return peer != null && peer.capabilities != null && peer.capabilities.contains(CAP_OVERLAY_AUTH_V1);
+   }
+
+   /** 对端是否声明 stdTurnV1（unused here, kept for parity）。 */
+   public static boolean supportsStdTurn(RoomInfo.PeerInfo peer) {
+      return peer != null && peer.capabilities != null && peer.capabilities.contains(CAP_STD_TURN_V1);
+   }
+
+   /** 对端是否声明 relayMuxV1（玩家中继 v2 数据面，候选者筛选条件）。 */
+   public static boolean supportsRelayMux(RoomInfo.PeerInfo peer) {
+      return peer != null && peer.capabilities != null && peer.capabilities.contains(CAP_RELAY_MUX_V1);
+   }
+
+   /** 房主侧能力是否声明 relayMuxV1（加入方视角：本端 joiner 传输是否可进 mux 模式）。 */
+   public static boolean hostSupportsRelayMux(RoomInfo room) {
+      return room != null && !room.isHostLegacy() && room.getHostCapabilities().contains(CAP_RELAY_MUX_V1);
    }
 
    /** 本端自身能力表是否含指定能力（新构建恒真，保留入口以便未来按配置降级）。 */

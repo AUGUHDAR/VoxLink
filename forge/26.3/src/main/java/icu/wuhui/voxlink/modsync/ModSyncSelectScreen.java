@@ -19,16 +19,22 @@ import net.minecraft.network.chat.Component;
 public class ModSyncSelectScreen extends VoxLinkScreenBase {
    private static final int ROW_H = 12;
    private static final int MIN_ROWS = 3;
+   /** 模组条离线图标色板：按名称哈希取色，低饱和 MC 风格。 */
+   private static final int[] CARD_COLORS = {
+      0xFF4A6FA5, 0xFF5B8C5A, 0xFFB07D3F, 0xFF8A5BA5, 0xFFA55B5B, 0xFF3F8C8C
+   };
 
    private final String roomCode;
+   private final String scope;
    private final List<ModSyncEntry> downloadable;
+   private final List<ModSyncEntry> manualEntries;
    private final List<String> unresolvable;
    private final List<String> versionDiff;
    private final List<String> skipKeys;
    private final Runnable onProceed;
    private final Runnable onCancel;
 
-   /** 虚拟条目：kind 0=区块头 1=普通行。 */
+   /** 虚拟条目：kind 0=区块头 1=普通行 2=模组条名行(携带entry) 3=模组条小字行。 */
    private final List<Object[]> lines = new ArrayList<>();
    private int page = 0;
    private int rowsPerPage = MIN_ROWS;
@@ -41,6 +47,15 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
    private Button cancelBtn;
    private Button prevBtn;
    private Button nextBtn;
+   private final List<Button> copyButtons = new ArrayList<>();
+   private int copiedResetTick = 0;
+   private Button copiedBtn = null;
+   private boolean resolveStarted = false;
+   private volatile boolean resolving = false;
+   /** MR 有项目但无本端兼容版本的条目（版本不匹配组）。 */
+   private final List<ModSyncEntry> incompatibleEntries = new ArrayList<>();
+   /** 下载期间到达的回流结果 {原条目, 解析条目, bucket}：回到 SELECTING 时补入。 */
+   private final List<Object[]> pendingResolved = new ArrayList<>();
 
    private enum State {SELECTING, DOWNLOADING}
 
@@ -62,7 +77,11 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       String roomCode,
       String scope,
       List<ModSyncEntry> downloadable,
+            List<ModSyncEntry> manualEntries,
+   
       List<String> unresolvable,
+
+   
       List<String> versionDiff,
       List<String> skipKeys,
       Runnable onProceed,
@@ -73,44 +92,84 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       super(Component.translatable(
          ModSyncManifestService.SCOPE_ALL.equals(scope) ? "voxlink.modsync.title_all" : "voxlink.modsync.title"));
       this.roomCode = roomCode;
+      this.scope = scope == null ? "" : scope;
       this.downloadable = downloadable;
+            this.manualEntries = manualEntries;
+   
       this.unresolvable = unresolvable;
+
+   
       this.versionDiff = versionDiff;
       this.skipKeys = skipKeys == null ? new java.util.ArrayList<>() : skipKeys;
       this.onProceed = onProceed;
       this.onCancel = onCancel;
-      this.buildLines();
-   }
-
-   /** 把三类信息拍平成虚拟行流，分页只面对这一种结构，杜绝重叠。 */
-   private void buildLines() {
-      this.lines.clear();
-      if (!this.downloadable.isEmpty()) {
-        this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.missing_header", this.downloadable.size()).getString()});
-         for (ModSyncEntry e : this.downloadable) {
-            this.lines.add(new Object[]{
-               1,
-               cleanText(cleanText(cleanText(Component.translatable("voxlink.modsync.entry_line", e.title, e.versionNumber, humanSize(e.size)).getString())))
-            });
+      // 手动条目按已知项目拆组：清单已知项目=版本不匹配组，其余=找不到组
+      for (int i = this.manualEntries.size() - 1; i >= 0; i--) {
+         ModSyncEntry me = this.manualEntries.get(i);
+         if (!me.projectId.isEmpty() || !me.downloadUrl.isEmpty()) {
+            this.manualEntries.remove(i);
+            this.incompatibleEntries.add(me);
          }
       }
 
-      if (!this.versionDiff.isEmpty()) {
-         this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.diff_header").getString()});
+      this.buildLines();
+   }
+
+   /** 三类信息拍平成虚拟行流分页渲染；模组条占两行(kind2/3)。 */
+   private void buildLines() {
+      this.lines.clear();
+      boolean allScope = ModSyncManifestService.SCOPE_ALL.equals(this.scope);
+      if (!this.downloadable.isEmpty()) {
+        this.lines.add(new Object[]{0, Component.translatable(
+            allScope ? "voxlink.modsync.missing_header_all" : "voxlink.modsync.missing_header",
+            this.downloadable.size()).getString()});
+         for (ModSyncEntry e : this.downloadable) {
+            this.addEntryCard(e);
+         }
+      }
+
+      if (!this.incompatibleEntries.isEmpty()) {
+         this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.incompatible_header", this.incompatibleEntries.size()).getString()});
+         for (ModSyncEntry e : this.incompatibleEntries) {
+            this.addEntryCard(e);
+         }
+      }
+
+      if (!this.manualEntries.isEmpty()) {
+         this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.notfound_header", this.manualEntries.size()).getString()});
+         for (ModSyncEntry e : this.manualEntries) {
+            this.addEntryCard(e);
+         }
+      }
+
+      if (!this.unresolvable.isEmpty() || !this.versionDiff.isEmpty()) {
+         this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.notes_header").getString()});
+         for (String u : this.unresolvable) {
+            this.lines.add(new Object[]{1, cleanText(u)});
+         }
+
          for (String d : this.versionDiff) {
             this.lines.add(new Object[]{1, cleanText(d)});
          }
       }
-
-      if (!this.unresolvable.isEmpty()) {
-         this.lines.add(new Object[]{0, Component.translatable("voxlink.modsync.unresolvable_header").getString()});
-         for (String u : this.unresolvable) {
-            this.lines.add(new Object[]{1, cleanText(u)});
-         }
-      }
    }
 
-   /**
+      /** 模组条 = 名行(图标/名称/复制按钮) + 小字行(jar 原名·版本·大小)。 */
+   private void addEntryCard(ModSyncEntry e) {
+      String sub = cleanText(e.fileName);
+      if (!e.versionNumber.isEmpty()) {
+         sub = e.versionNumber + " · " + sub;
+      }
+
+      if (e.size > 0L) {
+         sub = sub + " · " + humanSize(e.size);
+      }
+
+      this.lines.add(new Object[]{2, cleanText(e.title), e});
+      this.lines.add(new Object[]{3, sub});
+   }
+
+/**
     * 清洗待绘制文本：mods 目录里的文件名可能带 § 样式代码甚至控制字符，
     * 原样绘制会把整行染色/花屏——显示层统一剥掉（数据层的原名不动，便于日志对账）。
     */
@@ -146,6 +205,12 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       }
 
       if (this.state == State.SELECTING) {
+         this.buildCopyButtons();
+         if (!this.resolveStarted && (!this.manualEntries.isEmpty() || !this.incompatibleEntries.isEmpty())) {
+            this.resolveStarted = true;
+            this.startResolve();
+         }
+
          int by = this.height - 54;
          // 无可下载项（仅版本不一致/仅提示）时不给下载按钮，避免玩家对着空列表点"下载"
          boolean hasDownloads = !this.downloadable.isEmpty();
@@ -330,6 +395,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       // 不再走 onCancel：那条链会取消整个加入流程（leaveRoom+返回），且一旦
       // 导航回调异常本屏就永久停在"正在取消"（按钮已禁用、无人重建 UI）。
       this.state = State.SELECTING;
+      this.applyPendingResolved();
       this.statusText = Component.translatable("voxlink.modsync.download_cancelled").getString();
       this.statusColor = VoxLinkColors.MUTED;
       this.downloadAbort = false;
@@ -338,6 +404,7 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
    private void failThrough(String msg) {
       this.state = State.SELECTING;
+      this.applyPendingResolved();
       // M21：失败回到 SELECTING 后追加重试提示，避免玩家以为"卡死"了
       String hint = Component.translatable("voxlink.modsync.retry_hint").getString();
       this.statusText = hint.isEmpty() ? msg : (msg + " " + hint);
@@ -350,7 +417,9 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
       super.extractRenderState(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
       this.drawCenteredClipped(graphics, this.title.getString(), centerX, 10, VoxLinkColors.WHITE);
-      this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.subtitle", this.roomCode).getString(), centerX, 24, VoxLinkColors.MUTED);
+      this.drawCenteredClipped(graphics, Component.translatable(
+         ModSyncManifestService.SCOPE_ALL.equals(this.scope) ? "voxlink.modsync.subtitle_all" : "voxlink.modsync.subtitle",
+         this.roomCode).getString(), centerX, 24, VoxLinkColors.MUTED);
 
       if (this.state == State.SELECTING) {
          this.renderList(graphics, centerX);
@@ -367,6 +436,8 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
          if (!this.statusText.isEmpty()) {
             this.drawCenteredClipped(graphics, this.statusText, centerX, Math.min(this.listBottomY + 2, this.height - 86), this.statusColor);
+         } else if (this.resolving) {
+            this.drawCenteredClipped(graphics, Component.translatable("voxlink.modsync.resolving").getString(), centerX, Math.min(this.listBottomY + 2, this.height - 86), VoxLinkColors.MUTED);
          }
       } else {
          this.renderProgress(graphics, centerX);
@@ -375,21 +446,192 @@ public class ModSyncSelectScreen extends VoxLinkScreenBase {
 
    private void renderList(GuiGraphicsExtractor graphics, int centerX) {
       int listTop = 50;
-      int from = this.page * this.rowsPerPage;
-      int to = Math.min(this.lines.size(), from + this.rowsPerPage);
+      int[] range = this.pageRange();
+      int iconX = 10;
+      int textX = iconX + 20;
+      int copyW = 36;
+      int copyX = this.width - 8 - copyW;
       int y = listTop;
-      for (int i = from; i < to; i++) {
+      for (int i = range[0]; i < range[1]; i++) {
          Object[] line = this.lines.get(i);
-         boolean header = ((Integer)line[0]) == 0;
+         int kind = ((Integer)line[0]);
          String text = String.valueOf(line[1]);
-         if (header) {
+         if (kind == 0) {
             this.drawCenteredClipped(graphics, text, centerX, y, VoxLinkColors.WARNING);
-         } else {
+         } else if (kind == 1) {
             this.drawCenteredClipped(graphics, text, centerX, y, VoxLinkColors.WHITE);
+         } else if (kind == 2) {
+            ModSyncEntry e = (ModSyncEntry)line[2];
+            String title = text.isEmpty() ? cleanText(e.fileName) : text;
+            int[][] iconRuns = ModSyncIconCache.runs(e.iconUrl);
+            if (iconRuns == null && !e.iconUrl.isEmpty()) {
+               ModSyncIconCache.prefetch(e.iconUrl);
+            }
+
+            if (iconRuns != null) {
+               for (int[] run : iconRuns) {
+                  graphics.fill(iconX + run[0], y + 3 + run[1], iconX + run[0] + run[2], y + 4 + run[1], run[3]);
+               }
+            } else {
+               // 兜底：确定性色块+首字母
+               int hue = Math.floorMod(title.hashCode(), CARD_COLORS.length);
+               graphics.fill(iconX, y + 3, iconX + 16, y + 19, CARD_COLORS[hue]);
+               String initial = title.isEmpty() ? "?" : title.substring(0, 1).toUpperCase(java.util.Locale.ROOT);
+               var mcFont = Minecraft.getInstance().font;
+               this.drawString(graphics, initial, iconX + 8 - mcFont.width(initial) / 2, y + 7, 0xFFFFFFFF);
+            }
+            this.drawString(graphics, clipToWidth(title, copyX - textX - 6), textX, y + 2, 0xFFFFFFFF);
+         } else if (kind == 3) {
+            this.drawString(graphics, clipToWidth(text, this.width - 8 - textX), textX, y + 2, VoxLinkColors.MUTED);
          }
 
          y += ROW_H;
       }
+   }
+
+   /** 当前页的行区间：模组条占两行(kind2/3)，切割必须落在条边界上。 */
+   private int[] pageRange() {
+      int from = this.page * this.rowsPerPage;
+      int to = Math.min(this.lines.size(), from + this.rowsPerPage);
+      if (to < this.lines.size() && this.kindAt(to - 1) == 3) {
+         to--;
+      }
+
+      if (from > 0 && from < this.lines.size() && this.kindAt(from) == 3) {
+         from++;
+      }
+
+      if (from >= to && from >= 2) {
+         from -= 2;
+      }
+
+      return new int[]{from, Math.max(from, to)};
+   }
+
+   private int kindAt(int idx) {
+      return idx >= 0 && idx < this.lines.size() ? ((Integer)this.lines.get(idx)[0]) : -1;
+   }
+
+   /** 为当前页的每个模组条生成复制按钮（按钮只占自己的条行，绝不压底部按钮区）。 */
+   private void buildCopyButtons() {
+      this.copyButtons.clear();
+      this.copiedResetTick = 0;
+      this.copiedBtn = null;
+      int[] range = this.pageRange();
+      int copyW = 36;
+      int copyX = this.width - 8 - copyW;
+      int y = 50;
+      for (int i = range[0]; i < range[1]; i++) {
+         Object[] line = this.lines.get(i);
+         if (((Integer)line[0]) == 2) {
+            ModSyncEntry e = (ModSyncEntry)line[2];
+            String copyText = String.valueOf(line[1]).isEmpty() ? e.fileName : String.valueOf(line[1]);
+            Button b = Button.builder(Component.translatable("voxlink.modsync.copy"), btn -> {
+               Minecraft.getInstance().keyboardHandler.setClipboard(copyText);
+               btn.setMessage(Component.translatable("voxlink.modsync.copied"));
+               btn.active = false;
+               this.copiedBtn = btn;
+               this.copiedResetTick = 60;
+            }).bounds(copyX, y + 1, copyW, 18).build();
+            this.copyButtons.add(b);
+            this.addRenderableWidget(b);
+         }
+
+         y += ROW_H;
+      }
+   }
+
+   /** 后台 MR 兜底解析手动条目：真名/真图标原地更新，可下载者回流，按钮随之出现。 */
+   private void startResolve() {
+      this.resolving = true;
+      List<ModSyncEntry> snapshot = new ArrayList<>(this.manualEntries);
+      List<ModSyncEntry> incompatible = new ArrayList<>(this.incompatibleEntries);
+      List<ModSyncEntry> known = new ArrayList<>(this.downloadable);
+      ModSyncResolver.resolveAsync(snapshot, incompatible, known, new ModSyncResolver.Callback() {
+         @Override
+         public void onResolved(ModSyncEntry original, ModSyncEntry resolved, int bucket) {
+            Minecraft.getInstance().execute(() -> ModSyncSelectScreen.this.applyResolved(original, resolved, bucket));
+         }
+
+         @Override
+         public void onFinished(int resolvedCount) {
+            ModSyncLog.info("resolve finished, {} became downloadable", resolvedCount);
+            ModSyncSelectScreen.this.resolving = false;
+         }
+      });
+   }
+
+   private void applyResolved(ModSyncEntry original, ModSyncEntry resolved, int bucket) {
+      if (this.state != State.SELECTING) {
+         if (bucket == ModSyncResolver.BUCKET_DOWNLOADABLE || resolved != null) {
+            this.pendingResolved.add(new Object[]{original, resolved, bucket});
+         }
+
+         return;
+      }
+
+      this.applyOne(original, resolved, bucket);
+      // 名称/图标原地更新与分组移动统一刷新
+      this.buildLines();
+      this.rebuildInPlace();
+   }
+
+   private void applyOne(ModSyncEntry original, ModSyncEntry resolved, int bucket) {
+      if (bucket == ModSyncResolver.BUCKET_DOWNLOADABLE && resolved != null) {
+         if (original != null) {
+            this.manualEntries.remove(original);
+            this.incompatibleEntries.remove(original);
+         }
+
+         this.downloadable.add(resolved);
+      } else if (bucket == ModSyncResolver.BUCKET_INCOMPATIBLE && original != null) {
+         this.manualEntries.remove(original);
+         if (!this.incompatibleEntries.contains(original)) {
+            this.incompatibleEntries.add(original);
+         }
+      }
+   }
+
+   private void applyPendingResolved() {
+      if (this.pendingResolved.isEmpty()) {
+         return;
+      }
+
+      for (Object[] p : this.pendingResolved) {
+         this.applyOne((ModSyncEntry)p[0], (ModSyncEntry)p[1], (Integer)p[2]);
+      }
+
+      this.pendingResolved.clear();
+      this.buildLines();
+   }
+
+   @Override
+   public void tick() {
+      super.tick();
+      if (this.copiedResetTick > 0 && --this.copiedResetTick == 0 && this.copiedBtn != null) {
+         this.copiedBtn.setMessage(Component.translatable("voxlink.modsync.copy"));
+         this.copiedBtn.active = true;
+         this.copiedBtn = null;
+      }
+   }
+
+   /** 左对齐按像素宽截断（超宽补省略号）。 */
+   static String clipToWidth(String s, int maxW) {
+      if (s == null || s.isEmpty()) {
+         return "";
+      }
+
+      var font = Minecraft.getInstance().font;
+      if (font.width(s) <= maxW) {
+         return s;
+      }
+
+      String ellipsis = "…";
+      while (!s.isEmpty() && font.width(s + ellipsis) > maxW) {
+         s = s.substring(0, s.length() - 1);
+      }
+
+      return s + ellipsis;
    }
 
    private void renderProgress(GuiGraphicsExtractor graphics, int centerX) {

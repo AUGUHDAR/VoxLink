@@ -654,7 +654,8 @@ public class RoomManager {
 
       if (code != null && !code.isBlank()) {
          String normalizedCode = code.toUpperCase();
-         if (!normalizedCode.matches("^[A-HJ-NP-Z2-9]{6}$")) {
+         // 互通房导入码(HL+5位)与VoxLink码(6位)都放行，由服务端join分流
+         if (!normalizedCode.matches("^[A-HJ-NP-Z2-9]{6}$") && !icu.wuhui.voxlink.terracotta.RoomCodeRouter.isFedCode(normalizedCode)) {
             this.currentRoom.compareAndSet(PENDING, null);
             return CompletableFuture.failedFuture(new IllegalArgumentException(Component.translatable("voxlink.error.invalid_room_code").getString()));
          }
@@ -1886,9 +1887,19 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
                this.handleDisconnect(from, data);
                break;
             case "host_closing":
+               // 关房只认host/server，房客不可触发
+               if (!"host".equals(from) && !"server".equals(from)) {
+                  VoxLinkMod.LOGGER.warn("[Security] Discarded host_closing from untrusted source: {}", from);
+                  break;
+               }
                this.handleHostClosing(from, data);
                break;
             case "room_evicted":
+               // 驱逐通知只认host/server
+               if (!"host".equals(from) && !"server".equals(from)) {
+                  VoxLinkMod.LOGGER.warn("[Security] Discarded room_evicted from untrusted source: {}", from);
+                  break;
+               }
                this.handleRoomEvicted(from, data);
                break;
             case "punch_info":

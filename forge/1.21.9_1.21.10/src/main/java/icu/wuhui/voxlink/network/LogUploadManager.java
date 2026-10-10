@@ -154,10 +154,10 @@ public final class LogUploadManager
       }
    }
 
-   // 断链事件(稳定窗口内掉线=高价值失败现场, 立即上传)
+   // 断链事件: 桥建进入原生连接屏后, 任何掉线无条件上传(2026-10-05 用户规则, 半开案: 判死时长不可控, 稳定窗口曾吞证据)
    public static void onDisconnected()
    {
-      if (connectedAtMs > 0L && System.currentTimeMillis() - connectedAtMs < STABLE_WINDOW_MS && !UPLOADED.get()) {
+      if (connectedAtMs > 0L && !UPLOADED.get()) {
          if (uploadFuture != null) {
             uploadFuture.cancel(false);
          }
@@ -167,14 +167,24 @@ public final class LogUploadManager
       connectedAtMs = 0L;
    }
 
+   // 链路判死(单向死/静默超时): 与 onDisconnected 同权, 无条件快传
+   public static void onLinkDead()
+   {
+      if (activeCode == null || UPLOADED.get()) {
+         return;
+      }
+      if (uploadFuture != null) {
+         uploadFuture.cancel(false);
+      }
+      uploadFuture = SCHEDULER.schedule(LogUploadManager::runUpload, 1L, TimeUnit.SECONDS);
+      VoxLinkMod.LOGGER.info("[LogUpload] link dead captured, upload now");
+   }
+
    // 终局失败事件(showConnectFailedFinal 真终态): 失败样本 5s 后快传, 不再硬等 90s。
-   // 现有 runUpload 判定全保留: 万一失败后反而连上(兜底竞速赢), 稳定窗口逻辑仍会拦住误传
+   // 2026-10-05 移除稳定窗口拦截: 连接屏阶段失败无条件传(半开案修复)
    public static void onTerminalFailure()
    {
       if (activeCode == null || UPLOADED.get() || failureUploadArmed) {
-         return;
-      }
-      if (connectedAtMs > 0L && System.currentTimeMillis() - connectedAtMs >= STABLE_WINDOW_MS) {
          return;
       }
       failureUploadArmed = true;

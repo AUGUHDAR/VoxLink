@@ -31,6 +31,10 @@ import java.util.Set;
  */
 public final class ModrinthClient {
    private static final String API = "https://api.modrinth.com/v2";
+   /** MCIM 镜像（PCL 同款）：国内直连 MR 慢且不稳，镜像短超时优先、官方兜底。 */
+   private static final String MIRROR_API = "https://mod.mcimirror.top/modrinth";
+   private static final String MIRROR_PREFIX = "https://mod.mcimirror.top";
+   private static final Duration MIRROR_TIMEOUT = Duration.ofSeconds(8);
    private static final String USER_AGENT = "VoxLink/" + voxlinkVersion() + " (modsync)";
    private static final int CHUNK = 64;
    private static final Duration TIMEOUT = Duration.ofSeconds(20);
@@ -86,7 +90,7 @@ public final class ModrinthClient {
          body.addProperty("algorithm", "sha1");
          JsonObject resp;
          try {
-            resp = postJson(API + "/version_files", body.toString());
+            resp = postJson(apiUrls("/version_files"), body.toString());
          } catch (InterruptedException ie) {
             throw ie;
          } catch (Exception e) {
@@ -124,10 +128,10 @@ public final class ModrinthClient {
          }
 
          sb.append(']');
-         String url = API + "/projects?ids=" + URLEncoder.encode(sb.toString(), StandardCharsets.UTF_8);
+         java.util.List<String> urls = apiUrls("/projects?ids=" + URLEncoder.encode(sb.toString(), StandardCharsets.UTF_8));
          JsonArray arr;
          try {
-            arr = getJsonArray(url);
+            arr = getJsonArray(urls);
          } catch (InterruptedException ie) {
             throw ie;
          } catch (Exception e) {
@@ -153,8 +157,32 @@ public final class ModrinthClient {
    public static JsonObject latestVersionFor(String projectId, String gameVersion, String loader) throws IOException, InterruptedException {
       String gv = URLEncoder.encode("[\"" + escape(gameVersion) + "\"]", StandardCharsets.UTF_8);
       String ld = URLEncoder.encode("[\"" + escape(loader) + "\"]", StandardCharsets.UTF_8);
-      JsonArray arr = getJsonArray(API + "/project/" + escape(projectId) + "/version?game_versions=" + gv + "&loaders=" + ld);
+      JsonArray arr = getJsonArray(apiUrls("/project/" + escape(projectId) + "/version?game_versions=" + gv + "&loaders=" + ld));
       return arr != null && arr.size() > 0 && arr.get(0).isJsonObject() ? arr.get(0).getAsJsonObject() : null;
+   }
+
+   /** GET /v2/search：名称+加载器搜项目；gameVersion 非空时加版本 facet（空=放宽搜索）。 */
+   public static JsonArray search(String query, String loader, String gameVersion) throws IOException, InterruptedException {
+      String facets = "[[\"project_type:mod\"],[\"categories:" + escape(loader) + "\"]";
+      if (gameVersion != null && !gameVersion.isBlank()) {
+         facets += ",[\"versions:" + escape(gameVersion) + "\"]";
+      }
+
+      facets += "]";
+      java.util.List<String> urls = apiUrls("/search?query=" + URLEncoder.encode(query, StandardCharsets.UTF_8)
+         + "&facets=" + URLEncoder.encode(facets, StandardCharsets.UTF_8) + "&limit=5");
+      JsonObject o = getJsonObject(urls, false);
+      return o != null && o.has("hits") && o.get("hits").isJsonArray() ? o.getAsJsonArray("hits") : new JsonArray();
+   }
+
+   /** GET /v2/project/{id|slug}；项目不存在(404)返回 null。 */
+   public static JsonObject project(String idOrSlug) throws IOException, InterruptedException {
+      return getJsonObject(apiUrls("/project/" + URLEncoder.encode(idOrSlug, StandardCharsets.UTF_8)), true);
+   }
+
+   /** API 请求链：镜像短超时在前，官方兜底在后。 */
+   private static java.util.List<String> apiUrls(String pathAndQuery) {
+      return java.util.Arrays.asList(MIRROR_API + pathAndQuery, API + pathAndQuery);
    }
 
    /**
@@ -180,13 +208,19 @@ public final class ModrinthClient {
             throw new AbortedException(fileName);
          }
 
+         // 尝试 0 走 MCIM 镜像（国内快），尝试 1 回官方 CDN
+         String attemptUrl = i == 0 ? mirrorDownloadUrl(url) : url;
          try {
-            long bytes = doDownload(url, cli, expectedSha512, expectedSha1, fileName, modsDir, shouldAbort);
+            long bytes = doDownload(attemptUrl, cli, expectedSha512, expectedSha1, fileName, modsDir, shouldAbort);
             return bytes;
          } catch (AbortedException ae) {
             throw ae; // 用户取消，立即上抛，不重试
          } catch (PermanentHttpException pe) {
-            // 4xx 等永久失败：直接上抛，不重试
+            // 镜像层 4xx 不作数：还有官方尝试就换源，官方 4xx 才是永久失败
+            if (i < MAX_ATTEMPTS - 1 && !attemptUrl.equals(url)) {
+               continue;
+            }
+
             throw pe;
          } catch (IOException e) {
             if (shouldAbort.getAsBoolean()) {
@@ -439,14 +473,10 @@ public final class ModrinthClient {
       return false;
    }
 
-   private static JsonObject postJson(String url, String json) throws IOException, InterruptedException {
-      HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+   private static JsonObject postJson(java.util.List<String> urls, String json) throws IOException, InterruptedException {
+      HttpResponse<String> resp = sendAny(urls, "Modrinth POST", b -> b
          .header("Content-Type", "application/json")
-         .header("User-Agent", USER_AGENT)
-         .timeout(TIMEOUT)
-         .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
-         .build();
-      HttpResponse<String> resp = sendWithRetry(request, "Modrinth POST");
+         .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)));
       if (resp.statusCode() / 100 != 2) {
          throw new IOException("Modrinth POST failed: HTTP " + resp.statusCode());
       }
@@ -455,13 +485,8 @@ public final class ModrinthClient {
       return el.isJsonObject() ? el.getAsJsonObject() : null;
    }
 
-   private static JsonArray getJsonArray(String url) throws IOException, InterruptedException {
-      HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-         .header("User-Agent", USER_AGENT)
-         .timeout(TIMEOUT)
-         .GET()
-         .build();
-      HttpResponse<String> resp = sendWithRetry(request, "Modrinth GET");
+   private static JsonArray getJsonArray(java.util.List<String> urls) throws IOException, InterruptedException {
+      HttpResponse<String> resp = sendAny(urls, "Modrinth GET", HttpRequest.Builder::GET);
       if (resp.statusCode() / 100 != 2) {
          throw new IOException("Modrinth GET failed: HTTP " + resp.statusCode());
       }
@@ -470,32 +495,46 @@ public final class ModrinthClient {
       return el.isJsonArray() ? el.getAsJsonArray() : null;
    }
 
+   private static JsonObject getJsonObject(java.util.List<String> urls, boolean nullOn404) throws IOException, InterruptedException {
+      HttpResponse<String> resp;
+      try {
+         resp = sendAny(urls, "Modrinth GET", HttpRequest.Builder::GET);
+      } catch (IOException e) {
+         // 404 走 nullOn404 约定（永久失败 message 固定为 "Modrinth GET HTTP <code>"）
+         if (nullOn404 && e.getMessage() != null && e.getMessage().endsWith("404")) {
+            return null;
+         }
+
+         throw e;
+      }
+
+      if (resp.statusCode() / 100 != 2) {
+         throw new IOException("Modrinth GET failed: HTTP " + resp.statusCode());
+      }
+
+      JsonElement el = JsonParser.parseString(resp.body());
+      return el.isJsonObject() ? el.getAsJsonObject() : null;
+   }
+
    /**
-    * 统一重试策略：
-    *  429：读取 Retry-After 头（秒，缺省 3s）后等待再试，计入尝试次数，最多 MAX_ATTEMPTS+1 次。
-    *  4xx（除 429）：PermanentHttpException，调用方不应重试。
-    *  5xx / IOException：按现有重试（最多 MAX_ATTEMPTS+1 次，间隔 BACKOFF_MS_1 / BACKOFF_MS_2）。
+    * 多源请求链：镜像短超时在前，官方兜底在后（PCL 同款策略）。
+    * 429 按小退避换源；4xx/5xx/网络失败换下一源，仅最后一源的 4xx 判永久失败。
     */
-   private static HttpResponse<String> sendWithRetry(HttpRequest request, String label) throws IOException, InterruptedException {
-      int maxTries = MAX_ATTEMPTS + 1;
-      StringBuilder errors = new StringBuilder();
-      for (int i = 0; i < maxTries; i++) {
+   private static HttpResponse<String> sendAny(java.util.List<String> urls, String label,
+                                               java.util.function.UnaryOperator<HttpRequest.Builder> method) throws IOException, InterruptedException {
+      IOException last = null;
+      for (int i = 0; i < urls.size(); i++) {
+         boolean isLast = i == urls.size() - 1;
+         boolean mirror = urls.get(i).startsWith(MIRROR_PREFIX);
          try {
-            HttpResponse<String> resp = client().send(request, HttpResponse.BodyHandlers.ofString());
+            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(urls.get(i)))
+               .header("User-Agent", USER_AGENT)
+               .timeout(mirror ? MIRROR_TIMEOUT : TIMEOUT);
+            HttpResponse<String> resp = client().send(method.apply(b).build(), HttpResponse.BodyHandlers.ofString());
             int code = resp.statusCode();
             if (code == 429) {
-               long waitSec = parseRetryAfter(resp);
-               if (waitSec <= 0) {
-                  waitSec = 3L;
-               }
-
-               if (i < maxTries - 1) {
-                  try {
-                     Thread.sleep(waitSec * 1000L);
-                  } catch (InterruptedException ie) {
-                     Thread.currentThread().interrupt();
-                     throw ie;
-                  }
+               if (!isLast) {
+                  Thread.sleep(Math.min(3L, parseRetryAfter(resp)) * 1000L);
                   continue;
                }
 
@@ -503,35 +542,34 @@ public final class ModrinthClient {
             }
 
             if (code / 100 == 4) {
-               // 4xx 永久失败：调用方按 PermanentHttpException 不再重试
+               // 镜像层 4xx 不作数，交给官方端点判定
+               if (!isLast) {
+                  continue;
+               }
+
                throw new PermanentHttpException(label + " HTTP " + code);
             }
 
             if (code / 100 == 5) {
-               appendError(errors, label + " HTTP " + code);
-               if (i < maxTries - 1) {
-                  backoff(i);
+               if (!isLast) {
                   continue;
                }
 
-               throw new IOException(label + " HTTP " + code + " (exhausted)");
+               throw new IOException(label + " HTTP " + code);
             }
 
             return resp;
          } catch (PermanentHttpException pe) {
             throw pe;
          } catch (IOException ioe) {
-            appendError(errors, label + " " + ioe.getMessage());
-            if (i < maxTries - 1) {
-               backoff(i);
-               continue;
+            last = ioe;
+            if (isLast) {
+               throw ioe;
             }
-
-            throw new IOException(label + ": " + (errors.length() > 0 ? errors.toString() : ioe.getMessage()), ioe);
          }
       }
 
-      throw new IOException(label + ": " + (errors.length() > 0 ? errors.toString() : "all attempts failed"));
+      throw last != null ? last : new IOException(label + ": no endpoint answered");
    }
 
    private static long parseRetryAfter(HttpResponse<?> resp) {
@@ -545,19 +583,6 @@ public final class ModrinthClient {
             }
          })
          .orElse(3L);
-   }
-
-   private static void backoff(int i) throws InterruptedException {
-      long backoff = (i == 0) ? BACKOFF_MS_1 : BACKOFF_MS_2;
-      Thread.sleep(backoff);
-   }
-
-   private static void appendError(StringBuilder errors, String msg) {
-      if (errors.length() > 0) {
-         errors.append(" | ");
-      }
-
-      errors.append(msg);
    }
 
    /** 从 version JSON 取 primary 文件对象；无 primary 时取第一个。 */
@@ -595,6 +620,31 @@ public final class ModrinthClient {
       }
 
       return ids;
+   }
+
+   /** MR CDN / forgecdn → MCIM 镜像；其余原样返回（PCL 同款映射）。 */
+   private static String mirrorDownloadUrl(String url) {
+      if (url == null) {
+         return url;
+      }
+
+      if (url.startsWith("https://cdn.modrinth.com/")) {
+         return MIRROR_PREFIX + "/" + url.substring("https://cdn.modrinth.com/".length());
+      }
+
+      try {
+         URI u = URI.create(url);
+         String host = u.getHost() == null ? "" : u.getHost();
+         boolean cfCdn = host.equals("edge.forgecdn.net") || host.equals("mediafilez.forgecdn.net")
+            || host.equals("media.forgecdn.net") || host.endsWith("-service.overwolf.wtf");
+         if (cfCdn) {
+            return MIRROR_PREFIX + (u.getPath() == null ? "" : u.getPath())
+               + (u.getQuery() == null || u.getQuery().isEmpty() ? "" : "?" + u.getQuery());
+         }
+      } catch (Exception ignored) {
+      }
+
+      return url;
    }
 
    private static String escape(String s) {

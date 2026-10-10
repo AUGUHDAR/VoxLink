@@ -339,6 +339,7 @@ public class TurnRelayClient {
             return Integer.compare(ra, rb);
          });
          all.complete(results);
+         pool.shutdown();
       });
       return all;
    }

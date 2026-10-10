@@ -144,7 +144,7 @@ public class FeedbackFormScreen extends VoxLinkScreenBase {
       this.rowY = 30 + this.descH + 6;
       this.logY = this.rowY + 24;
       this.tipsY = this.logY + 24;
-      this.statusY = this.tipsY + (2 + this.tipExamples) * TIP_LINE_H + 4;
+      this.statusY = this.tipsY + (FIXED_TIP_LINES + this.tipExamples) * TIP_LINE_H + 4;
    }
 
    /** 引导：这里既能提建议也能报问题；其后是原有的写作引导与示例 */

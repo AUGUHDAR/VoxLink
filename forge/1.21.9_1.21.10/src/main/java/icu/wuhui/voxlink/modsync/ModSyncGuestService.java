@@ -48,10 +48,11 @@ public final class ModSyncGuestService {
    private ModSyncGuestService() {
    }
 
-   /** 加入失败后清除门控缓存：下次再加入可重新看到下载选择窗。 */
+   /* 清该房门控会话状态（在途标记+bypass）：新一次加入必须重新弹获取模组页。 */
    public static void clearGateFor(String roomCode) {
       if (roomCode != null) {
          GATED_THIS_LAUNCH.remove(roomCode);
+      BYPASSED_THIS_LAUNCH.remove(roomCode);
       }
    }
 
@@ -73,7 +74,7 @@ public final class ModSyncGuestService {
       }
    }
 
-   /** 玩家在获取清单页点"直接进入"或取消加入：本次启动内该房间跳过检查，在途回调丢弃。 */
+   /* 获取页"直接进入"/取消：仅作废本次在途清单回调，不跨加入记忆。 */
    public static void bypass(String roomCode) {
       if (roomCode != null) {
          BYPASSED_THIS_LAUNCH.add(roomCode);
@@ -81,11 +82,10 @@ public final class ModSyncGuestService {
       }
    }
 
-   /**
-    * 是否跳过门控：只认玩家在获取清单页明确点过的"跳过检查"（BYPASSED_THIS_LAUNCH）。
-    * 不再做任何"本次启动已弹过就不再弹"的记忆——房主随时可能增删必装 mod，
-    * 每次加入都重新拉清单重新判定；弹窗是否展示由 diff 结果决定（无差异不弹，无感知）。
-    */
+   /*
+   * 门控跳过仅存在于单次加入流程内（bypass 后由新流程入口 clearGateFor 重置）——
+   * 每次加入都重新拉清单重新判定；弹窗是否展示由 diff 结果决定（无差异不弹，无感知）。
+   */
    public static boolean shouldSkipGate(String roomCode) {
       return roomCode != null && BYPASSED_THIS_LAUNCH.contains(roomCode);
    }
@@ -179,11 +179,11 @@ public final class ModSyncGuestService {
             }
 
             ModSyncLog.info(
-               "guest diff: downloadable={} versionDiff={} unresolvable={} titles={}",
-               new Object[]{diff.downloadable.size(), diff.versionDiff.size(), diff.unresolvable.size(),
+               "guest diff: downloadable={} versionDiff={} manual={} unresolvable={} titles={}",
+               new Object[]{diff.downloadable.size(), diff.versionDiff.size(), diff.manualEntries.size(), diff.unresolvable.size(),
                   ModSyncSelectScreen.clip(joinTitles(diff), 200)}
             );
-            if (diff.downloadable.isEmpty() && diff.unresolvable.isEmpty() && diff.versionDiff.isEmpty()) {
+            if (diff.downloadable.isEmpty() && diff.manualEntries.isEmpty() && diff.unresolvable.isEmpty() && diff.versionDiff.isEmpty()) {
                mc.execute(proceed);
                return;
             }
@@ -194,8 +194,13 @@ public final class ModSyncGuestService {
                   Minecraft.getInstance().setScreen(
                      new ModSyncSelectScreen(
                         roomCode,
+                        fetchScope,
                         diff.downloadable,
+                                                diff.manualEntries,
+   
                         diff.unresolvable,
+
+   
                         diff.versionDiff,
                         diff.skipKeys,
                         proceed,
@@ -373,6 +378,14 @@ public final class ModSyncGuestService {
          sb.append(e.title).append('@').append(e.versionNumber);
       }
 
+      for (ModSyncEntry e : diff.manualEntries) {
+         if (n++ > 0) {
+            sb.append(", ");
+         }
+
+         sb.append('?').append(e.title);
+      }
+
       for (String s : diff.versionDiff) {
          if (n++ > 0) {
             sb.append(", ");
@@ -394,7 +407,9 @@ public final class ModSyncGuestService {
 
    public static final class DiffResult {
       public final List<ModSyncEntry> downloadable = new ArrayList<>();
-      public final List<String> unresolvable = new ArrayList<>();
+      /** 需手动安装的条目（MR 未收录/兼容性不符）：模组条展示+复制。 */
+      public final List<ModSyncEntry> manualEntries = new ArrayList<>();
+   public final List<String> unresolvable = new ArrayList<>();
       /** 同类模组但版本与房主不同：仅强提示，绝不移动/删除用户已装文件（运行中的 jar 被占用且属用户资产）。 */
       public final List<String> versionDiff = new ArrayList<>();
       /** 与 versionDiff 对应的会话跳过键（直接加入时记入会话记忆）。 */
@@ -458,11 +473,11 @@ public final class ModSyncGuestService {
          }
       }
 
-      // 未知模组：房主侧在 MR 查不到的 jar，仅提示（我们没有任何渠道让房客下到它们）
+      // 未知模组：房主侧在 MR 查不到的 jar，无自动下载渠道 → 结构化条目（模组条展示/复制）
       if (manifest.has("unknownMods") && manifest.get("unknownMods").isJsonArray()) {
          for (var el : manifest.getAsJsonArray("unknownMods")) {
             if (el.isJsonPrimitive()) {
-               out.unresolvable.add(el.getAsString());
+               out.manualEntries.add(ModSyncEntry.fromFileName(el.getAsString()));
             }
          }
       }
@@ -535,8 +550,8 @@ public final class ModSyncGuestService {
          if (hostFileCompatible) {
             out.downloadable.add(entry);
          } else {
-            // 房主的构建版本与本端 MC/加载器不一致且不允许再查 MR —— 转手动安装提示
-            out.unresolvable.add(entry.title + " (" + entry.versionNumber + ")");
+            // 房主的构建版本与本端 MC/加载器不一致且不允许再查 MR —— 转手动安装条目
+            out.manualEntries.add(entry);
          }
       }
 

@@ -6,6 +6,8 @@ import java.util.regex.Pattern;
 public final class RoomCodeRouter {
    private static final Pattern TERRACOTTA_CODE = Pattern.compile("^U/[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$");
    private static final Pattern VOXLINK_CODE = Pattern.compile("^[A-HJ-NP-Z2-9]{6}$");
+   // 互通房导入码：HL+HL原生码前5位(服务端hlImportCode)，恒7位不与6位VoxLink码冲突
+   private static final Pattern FED_CODE = Pattern.compile("^HL[A-Z0-9]{5}$");
 
    private RoomCodeRouter() {
    }
@@ -23,6 +25,10 @@ public final class RoomCodeRouter {
       return code == null ? false : VOXLINK_CODE.matcher(code.toUpperCase(Locale.ROOT)).matches();
    }
 
+   public static boolean isFedCode(String code) {
+      return code == null ? false : FED_CODE.matcher(code.toUpperCase(Locale.ROOT)).matches();
+   }
+
    public static boolean shouldUseTerracotta(String code) {
       return isTerracottaCode(code);
    }
@@ -31,7 +37,7 @@ public final class RoomCodeRouter {
       if (isTerracottaCode(code)) {
          return "Terracotta";
       } else {
-         return isVoxLinkCode(code) ? "VoxLink" : "Unknown";
+         return isFedCode(code) ? "HappyLink" : isVoxLinkCode(code) ? "VoxLink" : "Unknown";
       }
    }
 }

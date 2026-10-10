@@ -25,7 +25,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
    private static final int BTN_W = 200;
    private static final int BTN_H = 20;
    private static final int MARGIN_X = 20;
-   private static final int FORM_HEIGHT = 230;
+   private static final int FORM_HEIGHT = 254;
    private static final int FORM_MIN_Y = 24;
    private static final int LABEL_OFFSET_Y = 24;
    private static final int FIELD_OFFSET_Y = 48;
@@ -77,7 +77,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
    protected void init() {
       super.init();
       int centerX = this.width / 2;
-      int formHeight = 230;
+      int formHeight = 254;
       int y = Math.max(24, (this.height - formHeight) / 2);
       this.nameField = new EditBox(this.font, centerX - 100, y, 200, 20, Component.translatable("voxlink.room_name"));
       this.nameField.setMaxLength(20);
@@ -352,10 +352,10 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
             clipped = clipped + "...";
          }
 
-         int formHeight = 230;
+         int formHeight = 254;
          int y = Math.max(24, (this.height - formHeight) / 2);
          // 矮屏时夹住状态行 Y，避免状态跑到按钮之上或屏幕外
-         int statusY = Math.min(y + 186, this.height - 12);
+         int statusY = Math.min(y + 210, this.height - 12);
          this.drawCenteredString(graphics, clipped, centerX, statusY, this.statusColor);
       }
    }

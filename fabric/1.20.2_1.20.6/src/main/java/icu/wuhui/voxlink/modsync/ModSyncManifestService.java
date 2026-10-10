@@ -38,8 +38,8 @@ public final class ModSyncManifestService {
    private static final AtomicBoolean RUNNING = new AtomicBoolean(false);
    /** 依赖闭包最大深度（防脏元数据成环/超深；visited 已防环，此为双保险）。 */
    private static final int MAX_DEP_DEPTH = 8;
-   /** unknownMods 清单上限（信令单条消息 48KB 上限，1024 个 jar 文件名可能撑爆）。 */
-   private static final int UNKNOWN_MODS_CAP = 64;
+   /** unknownMods 清单上限（信令单条 48KB 预算内取 192：典型文件名 ~40B）。 */
+   private static final int UNKNOWN_MODS_CAP = 192;
    /** scope 取值：仅必装闭包 / 房主全部 MR 可识别模组。 */
    public static final String SCOPE_REQUIRED = "required";
    public static final String SCOPE_ALL = "all";
@@ -122,6 +122,18 @@ public final class ModSyncManifestService {
       }
 
       JsonObject built = buildBothManifests(stateHash);
+      // MR 反查零命中守卫：有 jar 但两档 mods 全空 ⇒ 大概率构建时 api.modrinth.com 整体不可达，
+      // 绝不落盘/进内存——否则坏清单被 stateHash 永久复用，房客永远"无法自动下载"。
+      // 不缓存 ⇒ 下一次 mods_request 现场重试构建，网络恢复即自愈。
+      int jarCount = built.has("jarCount") && built.get("jarCount").isJsonPrimitive()
+         ? built.get("jarCount").getAsInt() : 0;
+      if (jarCount > 0
+         && built.getAsJsonObject("required").getAsJsonArray("mods").size() == 0
+         && built.getAsJsonObject("all").getAsJsonArray("mods").size() == 0) {
+         ModSyncLog.warn("MR zero-hit for {} jars, skip caching (modrinth unreachable?), rebuild on next request", jarCount);
+         return built;
+      }
+
       cachedStateHash = stateHash;
       cachedManifests = built;
       writeDiskCache(stateHash, built);
@@ -160,6 +172,14 @@ public final class ModSyncManifestService {
          }
          if (root.has("required") && root.get("required").isJsonObject()
             && root.has("all") && root.get("all").isJsonObject()) {
+            // 历史坏缓存防御：两档 mods 全空=当年 MR 不可达时落盘的残废清单（jarCount 守卫
+            // 上线前写入）。丢弃重建：网络已恢复则直接出好清单，仍不可达则构建侧守卫不落盘。
+            if (root.getAsJsonObject("required").getAsJsonArray("mods").size() == 0
+               && root.getAsJsonObject("all").getAsJsonArray("mods").size() == 0) {
+               ModSyncLog.warn("disk cache has empty mods (legacy zero-hit?), discard and rebuild");
+               return null;
+            }
+
             return root;
          }
          return null;
@@ -332,6 +352,7 @@ public final class ModSyncManifestService {
       }
       required.add("unknownMods", trimmedUnknown);
       all.add("unknownMods", trimmedUnknown);
+      out.addProperty("jarCount", jars.size());
 
       ModSyncLog.info(
          "manifests ready: {} jars, required={} all={} unknown={} state={} {}ms",

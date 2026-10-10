@@ -58,7 +58,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       "voxlink.tip.auto_collapse_create",
       "voxlink.tip.disable_join_check",
       "voxlink.tip.app",
-      "voxlink.tip.kamu_launcher"
+      "voxlink.tip.kamu_launcher",
+      "voxlink.tip.indie"
    };
    private final List<String> tipQueue = new ArrayList<>();
    // ===== 日志面板（1.1.5 UI 重构）=====
@@ -95,18 +96,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private static final int MAX_MONITOR_TICKS = 360;
    private static final int BRIDGE_HANDSHAKE_TICKS = 60;
    private int bridgeEstablishedAtTick = -1;
-   private volatile boolean relayButtonVisible = false;
    private volatile long relayFailedMsgTime = 0L;
    private volatile boolean lastManualRelayInProgress = false;
    /** TURN 由忙转闲且未连接成功：显示 3 秒"中继不可用"瞬态提示（与玩家中继失败提示同机制）。 */
    private volatile long turnFailedMsgTime = 0L;
    private volatile boolean lastTurnBusy = false;
-   /** TURN"使用中继"按钮当前显隐（monitor 线程计算，init 消费）。 */
-   private volatile boolean turnButtonVisible = false;
-   /** 服务端 TURN 开关缓存（打洞 ≥20s 时查询一次，30s 刷新）。 */
-   private volatile boolean turnServerEnabled = false;
-   private volatile boolean turnStatusChecked = false;
-   private volatile long turnStatusCheckedAt = 0L;
    /** ModSync 门控已放行（清单拉完/玩家直接加入或直接进入）：重建本屏时不再走门控。 */
    private final boolean modSyncChecked;
    /** 正处于"正在获取房主必装清单"阶段：展示"直接进入"出口。 */
@@ -114,6 +108,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    public AttemptingJoinScreen(Screen parent, String roomCode, String password) {
       this(parent, roomCode, password, false);
+   // 新一次加入：清上次 bypass，获取模组页每次都重新弹
+   icu.wuhui.voxlink.modsync.ModSyncGuestService.clearGateFor(this.roomCode);
    }
 
    public AttemptingJoinScreen(Screen parent, String roomCode, String password, boolean modSyncChecked) {
@@ -187,35 +183,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
             this.addRenderableWidget(
                Button.builder(Component.translatable("voxlink.cancel"), button -> this.cancelJoin()).bounds(centerX - 100, btnY, 200, 20).build()
             );
-            if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton()) {
-               this.relayButtonVisible = true;
-               this.addRenderableWidget(
-                  Button.builder(Component.translatable("voxlink.relay.use_player_relay"), button -> this.onRelayButtonClicked())
-                     .bounds(this.width - 104, 4, 100, 20)
-                     .build()
-               );
-            } else if (this.active && VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress()) {
-               // 中继进行中: 把 "使用其他玩家进行中继" 按钮换成 "取消中继" 出口。
-               this.relayButtonVisible = true;
-               this.addRenderableWidget(
-                  Button.builder(Component.translatable("voxlink.relay.cancel"), button -> this.onCancelRelayClicked())
-                     .bounds(this.width - 104, 4, 100, 20)
-                     .build()
-               );
-            } else {
-               this.relayButtonVisible = false;
-            }
+            // 2026-10-05：玩家中继/TURN 两个手动按钮退役——中继由智能自动编排器接管
          }
-      }
-
-      // TURN"使用中继"：右上角小按钮。显隐由 monitor 线程按 20s 计时 + 服务端开关计算。
-      // y=26 避开标题（标题文字在 y=15..24，y=4 会与标题同一高度带重叠）
-      if (!bridgeReady && this.active && this.turnButtonVisible) {
-         this.addRenderableWidget(
-            Button.builder(Component.translatable("voxlink.turn.use"), button -> this.onTurnButtonClicked())
-               .bounds(this.width - 104, 26, 100, 20)
-               .build()
-         );
       }
 
       // 日志面板展开/收起: 右下角, 在上传日志提示上方预留空间(提示在 y=height-12)
@@ -282,42 +251,6 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       Minecraft.getInstance().gui.setScreen(this.parent);
    }
 
-   private void onRelayButtonClicked() {
-      if (VoxLinkMod.getConfig().isRelayEnabled()) {
-         // 先触发再重建：triggerManualRelay 同步置 manualRelayInProgress=true，
-         // init() 里 canShowRelayButton() 立即为 false，按钮不会被重新加回（原先有 500ms 幽灵按钮窗口）
-         VoxLinkMod.getRoomManager().getConnectionManager().triggerManualRelay();
-         this.relayButtonVisible = false;
-         this.lastManualRelayInProgress = true;
-         // 即时反馈：不等 monitor + 2s 抑制窗口，点击当场切换状态文本
-         this.voxlinkStatusText = Component.translatable("voxlink.relay.trying").getString();
-         this.voxlinkStatusColor = VoxLinkColors.WARNING;
-         this.voxlinkStatusLastUpdate = System.currentTimeMillis();
-         this.clearOurWidgets();
-         this.init();
-      }
-   }
-
-   /** "取消中继"按钮: 调用 ConnectionManager.cancelManualRelay(), 然后刷新布局回到直连态。 */
-   private void onCancelRelayClicked() {
-      VoxLinkMod.getRoomManager().getConnectionManager().cancelManualRelay();
-      // 手动取消不是失败：同步复位沿检测，否则下一个 monitor tick 会弹出"中继失败"误报
-      this.lastManualRelayInProgress = false;
-      // 让 AttemptingJoinScreen 重新走 init: manualRelayInProgress=false 后, canShowRelayButton 会重新判定。
-      this.clearOurWidgets();
-      this.init();
-   }
-
-   /** TURN"使用中继"：交由 ConnectionManager 完成测延迟/选节点/BIND 全流程；置 inProgress 后按钮自动消失。 */
-   private void onTurnButtonClicked() {
-      VoxLinkMod.getRoomManager().getConnectionManager().triggerTurnRelay();
-      // 即时反馈：不等 500ms monitor + 2s 抑制窗口，点击当场切换状态文本
-      this.voxlinkStatusText = Component.translatable("voxlink.turn.connecting").getString();
-      this.voxlinkStatusColor = VoxLinkColors.WARNING;
-      this.voxlinkStatusLastUpdate = System.currentTimeMillis();
-      this.clearOurWidgets();
-      this.init();
-   }
 
    private void startJoin() {
       this.active = true;
@@ -334,6 +267,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
          && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
          && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode)) {
+         icu.wuhui.voxlink.room.RoomInfo curInfo = VoxLinkMod.getRoomManager().getCurrentRoom();
+         if (curInfo != null && !curInfo.getHostCapabilities().contains(icu.wuhui.voxlink.network.ProtocolNegotiator.CAP_MOD_SYNC_V1)) {
+         // 房主未开启模组上传(建房caps声明已定谳)：不弹选择窗，直接开连
+         VoxLinkMod.LOGGER.info("[ModSync] host has no modSyncV1 cap, skip gate, room={}", this.roomCode);
+         icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.modsync_unsupported");
+         this.doStartDualP2P();
+         return;
+         }
+         
          this.modSyncChecking = true;
          VoxLinkMod.LOGGER.info("[ModSync] gate: waiting for scope selection, room={}", this.roomCode);
          this.voxlinkStatusText = Component.translatable("voxlink.modsync.scope_hint").getString();
@@ -352,7 +294,9 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
          return;
       }
 
-      this.voxlinkStatusText = Component.translatable("voxlink.modsync.checking").getString();
+      // 文案按 scope 区分：必装 / 全部
+      this.voxlinkStatusText = Component.translatable(
+         "all".equals(scope) ? "voxlink.modsync.checking_all" : "voxlink.modsync.checking").getString();
       this.voxlinkStatusColor = VoxLinkColors.WARNING;
       Minecraft mc0 = Minecraft.getInstance();
       AttemptingJoinScreen self = this;
@@ -699,52 +643,6 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                      );
                   }
 
-                  boolean shouldShowRelay = AttemptingJoinScreen.this.active && VoxLinkMod.getRoomManager().getConnectionManager().canShowRelayButton();
-                  if (shouldShowRelay != AttemptingJoinScreen.this.relayButtonVisible) {
-                     mc.execute(() -> {
-                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
-                           AttemptingJoinScreen.this.clearOurWidgets();
-                           AttemptingJoinScreen.this.init();
-                        }
-                     });
-                  }
-
-                  // TURN"使用中继"显隐：打洞 ≥20s 先查一次服务端开关（30s 缓存），开启且未在使用/未放弃才显示。
-                  // 计时用 punchUiStartMs（会话首周期只设一次）：connectionStartTimeMs 在首周期前为 0/残留旧值
-                  // 会让 now-0 天文数字被误判成"已超20s"→按钮刚进屏就闪现又消失；持续重试每轮还会复位再消失20s。
-                  // TURN 中途失败 teardown 后 turnInProgress/turnActive 复位，本条件自然重新成立（按钮重现）。
-                  icu.wuhui.voxlink.room.ConnectionManager cmTurn = VoxLinkMod.getRoomManager().getConnectionManager();
-                  long punchStartMs = cmTurn.getPunchUiStartMs();
-                  long punchMs = punchStartMs > 0L ? System.currentTimeMillis() - punchStartMs : 0L;
-                  if (punchMs >= 20000L
-                     && (!AttemptingJoinScreen.this.turnStatusChecked
-                        || System.currentTimeMillis() - AttemptingJoinScreen.this.turnStatusCheckedAt > 30000L)) {
-                     AttemptingJoinScreen.this.turnStatusChecked = true;
-                     AttemptingJoinScreen.this.turnStatusCheckedAt = System.currentTimeMillis();
-                     icu.wuhui.voxlink.network.TurnRelayClient
-                        .fetchStatus(VoxLinkMod.getRoomManager().getSignalingClient())
-                        .thenAccept(ok -> AttemptingJoinScreen.this.turnServerEnabled = ok);
-                  }
-
-                  boolean shouldShowTurn = AttemptingJoinScreen.this.active
-                     && roomInfo != null
-                     && !roomInfo.isHost()
-                     && punchMs >= 20000L
-                     && AttemptingJoinScreen.this.turnServerEnabled
-                     && !cmTurn.isTurnActive()
-                     && !cmTurn.isTurnInProgress()
-                     && !cmTurn.isTurnP2pGivenUp()
-                     && !cmTurn.isManualRelayInProgress();
-                  if (shouldShowTurn != AttemptingJoinScreen.this.turnButtonVisible) {
-                     AttemptingJoinScreen.this.turnButtonVisible = shouldShowTurn;
-                     mc.execute(() -> {
-                        if (mc.gui.screen() == AttemptingJoinScreen.this) {
-                           AttemptingJoinScreen.this.clearOurWidgets();
-                           AttemptingJoinScreen.this.init();
-                        }
-                     });
-                  }
-
                   boolean currentRelayInProgress = VoxLinkMod.getRoomManager().getConnectionManager().isManualRelayInProgress();
                   if (AttemptingJoinScreen.this.lastManualRelayInProgress && !currentRelayInProgress) {
                      AttemptingJoinScreen.this.relayFailedMsgTime = System.currentTimeMillis();
@@ -752,6 +650,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
                   AttemptingJoinScreen.this.lastManualRelayInProgress = currentRelayInProgress;
                   // TURN 失败瞬态：进行中→空闲且未连上 = 失败，给 3 秒可见反馈（否则只有静默 teardown）
+                  icu.wuhui.voxlink.room.ConnectionManager cmTurn = VoxLinkMod.getRoomManager().getConnectionManager();
                   boolean turnBusyNow = cmTurn.isTurnInProgress() || cmTurn.isTurnActive();
                   if (AttemptingJoinScreen.this.lastTurnBusy && !turnBusyNow) {
                      AttemptingJoinScreen.this.turnFailedMsgTime = System.currentTimeMillis();
