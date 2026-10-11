@@ -32,7 +32,7 @@ import java.util.Set;
 public final class ModrinthClient {
    private static final String API = "https://api.modrinth.com/v2";
    /** MCIM 镜像（PCL 同款）：国内直连 MR 慢且不稳，镜像短超时优先、官方兜底。 */
-   private static final String MIRROR_API = "https://mod.mcimirror.top/modrinth";
+   private static final String MIRROR_API = "https://mod.mcimirror.top/modrinth/v2";
    private static final String MIRROR_PREFIX = "https://mod.mcimirror.top";
    private static final Duration MIRROR_TIMEOUT = Duration.ofSeconds(8);
    private static final String USER_AGENT = "VoxLink/" + voxlinkVersion() + " (modsync)";
