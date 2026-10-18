@@ -16,7 +16,7 @@ import org.slf4j.LoggerFactory;
 public class VoxLinkConfig {
    private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-config");
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-   private static final String DEFAULT_SERVER_URL = "https://p2p.wuhui.icu";
+   private static final String DEFAULT_SERVER_URL = "https://link.voxdev.top";
    private static final int DEFAULT_HEARTBEAT_INTERVAL = 5;
    private static final int DEFAULT_SIGNAL_POLL_INTERVAL = 3000;
    private static final int DEFAULT_CONNECTION_TIMEOUT = 20000;
@@ -54,7 +54,7 @@ public class VoxLinkConfig {
    private volatile boolean allowInsecureServerUrl = false;
 
    public VoxLinkConfig() {
-      this.serverUrl = "https://p2p.wuhui.icu";
+      this.serverUrl = "https://link.voxdev.top";
       this.autoUPnP = true;
       this.offlineMode = true;
       this.heartbeatInterval = 5;
@@ -82,7 +82,7 @@ public class VoxLinkConfig {
                config.configVersion = root.get("configVersion").getAsInt();
             }
 
-            config.serverUrl = root.has("serverUrl") && !root.get("serverUrl").isJsonNull() ? root.get("serverUrl").getAsString() : "https://p2p.wuhui.icu";
+            config.serverUrl = root.has("serverUrl") && !root.get("serverUrl").isJsonNull() ? root.get("serverUrl").getAsString() : "https://link.voxdev.top";
             config.autoUPnP = root.has("autoUPnP") ? root.get("autoUPnP").getAsBoolean() : true;
             config.offlineMode = root.has("offlineMode") ? root.get("offlineMode").getAsBoolean() : true;
             config.heartbeatInterval = root.has("heartbeatInterval") ? root.get("heartbeatInterval").getAsInt() : 5;
@@ -99,12 +99,12 @@ public class VoxLinkConfig {
             config.autoCollapseCreateUi = root.has("autoCollapseCreateUi") && root.get("autoCollapseCreateUi").getAsBoolean();
             config.allowInsecureServerUrl = root.has("allowInsecureServerUrl") && root.get("allowInsecureServerUrl").getAsBoolean();
             if (config.serverUrl == null || config.serverUrl.isEmpty()) {
-               config.serverUrl = "https://p2p.wuhui.icu";
+               config.serverUrl = "https://link.voxdev.top";
             }
 
             if (config.serverUrl.contains("index.php")) {
                LOGGER.warn("Detected legacy URL format: {}, reset to default", config.serverUrl);
-               config.serverUrl = "https://p2p.wuhui.icu";
+               config.serverUrl = "https://link.voxdev.top";
             }
 
             int fileVer = root.has("configVersion") ? root.get("configVersion").getAsInt() : 0;
@@ -161,10 +161,16 @@ public class VoxLinkConfig {
          this.serverUrl = this.serverUrl.replaceAll("/+$", "");
       }
 
+      // 域名迁移：旧域名落盘时改写为默认
+      if (this.serverUrl != null && this.serverUrl.contains("wuhui.icu")) {
+         LOGGER.warn("Deprecated serverUrl {} migrated to {}", this.serverUrl, DEFAULT_SERVER_URL);
+         this.serverUrl = DEFAULT_SERVER_URL;
+      }
+
       // 安全修复：明文 http:// 信令默认拒绝（凭据/房间令牌会明文出网）；
       // 显式设置 allowInsecureServerUrl=true 可放行自建 http 服务器。
       if ((this.serverUrl != null && this.serverUrl.toLowerCase().startsWith("http://")) && !this.allowInsecureServerUrl) {
-         this.serverUrl = "https://p2p.wuhui.icu";
+         this.serverUrl = "https://link.voxdev.top";
       }
       if (this.heartbeatInterval < 5) {
          this.heartbeatInterval = 5;

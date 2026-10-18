@@ -327,7 +327,8 @@ public final class ModrinthClient {
       }
 
       Path target = modsDir.resolve(fileName);
-      Path part = modsDir.resolve(fileName + ".part");
+      // 唯一 .part：并发/残留写入不再互相踩踏
+      Path part = modsDir.resolve(fileName + "." + System.nanoTime() + ".part");
       MessageDigest sha512;
       MessageDigest sha1;
       try {
@@ -416,19 +417,30 @@ public final class ModrinthClient {
          ModSyncLog.warn("no expected hash for {}; skipping verification", fileName);
       }
 
-      // 原子改名：优先 ATOMIC_MOVE，平台不支持时退化为普通 move；任何 IO 失败都清 .part
-      try {
+      // 原子改名：优先 ATOMIC_MOVE；失败短退避重试 3 次（杀软/占用锁瞬态）
+      IOException lastMove = null;
+      for (int mv = 0; mv < 3; mv++) {
          try {
-            Files.move(part, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-         } catch (AtomicMoveNotSupportedException amns) {
-            Files.move(part, target, StandardCopyOption.REPLACE_EXISTING);
+            try {
+               Files.move(part, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException amns) {
+               Files.move(part, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            return total;
+         } catch (IOException moveEx) {
+            lastMove = moveEx;
+            try {
+               Thread.sleep(150L << mv);
+            } catch (InterruptedException ie) {
+               Thread.currentThread().interrupt();
+               break;
+            }
          }
-      } catch (IOException moveEx) {
-         quietDelete(part);
-         throw moveEx;
       }
 
-      return total;
+      quietDelete(part);
+      throw lastMove != null ? lastMove : new IOException("move failed: " + fileName);
    }
 
    /** 用户主动取消专用异常：调用方按"静默回到选择界面"处理，不当失败刷红。 */

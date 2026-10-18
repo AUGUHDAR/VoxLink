@@ -300,6 +300,8 @@ public class ConnectionManager {
 
    private volatile String savedConnectionFrom = "";
 
+   private volatile String hostRevPunchPeer;
+
    private volatile String savedConnectionHostIpv6;
 
    private volatile String savedConnectionHostIp;
@@ -394,6 +396,9 @@ public class ConnectionManager {
 
    // 打洞占用期间排队的join_request重放任务(按peer记录)，对端断开时作废
    private final ConcurrentHashMap<String, List<ScheduledFuture<?>>> queuedJoinReplays = new ConcurrentHashMap<>();
+
+   // 排队中的join_request载荷(按peer记录)，host连接获胜后立即放行
+   private final ConcurrentHashMap<String, JsonObject> queuedJoinPayloads = new ConcurrentHashMap<>();
 
    private final AddressBlacklist addressBlacklist = AddressBlacklist.get();
    // punchAuthV1：当前连接周期的打洞认证密钥（applyPunchTemplate 注入每个 puncher）
@@ -1855,6 +1860,8 @@ private volatile long lastProfileSwitchMs = 0L;
 
             VoxLinkMod.LOGGER.info("[RoomManager] Punching in progress, queue join_request from {} (retry {}/3)", from, retryCount + 1);
 
+            this.queuedJoinPayloads.put(from, data);
+
             int nextRetry = retryCount + 1;
 
             // H3a: 闭包创建时捕获房间码,执行时校验,避免换房后排队的旧任务
@@ -1862,6 +1869,8 @@ private volatile long lastProfileSwitchMs = 0L;
             String capturedRoomCode = state.roomInfo.getCode();
 
             ScheduledFuture<?> queuedRetry = this.scheduler.schedule(() -> {
+
+               this.queuedJoinPayloads.remove(from);
 
                RoomManager.RoomState st = this.roomManager.currentRoom.get();
 
@@ -3858,6 +3867,7 @@ private volatile long lastProfileSwitchMs = 0L;
          }
 
          ctx.punchInfoId = punchInfoId;
+         ctx.punchStartMs = System.currentTimeMillis();
          LogUploadManager.schedulePunchUpload();
 
          VoxLinkMod.LOGGER.info("[RoomManager] Received punch_info from {}: {}:{}", new Object[]{from, joinerMappedIp, joinerMappedPort});
@@ -5174,6 +5184,8 @@ private volatile long lastProfileSwitchMs = 0L;
 
                   VoxLinkMod.LOGGER.info("[ReversePunch] Host reverse punch socket: localPort={}", puncher.getSocket().getLocalPort());
 
+                  this.hostRevPunchPeer = from;
+
                   this.activeHolePunchers.put("hostRev", puncher);
 
                   RoomManager.RoomState fState = state;
@@ -5485,6 +5497,8 @@ private volatile long lastProfileSwitchMs = 0L;
                                  currentPuncher.close();
 
                                  this.activeHolePunchers.remove("hostRev");
+
+                                 this.hostRevPunchPeer = null;
 
                               }
 
@@ -12037,6 +12051,8 @@ Minecraft mc = Minecraft.getInstance();
             }
             // 互操作降级开关: 对端为旧引擎(未武装密钥)时连续认证失败自动回明文, 不再互丢致死
             transport.allowAuthDowngradeForInterop();
+            // TURN载具补接ICE重启回调
+            transport.setOnIceRestartRequested(this::triggerIceRestart);
 
             this.turnTransport = transport;
             this.turnPeerId = "host";
@@ -12065,19 +12081,8 @@ Minecraft mc = Minecraft.getInstance();
                this.teardownTurn(state, "voxlink.turn.failed");
             } else {
                // host 数据面就绪回执有 20s 兜底（handleTurnReady 到达即 start+桥接）
-               this.scheduler.schedule(() -> {
-                  // stdTurn 分支：turnTransport 要等 turn_ready 才建——null 即未就绪
-                  // turnReadyApplied 门: 曾成功应用过 turn_ready(path up 后退房/换道清空了
-                  // turnTransport)时不再误报"没收到 turn_ready"(实证 2026-10-05 真机日志:
-                  // path up 19s 后退房, 空响 teardown 并打失败文案)
-                  boolean noReady = !this.turnReadyApplied.get()
-                     && (this.turnTransport == null || !this.turnTransport.isConnected());
-                  if (noReady && !this.turnSwitchedToP2p) {
-                     VoxLinkMod.LOGGER.warn("[Turn] guest got no turn_ready in 20s (host dead / signal lost), teardown");
-                     icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.turn_no_ready");
-                     this.teardownTurn(state, "voxlink.turn.failed");
-                  }
-               }, 20L, TimeUnit.SECONDS);
+               // 保险 v2: 20s 先强制补拉一次再判死; 信令不健康时延寿重查, 总窗≤65s(≤90s 有界)
+               this.scheduler.schedule(() -> this.turnReadyWatchdog(state, 0), 20L, TimeUnit.SECONDS);
             }
          });
    }
@@ -12234,6 +12239,8 @@ Minecraft mc = Minecraft.getInstance();
           // 互操作降级开关: 旧引擎 guest(桌面 App/旧版 mod)无密钥时连续认证失败自动回明文
           // (实证 09-11 23:03: host armed 而对端明文, path up 同秒互丢, 19s 后桥死)
           transport.allowAuthDowngradeForInterop();
+          // TURN载具补接ICE重启回调
+          transport.setOnIceRestartRequested(this::triggerIceRestart);
 
           this.turnTransport = transport;
           transport.start();
@@ -12249,20 +12256,8 @@ Minecraft mc = Minecraft.getInstance();
                 VoxLinkMod.LOGGER.warn("[Turn] turn_ready send failed: {}", e.getMessage());
                 return null;
              });
-             // 1.1.5: turn_ready 单发无重试是硬伤(信令一次 HTTP 失败 guest 就整场重来);
-             // 4s 后补发一次, 守卫: 会话仍在且对端未换
-             JsonObject readyResend = ready;
-             this.scheduler.schedule(() -> {
-                if (this.turnSession == session && this.turnPeerId == from) {
-                   this.signalingClient
-                      .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_ready", readyResend, from)
-                      .exceptionally(e -> {
-                         VoxLinkMod.LOGGER.debug("[Turn] turn_ready resend failed: {}", e.getMessage());
-                         return null;
-                      });
-                   VoxLinkMod.LOGGER.info("[Turn] turn_ready resent (delivery insurance)");
-                }
-             }, 4L, java.util.concurrent.TimeUnit.SECONDS);
+             // 投递保险 v2: 5s×12 有界重发, 回执即停(单次补发盖不住 30s 级限流退避)
+             this.scheduleTurnReadyResend(state, from, ready, session, false, System.currentTimeMillis(), 0);
           this.startTurnBgMonitor(state);
           VoxLinkMod.LOGGER.info("[Turn] host path up via {}:{} (peer={})", host, port, from);
           icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
@@ -12366,6 +12361,8 @@ Minecraft mc = Minecraft.getInstance();
             VoxLinkMod.LOGGER.info("[PunchAuth] stdTurn transport without auth (peer {} legacy/caps missing)", turnPeerId);
          }
          transport.allowAuthDowngradeForInterop();
+         // TURN载具补接ICE重启回调
+         transport.setOnIceRestartRequested(this::triggerIceRestart);
 
          this.turnTransport = transport;
          transport.start();
@@ -12383,24 +12380,83 @@ Minecraft mc = Minecraft.getInstance();
                VoxLinkMod.LOGGER.warn("[Turn] stdTurn turn_ready send failed: {}", e.getMessage());
                return null;
             });
-         // 投递保险重发（对齐自定义协议 1.1.5：单发无重试是硬伤）
-         JsonObject readyResend = ready;
-         StdTurnClient.StdTurnSession sessionRef = session;
-         this.scheduler.schedule(() -> {
-            if (this.stdTurnSession == sessionRef && this.turnPeerId != null && this.turnPeerId.equals(from)) {
-               this.signalingClient
-                  .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_ready", readyResend, from)
-                  .exceptionally(e -> {
-                     VoxLinkMod.LOGGER.debug("[Turn] stdTurn turn_ready resend failed: {}", e.getMessage());
-                     return null;
-                  });
-               VoxLinkMod.LOGGER.info("[Turn] stdTurn turn_ready resent (delivery insurance)");
-            }
-         }, 4L, java.util.concurrent.TimeUnit.SECONDS);
+         // 投递保险 v2: 5s×12 有界重发, 回执即停
+         this.scheduleTurnReadyResend(state, from, ready, session, true, System.currentTimeMillis(), 0);
          this.startTurnBgMonitor(state);
          VoxLinkMod.LOGGER.info("[Turn] stdTurn host path up (channel 0x4000 ↔ {}, peer={})", peer, from);
          icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
       });
+   }
+
+   /**
+    * turn_ready 投递保险 v2: 每 5s 重发, 至多 12 次/60s(有界≤90s)。
+    * 停止条件: 会话更替/拆除, 或 guest 数据面回包(getLastRecvTime 前移=已应用 turn_ready)。
+    * 重复投递由 guest 侧 turnReadyApplied CAS 幂等吞掉, 不会双建桥。
+    */
+   private void scheduleTurnReadyResend(
+      RoomManager.RoomState state, String from, JsonObject ready, Object sessionRef, boolean stdTurn, long pathUpMs, int round
+   ) {
+      this.scheduler.schedule(() -> {
+         try {
+            boolean sessionCurrent = stdTurn
+               ? this.stdTurnSession == sessionRef && this.turnPeerId != null && this.turnPeerId.equals(from)
+               : this.turnSession == sessionRef && this.turnPeerId == from;
+            if (!sessionCurrent) {
+               return;
+            }
+            ReliableUdpTransport t = this.turnTransport;
+            if (t != null && t.getLastRecvTime() > pathUpMs) {
+               return;
+            }
+            if (round >= 12) {
+               VoxLinkMod.LOGGER.warn("[Turn] turn_ready insurance exhausted ({} resends/60s), stop", round);
+               return;
+            }
+            this.signalingClient
+               .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "turn_ready", ready, from)
+               .exceptionally(e -> {
+                  VoxLinkMod.LOGGER.debug("[Turn] turn_ready resend failed: {}", e.getMessage());
+                  return null;
+               });
+            VoxLinkMod.LOGGER.info("[Turn] turn_ready resent {}/12 (delivery insurance)", round + 1);
+            this.scheduleTurnReadyResend(state, from, ready, sessionRef, stdTurn, pathUpMs, round + 1);
+         } catch (Exception e) {
+            VoxLinkMod.LOGGER.debug("[Turn] turn_ready insurance error: {}", e.getMessage());
+         }
+      }, 5L, java.util.concurrent.TimeUnit.SECONDS);
+   }
+
+   /**
+    * turn_ready 兜底看门狗 v2: round0 于 20s 触发, 先强制补拉一次(覆盖 WS 半开/安全网
+    * 节拍慢于看门狗的漏收)再于 +5s 复查; 仍无且本端信令不健康(WS 断/降级/轮询退避)时
+    * 每轮补拉+延寿 20s, 至多 2 轮, 65s 封顶后诚实 teardown。信令健康则 25s 即判死,
+    * 死 host 的失败路径仅多等 5s。
+    */
+   private void turnReadyWatchdog(RoomManager.RoomState state, int round) {
+      boolean noReady = !this.turnReadyApplied.get()
+         && (this.turnTransport == null || !this.turnTransport.isConnected());
+      if (!noReady || this.turnSwitchedToP2p || this.roomManager.currentRoom.get() != state) {
+         return;
+      }
+      long waited = round == 0 ? 20L : 25L + (round - 1) * 20L;
+      if (round == 0) {
+         VoxLinkMod.LOGGER.warn("[Turn] no turn_ready in 20s, force catch-up poll, recheck in 5s");
+         this.roomManager.catchUpSignalOnce();
+         this.scheduler.schedule(() -> this.turnReadyWatchdog(state, 1), 5L, TimeUnit.SECONDS);
+         return;
+      }
+      boolean signalUnhealthy = !this.signalingClient.isWsConnected()
+         || this.roomManager.isSignalingDegraded()
+         || this.roomManager.isSignalPollBackedOff();
+      if (signalUnhealthy && round < 3) {
+         VoxLinkMod.LOGGER.warn("[Turn] still no turn_ready at {}s, signal degraded, extend wait", waited);
+         this.roomManager.catchUpSignalOnce();
+         this.scheduler.schedule(() -> this.turnReadyWatchdog(state, round + 1), 20L, TimeUnit.SECONDS);
+         return;
+      }
+      VoxLinkMod.LOGGER.warn("[Turn] guest got no turn_ready in {}s (host dead / signal lost), teardown", waited);
+      icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.turn_no_ready");
+      this.teardownTurn(state, "voxlink.turn.failed");
    }
 
    /** guest 收 turn_ready：host 数据面就绪 → start 自己的 TURN transport → 桥接进 MC。 */
@@ -12499,6 +12555,8 @@ Minecraft mc = Minecraft.getInstance();
             VoxLinkMod.LOGGER.info("[PunchAuth] stdTurn transport without auth (host caps missing)");
          }
          transport.allowAuthDowngradeForInterop();
+         // TURN载具补接ICE重启回调
+         transport.setOnIceRestartRequested(this::triggerIceRestart);
 
          this.turnTransport = transport;
          transport.start();
@@ -13082,6 +13140,8 @@ Minecraft mc = Minecraft.getInstance();
    /** 房间态未就绪时的挂载复查任务(就绪/会话终结/退房即自取消) */
    private volatile ScheduledFuture<?> autoRelayArmWaiterTask;
    private volatile ScheduledFuture<?> relayVerifyWatchdogTask;
+   /** 验证后下行保鲜窗: 持续零下行判该道停滞 */
+   private static final long RELAY_DOWNLINK_FRESH_MS = 6000L;
    private volatile boolean autoRelayTurnAttempted;
    private volatile boolean autoRelayTurnUnhealthy;
    private volatile boolean autoRelayPlayerAttempted;
@@ -13264,7 +13324,7 @@ Minecraft mc = Minecraft.getInstance();
       final long armMs = System.currentTimeMillis();
       this.relayVerifyWatchdogTask = this.scheduler.scheduleAtFixedRate(() -> {
          try {
-            if (ConnectionHelper.isMcTrulyConnected() || P2PBridge.hasJoinerDownlink()) {
+            if (ConnectionHelper.isMcTrulyConnected()) {
                this.cancelRelayVerifyWatchdog();
                this.autoRelayMode = false;
                P2PBridge.stopJoinerJournal();
@@ -13279,6 +13339,18 @@ Minecraft mc = Minecraft.getInstance();
 
             if (!P2PBridge.isRunning() || this.roomManager.currentRoom.get() != state) {
                this.cancelRelayVerifyWatchdog();
+               return;
+            }
+
+            if (P2PBridge.hasJoinerDownlink()) {
+               // 验证后转下行保鲜盯守: 停滞即换道
+               if (!P2PBridge.isJoinerDownlinkFresh(RELAY_DOWNLINK_FRESH_MS)) {
+                  VoxLinkMod.LOGGER.warn("[AutoRelay] relay downlink stalled {}ms after first byte, failover", RELAY_DOWNLINK_FRESH_MS);
+                  this.cancelRelayVerifyWatchdog();
+                  this.autoRelayMode = false;
+                  P2PBridge.stopJoinerJournal();
+                  this.onRelayVerifyDead(state, turnPath);
+               }
                return;
             }
 
@@ -14110,6 +14182,7 @@ Minecraft mc = Minecraft.getInstance();
 
 
       this.activeHolePunchers.clear();
+      this.hostRevPunchPeer = null;
 
 
 
@@ -15459,7 +15532,7 @@ Minecraft mc = Minecraft.getInstance();
 
       }
 
-      if (this.activeUdpTransports.containsKey(from)) {
+      if (this.activeUdpTransports.containsKey(from) || P2PBridge.hasActiveBridgePairs()) {
 
          this.finishHostBridgeConnect(state, from);
 
@@ -15483,7 +15556,8 @@ Minecraft mc = Minecraft.getInstance();
 
       }
 
-      if (this.roomManager.currentRoom.get() != state || !this.activeUdpTransports.containsKey(clientId)) {
+      if (this.roomManager.currentRoom.get() != state
+         || !(this.activeUdpTransports.containsKey(clientId) || P2PBridge.hasActiveBridgePairs())) {
 
          VoxLinkMod.LOGGER.warn("[ConnState] Skip host CONNECTED confirm client={} (room/transport changed)", clientId);
 
@@ -15523,6 +15597,7 @@ Minecraft mc = Minecraft.getInstance();
 
       boolean targetsThisPeer = this.hostPunchContexts.containsKey(from)
          || this.activeUdpTransports.containsKey(from)
+         || from.equals(this.hostRevPunchPeer)
          || from.equals(this.savedConnectionFrom);
 
       if (!punchingBusy || !targetsThisPeer || this.connectionWon.get()) {
@@ -15611,6 +15686,8 @@ Minecraft mc = Minecraft.getInstance();
 
       }
 
+      this.queuedJoinPayloads.remove(from);
+
       List<ScheduledFuture<?>> list = this.queuedJoinReplays.remove(from);
 
       if (list != null && !list.isEmpty()) {
@@ -15625,6 +15702,23 @@ Minecraft mc = Minecraft.getInstance();
 
       }
 
+   }
+
+   // host任一对端获胜后立即放行排队join_request(打洞已停，busy必为false)
+   public void flushQueuedJoinRequestsAfterWin() {
+      if (this.queuedJoinPayloads.isEmpty()) {
+         return;
+      }
+      for (String peer : this.queuedJoinPayloads.keySet().toArray(new String[0])) {
+         JsonObject payload = this.queuedJoinPayloads.remove(peer);
+         this.cancelQueuedJoinReplays(peer);
+         RoomManager.RoomState st = this.roomManager.currentRoom.get();
+         if (st == null || st == RoomManager.PENDING || !st.roomInfo.isHost() || peer == null) {
+            continue;
+         }
+         VoxLinkMod.LOGGER.info("[RoomManager] Host connection won, flush queued join_request from {}", peer);
+         this.handleJoinRequest(peer, payload != null ? payload : new JsonObject(), 0);
+      }
    }
 
    // 打洞占用期结束后的join_request重放：不再默默丢弃，等打洞一停立即处理

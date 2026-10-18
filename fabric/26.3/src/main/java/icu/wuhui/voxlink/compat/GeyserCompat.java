@@ -36,11 +36,11 @@ public final class GeyserCompat {
 
       try {
          Class<?> geyserApiClass = Class.forName("org.geysermc.geyser.api.GeyserApi");
-         Object api = geyserApiClass.getMethod("api").invoke(null);
+         Object api = invokeAccessible(geyserApiClass, null, "api");
          if (api != null) {
-            Object listener = api.getClass().getMethod("bedrockListener").invoke(api);
+            Object listener = invokeAccessible(api.getClass(), api, "bedrockListener");
             if (listener != null) {
-               int port = (Integer)listener.getClass().getMethod("port").invoke(listener);
+               int port = (Integer)invokeAccessible(listener.getClass(), listener, "port");
                if (port > 0) {
                   bedrockPort = port;
                   return port;
@@ -52,19 +52,27 @@ public final class GeyserCompat {
       }
 
       try {
-         Object geyserImpl = Class.forName("org.geysermc.geyser.GeyserImpl").getMethod("getInstance").invoke(null);
+         Class<?> impl = Class.forName("org.geysermc.geyser.GeyserImpl");
+         Object geyserImpl = invokeAccessible(impl, null, "getInstance");
          if (geyserImpl == null) {
             return 19132;
          }
 
-         Object config = geyserImpl.getClass().getMethod("config").invoke(geyserImpl);
-         Object bedrockConfig = config.getClass().getMethod("bedrock").invoke(config);
-         int port = (Integer)bedrockConfig.getClass().getMethod("port").invoke(bedrockConfig);
+         Object config = invokeAccessible(geyserImpl.getClass(), geyserImpl, "config");
+         Object bedrockConfig = invokeAccessible(config.getClass(), config, "bedrock");
+         int port = (Integer)invokeAccessible(bedrockConfig.getClass(), bedrockConfig, "port");
          bedrockPort = port > 0 ? port : 19132;
          return bedrockPort;
       } catch (Throwable e) {
          LOGGER.warn("Failed to read Geyser bedrock port, using default {}: {}", new Object[]{19132, e.toString(), e});
          return 19132;
       }
+   }
+
+   /** 反射调无参方法：先 trySetAccessible 再 invoke，避免 IllegalAccessException */
+   private static Object invokeAccessible(Class<?> owner, Object target, String name) throws Exception {
+      java.lang.reflect.Method m = owner.getMethod(name);
+      m.trySetAccessible();
+      return m.invoke(target);
    }
 }

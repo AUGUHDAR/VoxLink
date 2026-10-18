@@ -105,6 +105,8 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
    private final boolean modSyncChecked;
    /** 正处于"正在获取房主必装清单"阶段：展示"直接进入"出口。 */
    private boolean modSyncChecking = false;
+   /** 已选定同步范围：防重复触发 gate（2T5NXG 双拉清单） */
+   private boolean scopePicked = false;
 
    public AttemptingJoinScreen(Screen parent, String roomCode, String password) {
       this(parent, roomCode, password, false);
@@ -150,7 +152,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       int centerX = this.width / 2;
       int btnY = this.height / 2 + 45;
       // 首次 init 且即将走门控时，本屏就是"正在获取房主必装清单"页：给出不等清单的出口
-      boolean gatePending = (this.modSyncChecking || !this.joinApiDone) && !this.modSyncChecked
+      boolean gatePending = (this.modSyncChecking || !this.joinApiDone) && !this.modSyncChecked && !this.scopePicked
          && icu.wuhui.voxlink.modsync.ModSyncGuestService.isEnabled()
          && icu.wuhui.voxlink.terracotta.RoomCodeRouter.isVoxLinkCode(this.roomCode)
          && !icu.wuhui.voxlink.modsync.ModSyncGuestService.shouldSkipGate(this.roomCode);
@@ -290,9 +292,11 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
    /** 玩家选定同步范围：按 scope 走门控拉清单（继续/取消回调与原门控一致）。 */
    private void onScopePicked(String scope) {
-      if (!this.modSyncChecking) {
+      if (this.scopePicked || !this.modSyncChecking) {
          return;
       }
+
+      this.scopePicked = true;
 
       // 文案按 scope 区分：必装 / 全部
       this.voxlinkStatusText = Component.translatable(

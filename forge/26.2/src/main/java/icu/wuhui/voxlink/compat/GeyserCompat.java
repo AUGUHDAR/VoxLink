@@ -29,11 +29,11 @@ public final class GeyserCompat {
         if (!isGeyserLoaded()) return -1;
         try {
             var geyserApiClass = Class.forName("org.geysermc.geyser.api.GeyserApi");
-            var api = geyserApiClass.getMethod("api").invoke(null);
+            var api = invokeAccessible(geyserApiClass, null, "api");
             if (api != null) {
-                var listener = api.getClass().getMethod("bedrockListener").invoke(api);
+                var listener = invokeAccessible(api.getClass(), api, "bedrockListener");
                 if (listener != null) {
-                    var port = (int) listener.getClass().getMethod("port").invoke(listener);
+                    var port = (int) invokeAccessible(listener.getClass(), listener, "port");
                     if (port > 0) {
                         bedrockPort = port;
                         return port;
@@ -44,12 +44,12 @@ public final class GeyserCompat {
             LOGGER.debug("GeyserApi.bedrockListener() failed, trying GeyserImpl: {}", e.getMessage());
         }
         try {
-            var geyserImpl = Class.forName("org.geysermc.geyser.GeyserImpl")
-                    .getMethod("getInstance").invoke(null);
+            var impl = Class.forName("org.geysermc.geyser.GeyserImpl");
+            var geyserImpl = invokeAccessible(impl, null, "getInstance");
             if (geyserImpl == null) return DEFAULT_BEDROCK_PORT;
-            var config = geyserImpl.getClass().getMethod("config").invoke(geyserImpl);
-            var bedrockConfig = config.getClass().getMethod("bedrock").invoke(config);
-            var port = (int) bedrockConfig.getClass().getMethod("port").invoke(bedrockConfig);
+            var config = invokeAccessible(geyserImpl.getClass(), geyserImpl, "config");
+            var bedrockConfig = invokeAccessible(config.getClass(), config, "bedrock");
+            var port = (int) invokeAccessible(bedrockConfig.getClass(), bedrockConfig, "port");
             bedrockPort = port > 0 ? port : DEFAULT_BEDROCK_PORT;
             return bedrockPort;
         } catch (Throwable e) {
@@ -57,5 +57,12 @@ public final class GeyserCompat {
             LOGGER.warn("Failed to read Geyser bedrock port, using default {}: {}", DEFAULT_BEDROCK_PORT, e.toString(), e);
             return DEFAULT_BEDROCK_PORT;
         }
+    }
+
+    /** 反射调无参方法：先 trySetAccessible 再 invoke，避免 IllegalAccessException */
+    private static Object invokeAccessible(Class<?> owner, Object target, String name) throws Exception {
+        java.lang.reflect.Method m = owner.getMethod(name);
+        m.trySetAccessible();
+        return m.invoke(target);
     }
 }

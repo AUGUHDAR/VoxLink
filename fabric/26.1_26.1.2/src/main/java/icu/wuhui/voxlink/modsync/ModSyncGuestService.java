@@ -113,7 +113,11 @@ public final class ModSyncGuestService {
 
       // 每次加入都重新门控（不做会话级记忆）；GATED_THIS_LAUNCH 仅作"在途"标记，
       // 供取消/超时路径清理，不作为放行依据。
-      GATED_THIS_LAUNCH.add(roomCode);
+      // 单飞：同房在途重复 gate 直接忽略（双击/重进屏不再双拉清单）
+      if (!GATED_THIS_LAUNCH.add(roomCode)) {
+         ModSyncLog.info("gate: duplicate while in-flight, room={}", roomCode);
+         return;
+      }
 
       // 包装 onProceed/onCancel：清理在途标记。
       // 不再置位任何"已选择"记忆——shouldSkipGate 只认 BYPASSED_THIS_LAUNCH。

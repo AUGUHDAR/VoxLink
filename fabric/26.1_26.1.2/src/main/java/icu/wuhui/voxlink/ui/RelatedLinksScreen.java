@@ -13,7 +13,7 @@ public class RelatedLinksScreen extends VoxLinkScreenBase {
       {"voxlink.links.github", "https://github.com/AUGUHDAR/VoxLink"},
       {"voxlink.links.modrinth", "https://modrinth.com/mod/voxlink"},
       {"voxlink.links.curseforge", "https://www.curseforge.com/minecraft/mc-mods/voxlink"},
-      {"voxlink.links.site", "https://p2p.wuhui.icu/"},
+      {"voxlink.links.site", "https://link.voxdev.top/"},
       {"voxlink.links.discord", "https://discord.gg/XaAFxvzPDS"},
       {"voxlink.links.qq", "https://qm.qq.com/cgi-bin/qm/qr?k=OEkk9L8m8jdFMkbGDhKZs0u2U0azLAPo&jump_from=webapi&authKey=v0dYAQniGZypAJuoPZW/7FL0bfoc32h68oIHd9lqGwOvAduzcwsJNR7Mei9/YugW"},
       {"voxlink.links.gitee", "https://gitee.com/AUGUHDAR/VoxLink"}

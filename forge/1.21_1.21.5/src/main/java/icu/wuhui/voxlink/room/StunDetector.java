@@ -87,6 +87,8 @@ public final class StunDetector {
    }
 
    private static String probeLocalIpAddress() {
+      String best = null;
+      int bestScore = Integer.MIN_VALUE;
       try {
          Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
 
@@ -100,7 +102,12 @@ public final class StunDetector {
                   if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
                      String ip = addr.getHostAddress();
                      if (!ip.startsWith("127.")) {
-                        return ip;
+                        // 多候选打分选优，不再取首个（网卡顺序干扰）
+                        int score = scoreLocalCandidate(ip);
+                        if (score > bestScore) {
+                           bestScore = score;
+                           best = ip;
+                        }
                      }
                   }
                }
@@ -110,7 +117,34 @@ public final class StunDetector {
          VoxLinkMod.LOGGER.warn("[StunDetector] Get local IP failed: {}", e.getMessage());
       }
 
-      return null;
+      return best;
+   }
+
+   /** 候选打分：RFC1918 优先，VBox 默认段垫底，26/8 等 VPN 段次之 */
+   private static int scoreLocalCandidate(String ip) {
+      int o2 = secondOctet(ip);
+      int score;
+      if (ip.startsWith("10.") || ip.startsWith("192.168.") || (ip.startsWith("172.") && o2 >= 16 && o2 <= 31)) {
+         score = 40; // RFC1918 局域网段优先
+      } else if (ip.startsWith("26.") || (ip.startsWith("100.") && o2 >= 64 && o2 <= 127)) {
+         score = 20; // Radmin/Tailscale 等 VPN 段次之
+      } else {
+         score = 10;
+      }
+
+      if (ip.startsWith("192.168.56.")) {
+         score -= 100; // VBox Host-Only 默认段，仅唯一候选时兜底
+      }
+
+      return score;
+   }
+
+   private static int secondOctet(String ip) {
+      try {
+         return Integer.parseInt(ip.split("\\.")[1]);
+      } catch (Exception e) {
+         return -1;
+      }
    }
 
    public static boolean verifyIPv6Connectivity() {

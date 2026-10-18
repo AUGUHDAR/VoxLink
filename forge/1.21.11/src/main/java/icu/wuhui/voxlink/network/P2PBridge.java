@@ -846,6 +846,11 @@ public class P2PBridge {
       return running.get();
    }
 
+   /** 直连获胜判据：存在活跃桥对(LAN/IPv6 overlay TCP) */
+   public static boolean hasActiveBridgePairs() {
+      return !activePairs.isEmpty();
+   }
+
    public static boolean isTargetMatch(String hostIp, int port) {
       return currentHostPort != port ? false : hostIp == null || hostIp.equals(currentHostIp);
    }
@@ -922,9 +927,12 @@ public class P2PBridge {
    private static final Object JOINER_SWAP_LOCK = new Object();
    // 下行首包标志：中继"真连接验证"用——服务器经中继回包到达即算该道活
    private static volatile boolean joinerDownlinkSeen = false;
+   // 最近下行字节时刻：验证后下行保鲜检测用
+   private static volatile long joinerDownlinkLastMs = 0L;
 
    public static void markJoinerDownlink() {
       joinerDownlinkSeen = true;
+      joinerDownlinkLastMs = System.currentTimeMillis();
    }
 
    public static boolean hasJoinerDownlink() {
@@ -933,6 +941,13 @@ public class P2PBridge {
 
    public static void resetJoinerDownlink() {
       joinerDownlinkSeen = false;
+      joinerDownlinkLastMs = 0L;
+   }
+
+   /** 下行保鲜: 最近freshMs内有过下行字节 */
+   public static boolean isJoinerDownlinkFresh(long freshMs) {
+      long last = joinerDownlinkLastMs;
+      return last > 0L && System.currentTimeMillis() - last < freshMs;
    }
 
    // ===== 连接期上行日志（中继换道重放用） =====

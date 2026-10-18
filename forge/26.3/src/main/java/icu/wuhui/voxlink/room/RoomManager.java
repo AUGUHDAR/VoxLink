@@ -1509,7 +1509,8 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
                               && !"INVALID_TOKEN".equals(response.error)
                               && !"ROOM_CLOSED".equals(response.error)) {
                               int fails = this.heartbeatFailCount.incrementAndGet();
-                              VoxLinkMod.LOGGER.warn("Heartbeat failed ({}/{}): {}", new Object[]{fails, 8, response.error});
+                              int shown = Math.min(fails, 8);
+                              VoxLinkMod.LOGGER.warn("Heartbeat failed ({}/{}): {}", new Object[]{shown, 8, response.error});
                               if ("SERVER_403".equals(response.error) || "SERVER_404".equals(response.error)) {
                                  VoxLinkMod.LOGGER.warn("Server temp error ({}), not counted as heartbeat fail", response.error);
                                  this.heartbeatFailCount.decrementAndGet();
@@ -1617,7 +1618,8 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
             )
             .exceptionally(ex -> {
                int fails = this.heartbeatFailCount.incrementAndGet();
-               VoxLinkMod.LOGGER.warn("Heartbeat exception ({}/{}): {}", new Object[]{fails, 8, ex.getMessage()});
+               int shown = Math.min(fails, 8);
+               VoxLinkMod.LOGGER.warn("Heartbeat exception ({}/{}): {}", new Object[]{shown, 8, ex.getMessage()});
                if (fails >= 8 && !this.signalingDegraded) {
                   this.enterSignalingDegraded();
                }
@@ -1847,6 +1849,11 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       }
    }
 
+   /** 轮询是否处于限流退避档(≥10s)。 */
+   public boolean isSignalPollBackedOff() {
+      return this.currentSignalPollInterval >= 10000L;
+   }
+
    private void handleSignal(JsonObject signal) {
       if (signal.has("type") && !signal.get("type").isJsonNull() && signal.has("from") && !signal.get("from").isJsonNull()) {
          String type = signal.get("type").getAsString();
@@ -2027,8 +2034,9 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       VoxLinkMod.LOGGER.info("Peer connected: {}", from);
       RoomManager.RoomState st = this.currentRoom.get();
       if (st != null && st != PENDING && st.roomInfo.isHost()) {
-         if (from != null && this.connectionManager.hasUdpTransport(from)) {
+         if (from != null && (this.connectionManager.hasUdpTransport(from) || P2PBridge.hasActiveBridgePairs())) {
             this.connectionManager.stopAllPunchingAfterHostBridge();
+            this.connectionManager.flushQueuedJoinRequestsAfterWin();
          } else {
             VoxLinkMod.LOGGER.info("[RoomManager] Peer connected but host transport not ready, keep punching");
          }
@@ -2142,9 +2150,9 @@ if (roomData.has("gameVersion") && !roomData.get("gameVersion").isJsonNull()) {
       }
       RoomManager.RoomState state = this.currentRoom.get();
       if (state != null && state != PENDING && state.roomInfo.isHost() && from != null) {
-         this.connectionManager.clearHostPunchingState();
          // 对端取消不停手修复：打洞进行中收到disconnect立即中止本轮打洞/持续重试并作废其排队join_request
          this.connectionManager.abortPunchOnPeerDisconnect(from);
+         this.connectionManager.clearHostPunchingState();
          ReliableUdpTransport transport = this.connectionManager.removeUdpTransport(from);
          if (transport != null) {
             try {

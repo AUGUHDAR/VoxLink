@@ -114,7 +114,7 @@ public final class FeedbackUploader {
    /**
     * 提交反馈。所有文件均流式上传；结果通过 callback 返回（非主线程）。
     *
-    * @param serverUrl  信令服务器地址（如 https://p2p.wuhui.icu）
+    * @param serverUrl  信令服务器地址（如 https://link.voxdev.top）
     * @param clientInfo JSON 字符串（游戏版本/加载器/mod版本/玩家名等），可为空串
     */
    public static void submit(String serverUrl, String description, String clientInfo,
@@ -204,7 +204,7 @@ public final class FeedbackUploader {
    static String normalizeUrl(String serverUrl) {
       String url = serverUrl == null ? "" : serverUrl.trim();
       if (url.isEmpty()) {
-         url = "https://p2p.wuhui.icu";
+         url = "https://link.voxdev.top";
       }
 
       if (!url.startsWith("http://") && !url.startsWith("https://")) {

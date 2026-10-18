@@ -49,6 +49,8 @@ public class ReliableUdpTransport implements AutoCloseable {
    private static final int KEEPALIVE_TIMEOUT_S = 60;
    // 判单向死所需连续失败心跳拍数
    private static final int HEARTBEAT_FAIL_LIMIT = 5;
+   // 判TX死(对端收不到我)所需连续零ACK推进拍数
+   private static final int TX_NO_ACK_FAIL_LIMIT = 10;
    private static final int MAX_SILENT_RETRANSMIT_CYCLES = 30;
    private static final int UNRELIABLE_FAIL_THRESHOLD = 5;
    private static final long UNRELIABLE_SILENCE_MS = 8000L;
@@ -114,6 +116,9 @@ public class ReliableUdpTransport implements AutoCloseable {
    private long lastHeartbeatMs = System.currentTimeMillis();
    private int heartbeatFailStreak = 0;
    private boolean heartbeatEverRx = false;
+   // TX死检测(仅scheduler线程): 在途包oldest零推进
+   private int txNoAckStreak = 0;
+   private int txNoAckLastOldest = -1;
    // punchAuthV1：数据面认证上下文（null = 非认证模式，帧格式与旧版本逐字节一致）
    private volatile byte[] authKeyBytes;
    private volatile Mac authMac;
@@ -433,6 +438,11 @@ public class ReliableUdpTransport implements AutoCloseable {
 
    public boolean isConnected() {
       return this.connected.get() && this.running;
+   }
+
+   /** 最近收到对端数据的时刻，投递保险回执用。 */
+   public long getLastRecvTime() {
+      return this.lastRecvTime;
    }
 
    /** 载具热切排干用：是否还有未被确认的出口数据（含积压重传队列）。 */
@@ -1150,6 +1160,27 @@ public class ReliableUdpTransport implements AutoCloseable {
          this.triggerIceRestart();
          this.close();
          return;
+      }
+
+      // TX死对称检测: 对端心跳活着但我DATA零ACK推进
+      if (this.heartbeatEverRx && !this.pendingAcks.isEmpty()) {
+         int oldest = this.oldestUnackedSeq;
+         if (oldest == this.txNoAckLastOldest) {
+            if (++this.txNoAckStreak >= TX_NO_ACK_FAIL_LIMIT) {
+               LOGGER.warn("[ReliableUdp] TX dead: {} heartbeats no ack progress, peer not receiving our data", this.txNoAckStreak);
+               LogUploadManager.onLinkDead();
+               this.sendRestart();
+               this.triggerIceRestart();
+               this.close();
+               return;
+            }
+         } else {
+            this.txNoAckStreak = 0;
+            this.txNoAckLastOldest = oldest;
+         }
+      } else {
+         this.txNoAckStreak = 0;
+         this.txNoAckLastOldest = -1;
       }
 
       this.lastHeartbeatMs = now;

@@ -545,7 +545,7 @@ public final class TicketClient {
    private static String normalize(String serverUrl, String route) {
       String url = serverUrl == null ? "" : serverUrl.trim();
       if (url.isEmpty()) {
-         url = "https://p2p.wuhui.icu";
+         url = "https://link.voxdev.top";
       }
       if (!url.startsWith("http://") && !url.startsWith("https://")) {
          url = "https://" + url;

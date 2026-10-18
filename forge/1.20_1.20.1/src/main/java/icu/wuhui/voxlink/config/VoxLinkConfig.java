@@ -17,7 +17,7 @@ public class VoxLinkConfig {
     private static final Logger LOGGER = LoggerFactory.getLogger("voxlink-config");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    private static final String DEFAULT_SERVER_URL = "https://p2p.wuhui.icu";
+    private static final String DEFAULT_SERVER_URL = "https://link.voxdev.top";
     private static final int DEFAULT_HEARTBEAT_INTERVAL = 5;
     private static final int DEFAULT_SIGNAL_POLL_INTERVAL = 3000;
     private static final int DEFAULT_CONNECTION_TIMEOUT = 20000;
@@ -152,10 +152,16 @@ public class VoxLinkConfig {
             serverUrl = serverUrl.replaceAll("/+$", "");
         }
 
+        // 域名迁移：旧域名落盘时改写为默认
+        if (this.serverUrl != null && this.serverUrl.contains("wuhui.icu")) {
+           LOGGER.warn("Deprecated serverUrl {} migrated to {}", this.serverUrl, DEFAULT_SERVER_URL);
+           this.serverUrl = DEFAULT_SERVER_URL;
+        }
+
         // 安全修复：明文 http:// 信令默认拒绝（凭据/房间令牌会明文出网）；
         // 显式设置 allowInsecureServerUrl=true 可放行自建 http 服务器。
         if ((this.serverUrl != null && this.serverUrl.toLowerCase().startsWith("http://")) && !this.allowInsecureServerUrl) {
-           this.serverUrl = "https://p2p.wuhui.icu";
+           this.serverUrl = "https://link.voxdev.top";
         }
         if (heartbeatInterval < MIN_HEARTBEAT_INTERVAL) heartbeatInterval = MIN_HEARTBEAT_INTERVAL;
         if (signalPollInterval < MIN_SIGNAL_POLL_INTERVAL) signalPollInterval = MIN_SIGNAL_POLL_INTERVAL;

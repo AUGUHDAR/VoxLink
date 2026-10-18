@@ -630,10 +630,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                }
 
                String msg = cause.getMessage();
-               String displayMsg = this.simplifyError(msg);
+               // 传原始码，终态处统一 simplifyError 一次，防二次简化降级
                mc.execute(() -> {
                   if (!this.cancelled) {
-                     CreateFlowState.finishFailure(displayMsg);
+                     CreateFlowState.finishFailure(msg);
                   }
                });
                return null;
