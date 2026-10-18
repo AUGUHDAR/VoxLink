@@ -37,11 +37,17 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(Integer.parseInt(project
 sourceSets {
     stubs {
         java {
-            srcDir 'src/stubs/java'
+            srcDir '../../core/src/stubs/java'
         }
     }
     main {
         compileClasspath += sourceSets.stubs.output
+        java {
+            srcDir '../../core/src/main/java'
+        }
+        resources {
+            srcDir '../../core/src/main/resources'
+        }
     }
 }
 
