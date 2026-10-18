@@ -1,0 +1,41 @@
+# ===== VoxLink-app（应用端仓库）=====
+# 本仓库根 = 应用端工程本体；CLI 版与 UI 版同源，靠构建标签分流。
+
+# 构建产物（build/ 目录本身是源码：wails 的图标、manifest、info.json 必须入库）
+build/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.app/
+AppImage/
+*.deb
+*.rpm
+
+# 临时与本地垃圾
+*.log
+*.tmp
+*.bak
+*.bak-*
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+node_modules/
+.claude/
+.trae/
+.vscode/
+.idea/
+*.iml
+
+# 运行期个人数据（玩家身份/工单凭证/日志，严禁入库）
+voxlink_tickets.json
+voxlink_settings.json
+stun_cache.json
+testdata_local/
+敏感源码备份_勿删/
+
+# 注意：frontend/dist/ 是**源码**（本工程免构建，手写原生 HTML/CSS/JS），
+# 历史上被 /dist/ 规则静默跳过过一次，这里刻意不设 dist/ 规则。

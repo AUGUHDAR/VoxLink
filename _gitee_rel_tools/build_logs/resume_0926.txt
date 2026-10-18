@@ -1,0 +1,6 @@
+并发度 = 1 | JDK21 = C:\Program Files\Java\jdk-21 | JDK25 = C:\Program Files\Java\jdk-25.0.2 | 内存守卫阈值 = 2.0GB
+[fabric/1.20.2_1.20.6] 开始（可用内存 3.7GB）
+  [fabric/1.20.2_1.20.6] OK -> voxlink-1.1.9-1.20.2_1.20.6-fabric.jar   108s
+[fabric/1.20_1.20.1] 开始（可用内存 3.9GB）
+  [fabric/1.20_1.20.1] OK -> voxlink-1.1.9-1.20_1.20.1-fabric.jar   27s
+[fabric/1.21.11] 开始（可用内存 4.4GB）

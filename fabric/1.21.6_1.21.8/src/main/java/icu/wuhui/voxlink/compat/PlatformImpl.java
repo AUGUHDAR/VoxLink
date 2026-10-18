@@ -122,20 +122,94 @@ public final class PlatformImpl {
                         }
                     }
 
-                    @Override
+@Override
                     public List<Map<String, String>> installedMods() {
                         List<Map<String, String>> mods = new ArrayList<>();
+                        // 反射枚举模组: 各 loader/时代 API 形态不一, 统一走反射避免分叉
                         try {
-                            FabricLoader.getInstance().getAllMods().forEach(container -> {
-                                Map<String, String> entry = new LinkedHashMap<>();
-                                entry.put("id", container.getMetadata().getId());
-                                entry.put("version", container.getMetadata().getVersion() != null
-                                    ? container.getMetadata().getVersion().getFriendlyString() : "");
-                                mods.add(entry);
-                            });
+                            Object list = null;
+                            for (Class<?> c : new Class<?>[]{
+                                tryClass("net.fabricmc.loader.api.FabricLoader"),
+                                tryClass("net.neoforged.fml.ModList"),
+                                tryClass("net.minecraftforge.fml.ModList")}) {
+                                if (c == null) {
+                                    continue;
+                                }
+                                list = c == null ? null : reflectMods(c);
+                                if (list != null) {
+                                    break;
+                                }
+                            }
+                            if (list instanceof Iterable) {
+                                for (Object mi : (Iterable<?>) list) {
+                                    Map<String, String> entry = new LinkedHashMap<>();
+                                    Object id = call(mi, "getModId");
+                                    if (id == null) {
+                                        id = call(call(mi, "getMetadata"), "getId");
+                                    }
+                                    Object ver = call(mi, "getVersion");
+                                    if (ver == null) {
+                                        ver = call(call(mi, "getMetadata"), "getVersion");
+                                    }
+                                    if (ver != null) {
+                                        Object friendly = call(ver, "getFriendlyString");
+                                        ver = friendly != null ? friendly : ver;
+                                    }
+                                    entry.put("id", id != null ? String.valueOf(id) : "");
+                                    entry.put("version", ver != null ? String.valueOf(ver) : "");
+                                    mods.add(entry);
+                                }
+                            }
                         } catch (Throwable ignored) {
                         }
                         return mods;
+                    }
+
+                    private Class<?> tryClass(String name) {
+                        try {
+                            return Class.forName(name);
+                        } catch (Throwable t) {
+                            return null;
+                        }
+                    }
+
+                    private Object call(Object target, String method) {
+                        if (target == null) {
+                            return null;
+                        }
+                        try {
+                            return target.getClass().getMethod(method).invoke(target);
+                        } catch (Throwable t) {
+                            return null;
+                        }
+                    }
+
+                    /** 依次尝试 instance.getMods() / static getMods() / getAllMods(). */
+                    private Object reflectMods(Class<?> c) {
+                        try {
+                            Object inst = null;
+                            try {
+                                inst = c.getMethod("get").invoke(null);
+                            } catch (Throwable ignored) {
+                            }
+                            if (inst != null) {
+                                Object v = call(inst, "getMods");
+                                if (v != null) {
+                                    return v;
+                                }
+                            }
+                            try {
+                                return c.getMethod("getMods").invoke(null);
+                            } catch (Throwable ignored) {
+                            }
+                            try {
+                                Object fl = c.getMethod("getInstance").invoke(null);
+                                return call(fl, "getAllMods");
+                            } catch (Throwable ignored) {
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                        return null;
                     }
                 };
             }

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "VoxLink",
+  "outputfilename": "VoxLink",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dir": "frontend",
+  "author": {
+    "name": "VoxLink"
+  },
+  "info": {
+    "productName": "VoxLink",
+    "productVersion": "1.0.0-beta",
+    "copyright": "Copyright 2026 VoxLink",
+    "comments": "VoxLink Minecraft 联机桌面客户端"
+  }
+}

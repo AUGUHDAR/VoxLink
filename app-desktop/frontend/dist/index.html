@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoxLink</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- ===================== 侧边栏 ===================== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">
+          <img src="assets/img/icon.png" alt="VoxLink">
+        </div>
+        <div class="brand-text">
+          <div class="brand-name">VoxLink</div>
+          <div class="brand-sub" data-i18n="voxlink.app.brand.sub">P2P 联机助手</div>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button class="nav-item nav-hide-on-session" data-page="lobby" title="浏览房间" data-i18n-title="voxlink.browse_rooms">
+          <span class="nav-ico" data-ico="home"></span><span class="nav-label" data-i18n="voxlink.app.nav.lobby">大厅</span>
+        </button>
+        <button class="nav-item nav-hide-on-session" data-page="join" title="加入房间" data-i18n-title="voxlink.join_room">
+          <span class="nav-ico" data-ico="join"></span><span class="nav-label" data-i18n="voxlink.join_room">加入房间</span>
+        </button>
+        <button class="nav-item nav-hide-on-session" data-page="create" title="创建房间" data-i18n-title="voxlink.create_room">
+          <span class="nav-ico" data-ico="create"></span><span class="nav-label" data-i18n="voxlink.create_room">创建房间</span>
+        </button>
+        <button class="nav-item nav-room hidden" data-page="room" title="当前房间" data-i18n-title="voxlink.app.nav.room">
+          <span class="nav-ico" data-ico="room"></span><span class="nav-label" data-i18n="voxlink.app.nav.room">当前房间</span>
+        </button>
+        <div class="nav-sep"></div>
+        <button class="nav-item" data-page="ticket" title="工单" data-i18n-title="voxlink.app.nav.ticket">
+          <span class="nav-ico" data-ico="ticket"></span><span class="nav-label" data-i18n="voxlink.app.nav.ticket">工单</span>
+          <span class="nav-badge hidden" id="ticket-badge">0</span>
+        </button>
+        <button class="nav-item" data-page="links" title="相关链接" data-i18n-title="voxlink.links.title">
+          <span class="nav-ico" data-ico="link"></span><span class="nav-label" data-i18n="voxlink.links.title">相关链接</span>
+        </button>
+        <button class="nav-item" data-page="settings" title="设置" data-i18n-title="voxlink.app.nav.settings">
+          <span class="nav-ico" data-ico="settings"></span><span class="nav-label" data-i18n="voxlink.app.nav.settings">设置</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <button class="room-pill hidden" id="room-pill" title="回到房间页" data-i18n-title="voxlink.app.room.back_to_room">
+          <span class="room-pill-dot" aria-hidden="true"></span>
+          <span class="room-pill-code" id="room-pill-code">------</span>
+          <span class="room-pill-text" data-i18n="voxlink.app.nav.room">当前房间</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ===================== 内容区 ===================== -->
+    <main class="main" id="main">
+      <!-- 大厅 -->
+      <section class="page" id="page-lobby">
+        <header class="page-head">
+          <div>
+            <h1 class="page-title" data-i18n="voxlink.app.nav.lobby">大厅</h1>
+            <p class="page-desc" data-i18n="voxlink.app.lobby.desc">浏览房间，找一局一起联机 qwq</p>
+          </div>
+          <button class="btn btn-ghost" id="lobby-refresh" data-i18n="voxlink.app.action.refresh">
+            <span class="ico" data-ico="refresh"></span>刷新
+          </button>
+        </header>
+
+        <div class="toolbar card">
+          <div class="search-box">
+            <span class="ico ico-muted" data-ico="search"></span>
+            <input type="text" id="lobby-search" placeholder="搜索房间名…" data-i18n-placeholder="voxlink.app.lobby.search_ph" autocomplete="off">
+          </div>
+          <select class="select" id="lobby-category"><option value="" data-i18n="voxlink.app.lobby.category_all">全部分类</option></select>
+          <div class="chip-group" id="lobby-loaders">
+            <button class="chip active" data-loader="" data-i18n="voxlink.category.all">全部</button>
+            <button class="chip" data-loader="fabric">fabric</button>
+            <button class="chip" data-loader="forge">forge</button>
+            <button class="chip" data-loader="neoforge">neoforge</button>
+          </div>
+          <div class="chip-group">
+            <button class="chip chip-toggle" id="lobby-exclude-hl"
+              title="隐藏 Happy Link 互通房间（只影响当前这一页显示，不改服务端）"
+              data-i18n="voxlink.app.lobby.exclude_hl" data-i18n-title="voxlink.app.lobby.exclude_hl_hint">排除 Happy Link</button>
+          </div>
+        </div>
+
+        <div class="room-grid" id="lobby-grid"></div>
+
+        <div class="empty hidden" id="lobby-empty">
+          <div class="empty-ico" aria-hidden="true">ᓚᘏᗢ</div>
+          <div class="empty-title" data-i18n="voxlink.app.lobby.empty">这里还没有房间</div>
+          <div class="empty-desc" data-i18n="voxlink.app.lobby.empty_desc">稍后刷新一下，或者自己开一个房间吧 :D</div>
+        </div>
+
+        <div class="pager hidden" id="lobby-pager">
+          <button class="btn btn-ghost btn-sm" id="pager-prev" data-i18n="voxlink.ticket.prev_page">上一页</button>
+          <div class="pager-nums" id="pager-nums"></div>
+          <button class="btn btn-ghost btn-sm" id="pager-next" data-i18n="voxlink.ticket.next_page">下一页</button>
+        </div>
+
+        <footer class="page-foot" id="lobby-foot">
+          <span id="lobby-ip" data-i18n="voxlink.app.lobby.getting_ip">正在获取你的公网 IP…</span>
+        </footer>
+      </section>
+
+      <!-- 加入房间 -->
+      <section class="page" id="page-join">
+        <header class="page-head">
+          <div>
+            <h1 class="page-title">加入房间</h1>
+            <p class="page-desc" data-i18n="voxlink.app.join.desc">输入6位房间代码，马上进入小伙伴的房间 awa</p>
+          </div>
+        </header>
+
+        <div class="card form-card join-card">
+          <div class="join-preview hidden" id="join-preview">
+            <span class="join-preview-name" id="join-preview-name"></span>
+            <span class="pill pill-accent" id="join-preview-lock" hidden data-i18n="voxlink.app.join.need_password">需要密码</span>
+          </div>
+
+          <label class="field-label" data-i18n="voxlink.room_code">房间代码</label>
+          <div class="code-inputs" id="code-inputs">
+            <input maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="房间代码第1位" data-i18n-aria="voxlink.app.join.code_aria_1">
+            <input maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="房间代码第2位" data-i18n-aria="voxlink.app.join.code_aria_2">
+            <input maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="房间代码第3位" data-i18n-aria="voxlink.app.join.code_aria_3">
+            <input maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="房间代码第4位" data-i18n-aria="voxlink.app.join.code_aria_4">
+            <input maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="房间代码第5位" data-i18n-aria="voxlink.app.join.code_aria_5">
+            <input maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="房间代码第6位" data-i18n-aria="voxlink.app.join.code_aria_6">
+            <!-- 第 7 格只在开头两位是 HL（Happy Link 互通码 HL+5 位）时出现，普通 6 位房号不受影响 -->
+            <input maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="房间代码第7位（互通码）" data-i18n-aria="voxlink.app.join.code_aria_fed" class="hidden" id="code-fed">
+          </div>
+
+          <div class="field hidden" id="join-pw-field">
+            <label class="field-label" for="join-pw" data-i18n="voxlink.app.join.room_password">房间密码</label>
+            <input type="password" class="input" id="join-pw" placeholder="这个房间设置了密码" data-i18n-placeholder="voxlink.app.join.pw_ph" autocomplete="off">
+          </div>
+
+          <div class="form-error hidden" id="join-error"></div>
+
+          <button class="btn btn-primary btn-lg btn-block" id="join-btn">
+            <span class="ico" data-ico="join"></span><span data-i18n="voxlink.join_room">加入房间</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 创建房间 -->
+      <section class="page" id="page-create">
+        <header class="page-head">
+          <div>
+            <h1 class="page-title">创建房间</h1>
+            <p class="page-desc" data-i18n="voxlink.app.create.desc">开一个新房间，等小伙伴们进来 :D</p>
+          </div>
+        </header>
+
+        <div class="card form-card">
+          <div class="field">
+            <label class="field-label" for="create-name" data-i18n="voxlink.app.create.name">房间名</label>
+            <input type="text" class="input" id="create-name" placeholder="VoxLink Room" autocomplete="off">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="create-pw" data-i18n="voxlink.app.create.pw_optional">密码（可选）</label>
+              <input type="text" class="input" id="create-pw" placeholder="不填则无需密码" data-i18n-placeholder="voxlink.app.create.pw_ph" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="field-label" for="create-category">分类</label>
+              <select class="select" id="create-category"></select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label" for="create-loader" data-i18n="voxlink.app.create.loader">启动器</label>
+              <select class="select" id="create-loader">
+                <option value="fabric">fabric</option>
+                <option value="forge">forge</option>
+                <option value="neoforge">neoforge</option>
+                <option value="unknown" data-i18n="voxlink.app.create.loader_unknown">其他/未知</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="create-version" data-i18n="voxlink.app.create.game_version">游戏版本</label>
+              <input type="text" class="input" id="create-version" placeholder="例如：1.21.1" data-i18n-placeholder="voxlink.app.create.version_ph" maxlength="16" autocomplete="off">
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="create-host-port" data-i18n="voxlink.app.create.local_port">本地 MC 端口</label>
+            <div class="port-row" id="create-port-row">
+              <input type="number" class="input" id="create-host-port" placeholder="25565" min="1024" max="65535" inputmode="numeric" autocomplete="off">
+              <select class="select port-select hidden" id="create-port-select"></select>
+              <button type="button" class="btn btn-ghost btn-sm" id="create-port-detect" data-i18n="voxlink.app.create.redetect">重新检测</button>
+            </div>
+            <p class="form-hint" id="create-port-hint" data-i18n="voxlink.app.create.port_autohint">进入此页后会自动检测本机 MC 端口…</p>
+            <p class="form-hint form-hint-error hidden" id="create-port-error"></p>
+          </div>
+          <div class="field hidden" id="create-category-custom-field">
+            <label class="field-label" for="create-category-custom" data-i18n="voxlink.create_room.custom_category">自定义分类</label>
+            <input type="text" class="input" id="create-category-custom" placeholder="输入自定义分类名称" data-i18n-placeholder="voxlink.app.create.custom_category_ph" maxlength="24" autocomplete="off">
+          </div>
+          <div class="field switch-field">
+            <div>
+              <div class="field-label" data-i18n="voxlink.visible.on">大厅显示</div>
+              <div class="field-sub" data-i18n="voxlink.app.create.visible_sub">关闭后房间不会出现在大厅列表，需要房间代码加入</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="create-visible" checked><span class="slider"></span></label>
+          </div>
+          <div class="field">
+            <label class="field-label" for="create-ms-instance" data-i18n="voxlink.app.modsync.instance">MC 实例（mods 目录）</label>
+            <div class="port-row">
+              <select class="select" id="create-ms-instance"></select>
+              <button type="button" class="btn btn-ghost btn-sm" id="create-ms-new" data-i18n="voxlink.app.create.new">新建</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="create-ms-del" disabled data-i18n="voxlink.app.create.delete">删除</button>
+            </div>
+            <p class="form-hint" data-i18n="voxlink.app.create.instance_hint">选了实例才会把你的必装清单同步给房客、加入别人房间时才会比对清单；不需要同步就留「不同步模组」。</p>
+          </div>
+          <div class="field hidden" id="create-ms-form">
+            <div class="field-label" data-i18n="voxlink.app.create.new_instance">新实例</div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="create-ms-name" data-i18n="voxlink.app.ms.instance_name">实例名</label>
+                <input type="text" class="input" id="create-ms-name" placeholder="例如 1.20.1 科技服" data-i18n-placeholder="voxlink.app.ms.instance_name_ph" maxlength="24" autocomplete="off">
+              </div>
+              <div class="field">
+                <label class="field-label" for="create-ms-loader" data-i18n="voxlink.app.ms.loader">加载器</label>
+                <select class="select" id="create-ms-loader">
+                  <option value="fabric">fabric</option>
+                  <option value="forge">forge</option>
+                  <option value="neoforge">neoforge</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="create-ms-dir" data-i18n="voxlink.app.ms.mods_dir">mods 目录</label>
+              <input type="text" class="input" id="create-ms-dir" placeholder="C:/Users/You/AppData/Roaming/.minecraft/mods" autocomplete="off">
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="create-ms-gv" data-i18n="voxlink.app.ms.mc_version">MC 版本</label>
+                <input type="text" class="input" id="create-ms-gv" placeholder="1.20.1" maxlength="16" autocomplete="off">
+              </div>
+              <div class="field ms-actions">
+                <button type="button" class="btn btn-ghost" id="create-ms-save-new" data-i18n="voxlink.app.ms.save_instance">保存实例</button>
+                <button type="button" class="btn btn-ghost" id="create-ms-cancel-new" data-i18n="voxlink.cancel">取消</button>
+              </div>
+            </div>
+          </div>
+          <div class="field switch-field">
+            <div>
+              <div class="field-label" data-i18n="voxlink.app.create.publish">上报必装 Mod 给房客</div>
+              <div class="field-sub" data-i18n="voxlink.app.create.publish_sub">开房后把本端必装清单同步给加入者，帮他们对齐版本</div>
+            </div>
+            <label class="switch" title="只影响这间房：房客进入前会比对你的必装清单" data-i18n-title="voxlink.app.create.publish_title"><input type="checkbox" id="create-ms-publish" checked><span class="slider"></span></label>
+          </div>
+          <div class="form-warn hidden" id="create-pw-warn" data-i18n="voxlink.app.create.pw_warn">设置了密码，房间创建时会自动大厅隐藏哦</div>
+          <div class="form-error hidden" id="create-error"></div>
+          <button class="btn btn-primary btn-lg btn-block" id="create-btn">
+            <span class="ico" data-ico="create"></span><span data-i18n="voxlink.create_room">创建房间</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 当前房间 -->
+      <section class="page" id="page-room">
+        <header class="page-head room-head">
+          <div class="room-head-main">
+            <div class="room-title-row">
+              <h1 class="page-title" id="room-name">房间</h1>
+              <span class="pill" id="room-status-pill">等待玩家</span>
+            </div>
+            <div class="room-code-row">
+              <button class="room-code" id="room-code" title="点击复制房间代码" data-i18n-title="voxlink.app.room.code_copy_title">------</button>
+              <button class="btn btn-ghost btn-sm" id="room-copy" title="复制房间代码" data-i18n-title="voxlink.app.room.copy_code_title">
+                <span class="ico" data-ico="copy"></span>复制
+              </button>
+              <span class="room-players" id="room-players">– / –</span>
+              <span class="heartbeat" id="room-heartbeat" title="心跳正常" data-i18n="voxlink.app.room.heartbeat" data-i18n-title="voxlink.app.room.heartbeat">
+                <span class="heartbeat-dot"></span>心跳正常
+              </span>
+            </div>
+          </div>
+          <button class="btn btn-danger" id="room-leave">
+            <span class="ico" data-ico="leave"></span><span id="room-leave-text">离开房间</span>
+          </button>
+        </header>
+
+        <div class="room-grid-2col">
+          <div class="room-col-main">
+            <!-- 连接卡（房客专用，房主不显示） -->
+            <div class="card conn-card hidden" id="conn-card">
+              <p class="conn-app-note hidden" id="conn-app-note" data-i18n="voxlink.app.room.conn_app_note">对方为应用端房间</p>
+              <div class="card-head">
+                <span class="ico ico-accent" data-ico="signal"></span>
+                <h2 class="card-title" data-i18n="voxlink.app.room.conn">连接</h2>
+                <span class="card-count" id="conn-phase-label">P2P 打洞</span>
+              </div>
+              <div class="conn-phase" id="conn-phase-box">
+                <span class="conn-spinner" id="conn-spinner"></span>
+                <span class="conn-phase-text" id="conn-phase-text">P2P 打洞进行中…</span>
+                <span class="conn-timer" id="conn-timer">已用时 0s</span>
+              </div>
+              <p class="conn-detail hidden" id="conn-detail"></p>
+              <div class="conn-nat hidden" id="conn-nat"></div>
+              <!-- 自动中继编排的 3 秒瞬态提示（通道"进行中→未连上"时出现），无手动入口 -->
+              <p class="conn-hint hidden" id="conn-hint"></p>
+              <div class="conn-success hidden" id="conn-success">
+                <div class="conn-addr-row">
+                  <code class="conn-addr" id="conn-addr"></code>
+                  <button class="btn btn-ghost btn-sm" id="conn-copy" title="复制地址" data-i18n="voxlink.modsync.copy" data-i18n-title="voxlink.app.room.copy_addr">
+                    <span class="ico" data-ico="copy"></span>复制
+                  </button>
+                </div>
+                <p class="conn-success-text" data-i18n="voxlink.app.room.success_text">连接已打通！打开 MC → 多人游戏 → 添加服务器，粘贴此地址即可进入 :D<span class="conn-success-extra" id="conn-success-extra"></span></p>
+                <p class="conn-success-soft" id="conn-success-soft">若无法进入，对方可能在运行其他游戏或不兼容的版本</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <span class="ico ico-accent" data-ico="signal"></span>
+                <h2 class="card-title" data-i18n="voxlink.app.room.signals">信令事件</h2>
+                <span class="card-count" id="signal-count">0 条</span>
+              </div>
+              <div class="signal-list" id="signal-list"></div>
+              <div class="empty empty-sm hidden" id="signal-empty">
+                <div class="empty-title" data-i18n="voxlink.app.room.signal_empty">还没有信令事件</div>
+                <div class="empty-desc" data-i18n="voxlink.app.room.signal_empty_desc">等玩家进来，这里就会有动静 (・ω・)</div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <span class="ico ico-accent" data-ico="mods"></span>
+                <h2 class="card-title" data-i18n="voxlink.app.room.mods_title">必装 Mod（ModSync）</h2>
+                <button class="btn btn-ghost btn-sm" id="mods-refresh" data-i18n="voxlink.app.action.refresh"><span class="ico" data-ico="refresh"></span>刷新</button>
+              </div>
+              <div id="mods-body"></div>
+            </div>
+          </div>
+
+          <div class="room-col-side">
+            <div class="card hidden" id="host-settings-card">
+              <div class="card-head">
+                <span class="ico ico-accent" data-ico="settings"></span>
+                <h2 class="card-title" data-i18n="voxlink.app.room.host_settings">房间设置</h2>
+              </div>
+              <div class="field">
+                <label class="field-label" for="hs-name" data-i18n="voxlink.app.create.name">房间名</label>
+                <input type="text" class="input" id="hs-name" autocomplete="off">
+              </div>
+              <div class="field">
+                <label class="field-label" for="hs-category">分类</label>
+                <select class="select" id="hs-category"></select>
+              </div>
+              <div class="field switch-field">
+                <div><div class="field-label" data-i18n="voxlink.visible.on">大厅显示</div></div>
+                <label class="switch"><input type="checkbox" id="hs-visible"><span class="slider"></span></label>
+              </div>
+              <div class="field">
+                <label class="field-label" for="hs-pw" data-i18n="voxlink.app.room.pw_unchanged">密码（留空不修改）</label>
+                <input type="text" class="input" id="hs-pw" placeholder="不修改请留空" data-i18n-placeholder="voxlink.app.room.pw_ph" autocomplete="off">
+              </div>
+              <button class="btn btn-primary btn-block" id="hs-save" data-i18n="voxlink.app.action.save_settings">保存设置</button>
+            </div>
+
+            <div class="card">
+              <div class="card-head collapsible" id="netlog-toggle">
+                <span class="ico ico-accent" data-ico="log"></span>
+                <h2 class="card-title" data-i18n="voxlink.app.room.netlog">连接日志</h2>
+                <span class="collapse-arrow" id="netlog-arrow">▾</span>
+              </div>
+              <div class="netlog" id="netlog-body">
+                <div class="netlog-line netlog-faint" data-i18n="voxlink.app.room.netlog_empty">暂无日志</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 工单 -->
+      <section class="page" id="page-ticket">
+        <header class="page-head">
+          <div>
+            <h1 class="page-title">工单</h1>
+            <p class="page-desc" data-i18n="voxlink.app.ticket.desc">报问题、提建议；官方回复后会在这里提醒你</p>
+          </div>
+          <button class="btn btn-ghost" id="ticket-refresh">
+            <span class="ico" data-ico="refresh"></span>刷新
+          </button>
+        </header>
+
+        <!-- 列表 -->
+        <div id="ticket-view-list">
+          <button class="btn btn-primary btn-block" id="ticket-new">
+            <span class="ico" data-ico="create"></span><span data-i18n="voxlink.app.ticket.new">提交新工单</span>
+          </button>
+          <div class="ticket-list" id="ticket-list"></div>
+          <div class="empty hidden" id="ticket-empty">
+            <div class="empty-ico" aria-hidden="true">ᓚᘏᗢ</div>
+            <div class="empty-title" data-i18n="voxlink.app.ticket.empty">还没有工单</div>
+            <div class="empty-desc" data-i18n="voxlink.app.ticket.empty_desc">连不上、进不去、有崩溃报告？提一张，回复会在这里等你 (・ω・)</div>
+          </div>
+        </div>
+
+        <!-- 新建 -->
+        <div id="ticket-view-new" class="hidden">
+          <div class="card form-card">
+            <div class="field">
+              <label class="field-label" for="ticket-desc" data-i18n="voxlink.app.ticket.field_desc">问题描述</label>
+              <textarea class="input" id="ticket-desc" rows="7" maxlength="10000"
+                        placeholder="写清：发生了什么、什么时候、做了什么操作、期望什么结果" data-i18n-placeholder="voxlink.app.ticket.desc_ph"></textarea>
+            </div>
+            <div class="field">
+              <div class="field-label" data-i18n="voxlink.app.ticket.attach_optional">附件（可选）</div>
+              <button type="button" class="btn btn-ghost btn-sm" id="ticket-pick" data-i18n="voxlink.app.ticket.pick_file">
+                <span class="ico" data-ico="link"></span>选择文件
+              </button>
+              <div class="ticket-files" id="ticket-new-files"></div>
+            </div>
+            <div class="form-warn" data-i18n="voxlink.app.ticket.rate_warn">提交后 10 分钟内只能再提交或追问一次（防灌水）</div>
+            <div class="form-error hidden" id="ticket-new-error"></div>
+            <div class="btn-row">
+              <button class="btn btn-ghost" id="ticket-new-cancel" data-i18n="voxlink.back">返回</button>
+              <button class="btn btn-primary btn-push" id="ticket-submit" data-i18n="voxlink.app.ticket.submit">提交工单</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 详情 -->
+        <div id="ticket-view-detail" class="hidden">
+          <div class="card ticket-thread" id="ticket-thread"></div>
+          <div class="card form-card" style="margin-top:var(--sp-4)">
+            <div class="field">
+              <label class="field-label" for="ticket-reply-text" data-i18n="voxlink.app.ticket.followup">追问</label>
+              <textarea class="input" id="ticket-reply-text" rows="4" maxlength="10000"
+                        placeholder="补充信息或追问…" data-i18n-placeholder="voxlink.app.ticket.reply_ph"></textarea>
+            </div>
+            <div class="field">
+              <div class="field-label" data-i18n="voxlink.app.ticket.attach_optional">附件（可选）</div>
+              <button type="button" class="btn btn-ghost btn-sm" id="ticket-reply-pick" data-i18n="voxlink.app.ticket.pick_file">
+                <span class="ico" data-ico="link"></span>选择文件
+              </button>
+              <div class="ticket-files" id="ticket-reply-files"></div>
+            </div>
+            <div class="form-error hidden" id="ticket-reply-error"></div>
+            <div class="btn-row">
+              <button class="btn btn-ghost" id="ticket-detail-back" data-i18n="voxlink.app.ticket.back_list">返回列表</button>
+              <button class="btn btn-danger btn-sm" id="ticket-delete" data-i18n="voxlink.ticket.delete">删除工单</button>
+              <button class="btn btn-primary btn-push" id="ticket-reply-send" data-i18n="voxlink.app.ticket.send_reply">发送追问</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 相关链接 -->
+      <section class="page" id="page-links">
+        <header class="page-head">
+          <div>
+            <h1 class="page-title" data-i18n="voxlink.links.title">相关链接</h1>
+            <p class="page-desc" data-i18n="voxlink.app.links.desc">VoxLink 的官方主页们，点开按钮会在浏览器打开</p>
+          </div>
+        </header>
+        <div class="links-grid" id="links-grid"></div>
+      </section>
+
+      <!-- 设置 -->
+      <section class="page" id="page-settings">
+        <header class="page-head">
+          <div>
+            <h1 class="page-title" data-i18n="voxlink.app.nav.settings">设置</h1>
+            <p class="page-desc" data-i18n="voxlink.app.settings.desc">调整 VoxLink 桌面端的参数</p>
+          </div>
+        </header>
+
+        <div class="card form-card">
+          <div class="field">
+            <label class="field-label" for="set-theme" data-i18n="voxlink.app.settings.theme">主题</label>
+            <select class="select" id="set-theme">
+              <option value="light" data-i18n="voxlink.app.settings.theme_light">浅色</option>
+              <option value="dark" data-i18n="voxlink.app.settings.theme_dark">深色</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label" for="set-language" data-i18n="voxlink.app.settings.language">界面语言</label>
+            <select class="select" id="set-language"></select>
+          </div>
+
+          <div class="field switch-field">
+            <div>
+              <div class="field-label" data-i18n="voxlink.app.settings.relay">玩家中继</div>
+              <div class="field-sub" data-i18n="voxlink.app.settings.relay_sub">开着才会被别人选中做中继，也能使用别人的中继</div>
+            </div>
+            <label class="switch" title="只影响玩家中继，不影响 TURN" data-i18n-title="voxlink.app.settings.relay_title">
+              <input type="checkbox" id="set-relay"><span class="slider"></span>
+            </label>
+          </div>
+          <div class="field switch-field">
+            <div>
+              <div class="field-label" data-i18n="voxlink.app.settings.ms_join">加入前检查必装 Mod</div>
+              <div class="field-sub" data-i18n="voxlink.app.settings.ms_join_sub">加入别人房间时先比对房主的必装清单，缺了提示下载</div>
+            </div>
+            <label class="switch" title="这条管的是你加入别人房间；别人加入你的房间由创建房间页的开关决定" data-i18n-title="voxlink.app.settings.ms_join_title">
+              <input type="checkbox" id="set-ms-join"><span class="slider"></span>
+            </label>
+          </div>
+          <div class="form-error hidden" id="settings-error"></div>
+          <button class="btn btn-primary" id="set-save" data-i18n="voxlink.app.action.save_settings">保存设置</button>
+        </div>
+
+        <!-- MC 实例管理：实例清单是全局的，创建房间页下拉里看到的就是它们 -->
+        <div class="card form-card" id="set-msi-card">
+          <div class="card-head">
+            <span class="ico ico-accent" data-ico="mods"></span>
+            <span class="card-title" data-i18n="voxlink.app.settings.msi_title">MC 实例管理</span>
+            <span class="card-count" id="set-msi-count" data-i18n="voxlink.app.settings.loading">正在读取…</span>
+          </div>
+          <p class="form-hint" data-i18n="voxlink.app.settings.msi_hint">点某一行可以展开改：名字、mods 目录、加载器、MC 版本。标了「正在使用」的那个，就是创建房间时帮你同步必装 Mod 的实例。</p>
+
+          <div class="empty empty-sm hidden" id="set-msi-empty" data-i18n="voxlink.app.settings.msi_empty">还没有实例，点下面的「新建实例」加一个吧</div>
+          <div id="set-msi-list"></div>
+          <div class="form-error hidden" id="set-msi-error"></div>
+
+          <div class="field hidden" id="set-msi-form">
+            <div class="field-label" data-i18n="voxlink.app.create.new_instance">新实例</div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="set-msi-name" data-i18n="voxlink.app.ms.instance_name">实例名</label>
+                <input type="text" class="input" id="set-msi-name" placeholder="例如 1.20.1 科技服" data-i18n-placeholder="voxlink.app.ms.instance_name_ph" maxlength="24" autocomplete="off">
+              </div>
+              <div class="field">
+                <label class="field-label" for="set-msi-loader" data-i18n="voxlink.app.ms.loader">加载器</label>
+                <select class="select" id="set-msi-loader">
+                  <option value="fabric">fabric</option>
+                  <option value="forge">forge</option>
+                  <option value="neoforge">neoforge</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="set-msi-dir" data-i18n="voxlink.app.ms.mods_dir">mods 目录</label>
+              <input type="text" class="input" id="set-msi-dir" placeholder="C:/Users/You/AppData/Roaming/.minecraft/mods" autocomplete="off">
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="set-msi-gv" data-i18n="voxlink.app.ms.mc_version">MC 版本</label>
+                <input type="text" class="input" id="set-msi-gv" placeholder="1.20.1" maxlength="16" autocomplete="off">
+              </div>
+              <div class="field ms-actions">
+                <button type="button" class="btn btn-ghost" id="set-msi-save-new" data-i18n="voxlink.app.ms.save_instance">保存实例</button>
+                <button type="button" class="btn btn-ghost" id="set-msi-cancel-new" data-i18n="voxlink.cancel">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="btn-row">
+              <button type="button" class="btn btn-primary" id="set-msi-save" data-i18n="voxlink.app.settings.msi_save_all">保存修改</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="set-msi-new" data-i18n="voxlink.app.settings.msi_new">新建实例</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="set-msi-refresh" data-i18n="voxlink.app.settings.msi_reload">重新读取</button>
+            </div>
+            <p class="form-hint" data-i18n="voxlink.app.settings.msi_foot_hint">改完点「保存修改」；点某一行的「设为当前」或「删除」，也会把你在上面已经填好的一起存下来 qwq</p>
+          </div>
+        </div>
+
+        <div class="card form-card">
+          <div class="about-row">
+            <div>
+              <div class="field-label" data-i18n="voxlink.app.settings.about">关于 VoxLink</div>
+              <p class="form-hint" data-i18n="voxlink.app.settings.about_desc">VoxLink 应用端，为 Minecraft 联机而生的独立助手 qwq</p>
+            </div>
+            <span class="pill pill-accent" id="settings-version">v1.1.9-beta</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-box" id="toast-box"></div>
+
+  <script src="assets/js/core.js"></script>
+  <script src="assets/js/lobby.js"></script>
+  <script src="assets/js/join.js"></script>
+  <script src="assets/js/create.js"></script>
+  <script src="assets/js/room.js"></script>
+  <script src="assets/js/modsync.js"></script>
+  <script src="assets/js/ticket.js"></script>
+  <script src="assets/js/links.js"></script>
+  <script src="assets/js/settings.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+#### public boolean isConnectionInHandoff();
+  public boolean isConnectionInHandoff();
+    Code:
+         0: aload_0
+         1: getfield      #456                // Field connectionEstablishedAtMs:J
+         4: lconst_0
+         5: lcmp
+         6: ifle          34
+         9: invokestatic  #17                 // Method java/lang/System.currentTimeMillis:()J
+        12: aload_0
+        13: getfield      #456                // Field connectionEstablishedAtMs:J
+        16: lsub
+        17: ldc2_w        #208                // long 5000l
+        20: lcmp
+        21: ifge          34
+        24: invokestatic  #3059               // Method icu/wuhui/voxlink/network/ConnectionHelper.isMcTrulyConnected:()Z
+        27: ifne          34
+        30: iconst_1
+        31: goto          35
+        34: iconst_0
+        35: ireturn
+
+
+#### public void markConnectionEstablished();
+  public void markConnectionEstablished();
+    Code:
+         0: aload_0
+         1: invokestatic  #17                 // Method java/lang/System.currentTimeMillis:()J
+         4: putfield      #456                // Field connectionEstablishedAtMs:J
+         7: return
+
+
+#### private void connectTerracottaToMC(java.lang.String, java.lang.String);
+  private void connectTerracottaToMC(java.lang.String, java.lang.String);
+    Code:
+         0: aload_1
+         1: ifnull        109
+         4: aload_1
+         5: invokevirtual #963                // Method java/lang/String.isEmpty:()Z
+         8: ifne          109
+        11: aload_1
+        12: invokestatic  #3161               // Method parsePortFromUrl:(Ljava/lang/String;)I
+        15: istore_3
+        16: iload_3
+        17: ifgt          34
+        20: new           #2867               // class java/lang/RuntimeException
+        23: dup
+        24: aload_1
+        25: invokedynamic #3164,  0           // InvokeDynamic #135:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+        30: invokespecial #2871               // Method java/lang/RuntimeException."<init>":(Ljava/lang/String;)V
+        33: athrow
+        34: aload_0
+        35: getfield      #532                // Field roomManager:Licu/wuhui/voxlink/room/RoomManager;
+        38: invokevirtual #3165               // Method icu/wuhui/voxlink/room/RoomManager.getCurrentRoom:()Licu/wuhui/voxlink/room/RoomInfo;
+        41: astore        4
+        43: aload         4
+        45: ifnonnull     58
+        48: aload_0
+        49: getfield      #532                // Field roomManager:Licu/wuhui/voxlink/room/RoomManager;
+        52: aload_2
+        53: invokevirtual #3169               // Method icu/wuhui/voxlink/room/RoomManager.setupTerracottaGuestRoom:(Ljava/lang/String;)Licu/wuhui/voxlink/room/RoomInfo;
+        56: astore        4
+        58: getstatic     #3173               // Field icu/wuhui/voxlink/room/ConnectionState.TRANSPORT_SETUP:Licu/wuhui/voxlink/room/ConnectionState;
+        61: iload_3
+        62: invokedynamic #3176,  0           // InvokeDynamic #136:makeConcatWithConstants:(I)Ljava/lang/String;
+        67: invokestatic  #1835               // Method icu/wuhui/voxlink/room/ConnectionState.transitionTo:(Licu/wuhui/voxlink/room/ConnectionState;Ljava/lang/String;)V
+        70: aload         4
+        72: ldc_w         #3177               // String voxlink.connection.bridge_setup
+        75: invokestatic  #808                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+        78: invokevirtual #814                // Method icu/wuhui/voxlink/room/RoomInfo.setConnectionMode:(Lnet/minecraft/network/chat/Component;)V
+        81: aload_0
+        82: invokevirtual #3179               // Method markConnectionEstablished:()V
+        85: iload_3
+        86: aload         4
+        88: invokestatic  #3182               // Method icu/wuhui/voxlink/network/ConnectionHelper.connectToServer:(ILicu/wuhui/voxlink/room/RoomInfo;)V
+        91: getstatic     #77                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+        94: ldc_w         #3186               // String [DualP2P] Terracotta connect MC port={}
+        97: iload_3
+        98: invokestatic  #92                 // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+       101: invokeinterface #991,  3          // InterfaceMethod org/slf4j/Logger.info:(Ljava/lang/String;Ljava/lang/Object;)V
+       106: goto          120
+       109: new           #2867               // class java/lang/RuntimeException
+       112: dup
+       113: ldc_w         #3188               // String ����connectUrlΪ�� �޷�����MC
+       116: invokespecial #2871               // Method java/lang/RuntimeException."<init>":(Ljava/lang/String;)V
+       119: athrow
+       120: return
+
+
+#### public void notifyAllPeersGone();
+  public void notifyAllPeersGone();
+    Code:
+         0: aload_0
+         1: getfield      #532                // Field roomManager:Licu/wuhui/voxlink/room/RoomManager;
+         4: getfield      #773                // Field icu/wuhui/voxlink/room/RoomManager.currentRoom:Ljava/util/concurrent/atomic/AtomicReference;
+         7: invokevirtual #778                // Method java/util/concurrent/atomic/AtomicReference.get:()Ljava/lang/Object;
+        10: checkcast     #579                // class icu/wuhui/voxlink/room/RoomManager$RoomState
+        13: astore_1
+        14: aload_1
+        15: ifnull        198
+        18: aload_1
+        19: getstatic     #780                // Field icu/wuhui/voxlink/room/RoomManager.PENDING:Licu/wuhui/voxlink/room/RoomManager$RoomState;
+        22: if_acmpeq     198
+        25: aload_1
+        26: getfield      #578                // Field icu/wuhui/voxlink/room/RoomManager$RoomState.roomInfo:Licu/wuhui/voxlink/room/RoomInfo;
+        29: invokevirtual #885                // Method icu/wuhui/voxlink/room/RoomInfo.isHost:()Z
+        32: ifeq          198
+        35: aload_1
+        36: getfield      #578                // Field icu/wuhui/voxlink/room/RoomManager$RoomState.roomInfo:Licu/wuhui/voxlink/room/RoomInfo;
+        39: ldc2_w        #26                 // long 60000l
+        42: invokevirtual #2975               // Method icu/wuhui/voxlink/room/RoomInfo.hasRecentPeer:(J)Z
+        45: ifeq          62
+        48: getstatic     #77                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+        51: ldc_w         #2979               // String [Connection] Peers still active in signaling, skip all-peers-gone
+        54: invokeinterface #824,  2          // InterfaceMethod org/slf4j/Logger.info:(Ljava/lang/String;)V
+        59: goto          198
+        62: aload_1
+        63: getfield      #578                // Field icu/wuhui/voxlink/room/RoomManager$RoomState.roomInfo:Licu/wuhui/voxlink/room/RoomInfo;
+        66: invokevirtual #2981               // Method icu/wuhui/voxlink/room/RoomInfo.hasEverHadPeer:()Z
+        69: ifne          86
+        72: getstatic     #77                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+        75: ldc_w         #2984               // String [Connection] No peer ever joined, keep waiting
+        78: invokeinterface #824,  2          // InterfaceMethod org/slf4j/Logger.info:(Ljava/lang/String;)V
+        83: goto          198
+        86: invokestatic  #1094               // Method icu/wuhui/voxlink/room/ConnectionState.getCurrent:()Licu/wuhui/voxlink/room/ConnectionState;
+        89: getstatic     #2986               // Field icu/wuhui/voxlink/room/ConnectionState.IDLE:Licu/wuhui/voxlink/room/ConnectionState;
+        92: if_acmpne     125
+        95: getstatic     #77                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+        98: ldc_w         #2989               // String [Connection] IDLE state, clear stale flags and keep waiting
+       101: invokeinterface #824,  2          // InterfaceMethod org/slf4j/Logger.info:(Ljava/lang/String;)V
+       106: aload_0
+       107: getfield      #388                // Field connectionCycleActive:Ljava/util/concurrent/atomic/AtomicBoolean;
+       110: iconst_0
+       111: invokevirtual #691                // Method java/util/concurrent/atomic/AtomicBoolean.set:(Z)V
+       114: aload_0
+       115: getfield      #406                // Field continuousRetryRound:Ljava/util/concurrent/atomic/AtomicInteger;
+       118: iconst_0
+       119: invokevirtual #826                // Method java/util/concurrent/atomic/AtomicInteger.set:(I)V
+       122: goto          198
+       125: aload_0
+       126: getfield      #388                // Field connectionCycleActive:Ljava/util/concurrent/atomic/AtomicBoolean;
+       129: invokevirtual #667                // Method java/util/concurrent/atomic/AtomicBoolean.get:()Z
+       132: ifne          145
+       135: aload_0
+       136: getfield      #406                // Field continuousRetryRound:Ljava/util/concurrent/atomic/AtomicInteger;
+       139: invokevirtual #672                // Method java/util/concurrent/atomic/AtomicInteger.get:()I
+       142: ifle          149
+       145: iconst_1
+       146: goto          150
+       149: iconst_0
+       150: istore_2
+       151: aload_0
+       152: getfield      #403                // Field continuousRetryCancelled:Ljava/util/concurrent/atomic/AtomicBoolean;
+       155: iconst_1
+       156: invokevirtual #691                // Method java/util/concurrent/atomic/AtomicBoolean.set:(Z)V
+       159: getstatic     #77                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+       162: ldc_w         #2991               // String [Connection] All peers gone (host alone), inConnection={}, abort persistent retry
+       165: iload_2
+       166: invokestatic  #260                // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;
+       169: invokeinterface #991,  3          // InterfaceMethod org/slf4j/Logger.info:(Ljava/lang/String;Ljava/lang/Object;)V
+       174: aload_1
+       175: getfield      #578                // Field icu/wuhui/voxlink/room/RoomManager$RoomState.roomInfo:Licu/wuhui/voxlink/room/RoomInfo;
+       178: invokevirtual #2993               // Method icu/wuhui/voxlink/room/RoomInfo.clearPeers:()V
+       181: aload_0
+       182: getfield      #388                // Field connectionCycleActive:Ljava/util/concurrent/atomic/AtomicBoolean;
+       185: iconst_0
+       186: invokevirtual #691                // Method java/util/concurrent/atomic/AtomicBoolean.set:(Z)V
+       189: getstatic     #2986               // Field icu/wuhui/voxlink/room/ConnectionState.IDLE:Licu/wuhui/voxlink/room/ConnectionState;
+       192: ldc_w         #2996               // String �Է��뿪,�صȴ�
+       195: invokestatic  #1835               // Method icu/wuhui/voxlink/room/ConnectionState.transitionTo:(Licu/wuhui/voxlink/room/ConnectionState;Ljava/lang/String;)V
+       198: return
+
+

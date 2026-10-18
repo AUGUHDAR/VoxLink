@@ -1,0 +1,4 @@
+508	取消加入
+514	返回上一界面
+718	Signaling unreachable: entering degraded keep-alive — room & data plane kept, new joins paused until recovery
+1673	[joinRoom] Host MC version differs from local (host={}, proto={}, you={}, proto={}{}) — proceeding

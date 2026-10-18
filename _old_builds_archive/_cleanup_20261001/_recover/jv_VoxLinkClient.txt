@@ -1,0 +1,368 @@
+Compiled from "VoxLinkClient.java"
+public class icu.wuhui.voxlink.VoxLinkClient {
+  private static final int AUTO_LEAVE_DELAY_TICKS;
+
+  private static int autoLeaveTicks;
+
+  private static volatile boolean inited;
+
+  private static volatile boolean wasInWorld;
+
+  public icu.wuhui.voxlink.VoxLinkClient();
+    Code:
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+         4: return
+
+  public static void onClientSetup(net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent);
+    Code:
+         0: aload_0
+         1: invokedynamic #7,  0              // InvokeDynamic #0:run:()Ljava/lang/Runnable;
+         6: invokevirtual #11                 // Method net/minecraftforge/fml/event/lifecycle/FMLClientSetupEvent.enqueueWork:(Ljava/lang/Runnable;)Ljava/util/concurrent/CompletableFuture;
+         9: pop
+        10: return
+
+  private static void initClient();
+    Code:
+         0: getstatic     #17                 // Field inited:Z
+         3: ifeq          7
+         6: return
+         7: iconst_1
+         8: putstatic     #17                 // Field inited:Z
+        11: invokestatic  #23                 // Method icu/wuhui/voxlink/VoxLinkMod.getSignalingClient:()Licu/wuhui/voxlink/network/SignalingClient;
+        14: astore_0
+        15: aload_0
+        16: ifnull        80
+        19: new           #29                 // class icu/wuhui/voxlink/network/TopologyClient
+        22: dup
+        23: aload_0
+        24: invokespecial #31                 // Method icu/wuhui/voxlink/network/TopologyClient."<init>":(Licu/wuhui/voxlink/network/SignalingClient;)V
+        27: astore_1
+        28: new           #34                 // class icu/wuhui/voxlink/room/RoomManager
+        31: dup
+        32: aload_0
+        33: aload_1
+        34: invokespecial #36                 // Method icu/wuhui/voxlink/room/RoomManager."<init>":(Licu/wuhui/voxlink/network/SignalingClient;Licu/wuhui/voxlink/network/TopologyClient;)V
+        37: astore_2
+        38: aload_1
+        39: invokestatic  #39                 // Method icu/wuhui/voxlink/VoxLinkMod.setTopologyClient:(Licu/wuhui/voxlink/network/TopologyClient;)V
+        42: aload_2
+        43: invokestatic  #43                 // Method icu/wuhui/voxlink/VoxLinkMod.setRoomManager:(Licu/wuhui/voxlink/room/RoomManager;)V
+        46: invokestatic  #47                 // Method icu/wuhui/voxlink/room/StunDetector.getStunServerGroups:()Ljava/util/List;
+        49: invokestatic  #53                 // Method icu/wuhui/voxlink/network/StunProbe.probeAsync:(Ljava/util/List;)Ljava/util/concurrent/CompletableFuture;
+        52: pop
+        53: goto          71
+        56: astore_3
+        57: getstatic     #61                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+        60: ldc           #65                 // String STUN prefetch on init failed: {}
+        62: aload_3
+        63: invokevirtual #67                 // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+        66: invokeinterface #71,  3           // InterfaceMethod org/slf4j/Logger.warn:(Ljava/lang/String;Ljava/lang/Object;)V
+        71: aload_2
+        72: invokedynamic #77,  0             // InvokeDynamic #1:run:()Ljava/lang/Runnable;
+        77: invokevirtual #78                 // Method icu/wuhui/voxlink/room/RoomManager.setRoomLostCallback:(Ljava/lang/Runnable;)V
+        80: invokestatic  #82                 // Method icu/wuhui/voxlink/network/PeerServer.refreshCache:()V
+        83: invokestatic  #87                 // Method icu/wuhui/voxlink/VoxLinkMod.getConfig:()Licu/wuhui/voxlink/config/VoxLinkConfig;
+        86: invokevirtual #91                 // Method icu/wuhui/voxlink/config/VoxLinkConfig.isAutoUPnP:()Z
+        89: ifeq          95
+        92: invokestatic  #97                 // Method icu/wuhui/voxlink/network/UPnPManager.tryMapAtStartup:()V
+        95: invokestatic  #102                // Method icu/wuhui/voxlink/network/PeerServer.start:()I
+        98: pop
+        99: invokestatic  #106                // Method icu/wuhui/voxlink/terracotta/TerracottaManager.resumeDownloadIfPending:()V
+       102: return
+      Exception table:
+         from    to  target type
+            46    53    56   Class java/lang/Exception
+
+  public static void onServerStarting(net.minecraftforge.event.server.ServerStartingEvent);
+    Code:
+         0: aload_0
+         1: invokevirtual #111                // Method net/minecraftforge/event/server/ServerStartingEvent.getServer:()Lnet/minecraft/server/MinecraftServer;
+         4: instanceof    #117                // class net/minecraft/client/server/IntegratedServer
+         7: ifeq          82
+        10: invokestatic  #87                 // Method icu/wuhui/voxlink/VoxLinkMod.getConfig:()Licu/wuhui/voxlink/config/VoxLinkConfig;
+        13: invokevirtual #119                // Method icu/wuhui/voxlink/config/VoxLinkConfig.isOfflineMode:()Z
+        16: ifeq          82
+        19: invokestatic  #122                // Method icu/wuhui/voxlink/VoxLinkMod.getRoomManager:()Licu/wuhui/voxlink/room/RoomManager;
+        22: astore_1
+        23: aload_1
+        24: ifnull        34
+        27: aload_1
+        28: invokevirtual #126                // Method icu/wuhui/voxlink/room/RoomManager.getCurrentRoom:()Licu/wuhui/voxlink/room/RoomInfo;
+        31: goto          35
+        34: aconst_null
+        35: astore_2
+        36: aload_2
+        37: ifnull        65
+        40: aload_2
+        41: invokevirtual #130                // Method icu/wuhui/voxlink/room/RoomInfo.isHost:()Z
+        44: ifeq          65
+        47: aload_0
+        48: invokevirtual #111                // Method net/minecraftforge/event/server/ServerStartingEvent.getServer:()Lnet/minecraft/server/MinecraftServer;
+        51: iconst_0
+        52: invokevirtual #135                // Method net/minecraft/server/MinecraftServer.setUsesAuthentication:(Z)V
+        55: getstatic     #61                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+        58: ldc           #141                // String Host room offline mode enabled
+        60: invokeinterface #143,  2          // InterfaceMethod org/slf4j/Logger.info:(Ljava/lang/String;)V
+        65: aload_0
+        66: invokevirtual #111                // Method net/minecraftforge/event/server/ServerStartingEvent.getServer:()Lnet/minecraft/server/MinecraftServer;
+        69: instanceof    #117                // class net/minecraft/client/server/IntegratedServer
+        72: ifeq          82
+        75: aload_0
+        76: invokevirtual #111                // Method net/minecraftforge/event/server/ServerStartingEvent.getServer:()Lnet/minecraft/server/MinecraftServer;
+        79: invokestatic  #147                // Method icu/wuhui/voxlink/command/LanHostRegistry.scheduleCapture:(Lnet/minecraft/server/MinecraftServer;)V
+        82: return
+
+  public static void onClientPlayerLoggingIn(net.minecraftforge.client.event.ClientPlayerNetworkEvent$LoggingIn);
+    Code:
+         0: invokestatic  #153                // Method icu/wuhui/voxlink/network/UpdateChecker.checkOnce:()V
+         3: iconst_1
+         4: putstatic     #158                // Field wasInWorld:Z
+         7: return
+
+  public static void onClientPlayerLoggingOut(net.minecraftforge.client.event.ClientPlayerNetworkEvent$LoggingOut);
+    Code:
+         0: getstatic     #158                // Field wasInWorld:Z
+         3: ifne          7
+         6: return
+         7: iconst_0
+         8: putstatic     #158                // Field wasInWorld:Z
+        11: invokestatic  #122                // Method icu/wuhui/voxlink/VoxLinkMod.getRoomManager:()Licu/wuhui/voxlink/room/RoomManager;
+        14: astore_1
+        15: aload_1
+        16: ifnull        32
+        19: aload_1
+        20: invokevirtual #161                // Method icu/wuhui/voxlink/room/RoomManager.isInRoom:()Z
+        23: ifeq          32
+        26: aload_1
+        27: ldc           #164                // String 退出世界
+        29: invokevirtual #166                // Method icu/wuhui/voxlink/room/RoomManager.leaveRoom:(Ljava/lang/String;)V
+        32: invokestatic  #169                // Method icu/wuhui/voxlink/terracotta/TerracottaManager.shutdown:()V
+        35: goto          53
+        38: astore_2
+        39: getstatic     #61                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+        42: ldc           #172                // String Failed to stop Terracotta on world exit: {}
+        44: aload_2
+        45: invokevirtual #67                 // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+        48: invokeinterface #71,  3           // InterfaceMethod org/slf4j/Logger.warn:(Ljava/lang/String;Ljava/lang/Object;)V
+        53: return
+      Exception table:
+         from    to  target type
+            32    35    38   Class java/lang/Exception
+
+  public static void onClientTickPost(net.minecraftforge.event.TickEvent$ClientTickEvent$Post);
+    Code:
+         0: invokestatic  #174                // Method net/minecraft/client/Minecraft.getInstance:()Lnet/minecraft/client/Minecraft;
+         3: astore_1
+         4: invokestatic  #180                // Method icu/wuhui/voxlink/network/ConnectionHelper.isConnecting:()Z
+         7: ifeq          39
+        10: aload_1
+        11: getfield      #185                // Field net/minecraft/client/Minecraft.gui:Lnet/minecraft/client/gui/Gui;
+        14: invokevirtual #189                // Method net/minecraft/client/gui/Gui.screen:()Lnet/minecraft/client/gui/screens/Screen;
+        17: instanceof    #195                // class net/minecraft/client/gui/screens/ConnectScreen
+        20: ifne          39
+        23: aload_1
+        24: getfield      #185                // Field net/minecraft/client/Minecraft.gui:Lnet/minecraft/client/gui/Gui;
+        27: invokevirtual #189                // Method net/minecraft/client/gui/Gui.screen:()Lnet/minecraft/client/gui/screens/Screen;
+        30: instanceof    #197                // class icu/wuhui/voxlink/ui/AttemptingJoinScreen
+        33: ifne          39
+        36: invokestatic  #199                // Method icu/wuhui/voxlink/network/ConnectionHelper.resetConnecting:()V
+        39: invokestatic  #122                // Method icu/wuhui/voxlink/VoxLinkMod.getRoomManager:()Licu/wuhui/voxlink/room/RoomManager;
+        42: astore_2
+        43: aload_2
+        44: ifnonnull     48
+        47: return
+        48: aload_2
+        49: invokevirtual #126                // Method icu/wuhui/voxlink/room/RoomManager.getCurrentRoom:()Licu/wuhui/voxlink/room/RoomInfo;
+        52: astore_3
+        53: aload_3
+        54: ifnonnull     58
+        57: return
+        58: aload_1
+        59: getfield      #202                // Field net/minecraft/client/Minecraft.player:Lnet/minecraft/client/player/LocalPlayer;
+        62: ifnonnull     156
+        65: aload_1
+        66: invokevirtual #206                // Method net/minecraft/client/Minecraft.getSingleplayerServer:()Lnet/minecraft/client/server/IntegratedServer;
+        69: ifnonnull     156
+        72: aload_3
+        73: invokevirtual #210                // Method icu/wuhui/voxlink/room/RoomInfo.getLocalBridgePort:()I
+        76: ifle          156
+        79: aload_1
+        80: getfield      #185                // Field net/minecraft/client/Minecraft.gui:Lnet/minecraft/client/gui/Gui;
+        83: invokevirtual #189                // Method net/minecraft/client/gui/Gui.screen:()Lnet/minecraft/client/gui/screens/Screen;
+        86: instanceof    #195                // class net/minecraft/client/gui/screens/ConnectScreen
+        89: ifne          156
+        92: aload_1
+        93: getfield      #185                // Field net/minecraft/client/Minecraft.gui:Lnet/minecraft/client/gui/Gui;
+        96: invokevirtual #189                // Method net/minecraft/client/gui/Gui.screen:()Lnet/minecraft/client/gui/screens/Screen;
+        99: instanceof    #197                // class icu/wuhui/voxlink/ui/AttemptingJoinScreen
+       102: ifne          156
+       105: invokestatic  #180                // Method icu/wuhui/voxlink/network/ConnectionHelper.isConnecting:()Z
+       108: ifne          156
+       111: getstatic     #213                // Field autoLeaveTicks:I
+       114: iconst_1
+       115: iadd
+       116: putstatic     #213                // Field autoLeaveTicks:I
+       119: getstatic     #213                // Field autoLeaveTicks:I
+       122: bipush        40
+       124: if_icmplt     160
+       127: getstatic     #61                 // Field icu/wuhui/voxlink/VoxLinkMod.LOGGER:Lorg/slf4j/Logger;
+       130: ldc           #217                // String MC exited world, auto leave room (after {} ticks)
+       132: getstatic     #213                // Field autoLeaveTicks:I
+       135: invokestatic  #219                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+       138: invokeinterface #225,  3          // InterfaceMethod org/slf4j/Logger.info:(Ljava/lang/String;Ljava/lang/Object;)V
+       143: iconst_0
+       144: putstatic     #213                // Field autoLeaveTicks:I
+       147: aload_2
+       148: ldc           #227                // String 检测到已退出世界，自动离开
+       150: invokevirtual #166                // Method icu/wuhui/voxlink/room/RoomManager.leaveRoom:(Ljava/lang/String;)V
+       153: goto          160
+       156: iconst_0
+       157: putstatic     #213                // Field autoLeaveTicks:I
+       160: return
+
+  private static void lambda$initClient$0();
+    Code:
+         0: invokestatic  #174                // Method net/minecraft/client/Minecraft.getInstance:()Lnet/minecraft/client/Minecraft;
+         3: astore_0
+         4: aload_0
+         5: ifnull        18
+         8: aload_0
+         9: aload_0
+        10: invokedynamic #229,  0            // InvokeDynamic #2:run:(Lnet/minecraft/client/Minecraft;)Ljava/lang/Runnable;
+        15: invokevirtual #232                // Method net/minecraft/client/Minecraft.execute:(Ljava/lang/Runnable;)V
+        18: return
+
+  private static void lambda$initClient$1(net.minecraft.client.Minecraft);
+    Code:
+         0: aload_0
+         1: getfield      #202                // Field net/minecraft/client/Minecraft.player:Lnet/minecraft/client/player/LocalPlayer;
+         4: ifnull        343
+         7: invokestatic  #122                // Method icu/wuhui/voxlink/VoxLinkMod.getRoomManager:()Licu/wuhui/voxlink/room/RoomManager;
+        10: astore_1
+        11: aload_1
+        12: ifnull        22
+        15: aload_1
+        16: invokevirtual #235                // Method icu/wuhui/voxlink/room/RoomManager.getRoomLostReason:()Ljava/lang/String;
+        19: goto          23
+        22: aconst_null
+        23: astore_2
+        24: aload_2
+        25: ifnull        32
+        28: aload_2
+        29: goto          34
+        32: ldc           #238                // String
+        34: astore        4
+        36: iconst_m1
+        37: istore        5
+        39: aload         4
+        41: invokevirtual #240                // Method java/lang/String.hashCode:()I
+        44: lookupswitch  { // 6
+             -2094549021: 104
+              -902021340: 185
+              -838121567: 168
+                 5536882: 136
+              1159431026: 120
+              1923153265: 152
+                 default: 199
+            }
+       104: aload         4
+       106: ldc           #245                // String HOST_CLOSED
+       108: invokevirtual #247                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       111: ifeq          199
+       114: iconst_0
+       115: istore        5
+       117: goto          199
+       120: aload         4
+       122: ldc           #251                // String HOST_DISCONNECTED
+       124: invokevirtual #247                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       127: ifeq          199
+       130: iconst_1
+       131: istore        5
+       133: goto          199
+       136: aload         4
+       138: ldc           #253                // String ROOM_NOT_FOUND
+       140: invokevirtual #247                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       143: ifeq          199
+       146: iconst_2
+       147: istore        5
+       149: goto          199
+       152: aload         4
+       154: ldc           #255                // String TOKEN_INVALID
+       156: invokevirtual #247                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       159: ifeq          199
+       162: iconst_3
+       163: istore        5
+       165: goto          199
+       168: aload         4
+       170: ldc_w         #257                // String ROOM_EXPIRED
+       173: invokevirtual #247                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       176: ifeq          199
+       179: iconst_4
+       180: istore        5
+       182: goto          199
+       185: aload         4
+       187: ldc_w         #259                // String ROOM_EVICTED
+       190: invokevirtual #247                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       193: ifeq          199
+       196: iconst_5
+       197: istore        5
+       199: iload         5
+       201: tableswitch   { // 0 to 5
+                       0: 240
+                       1: 249
+                       2: 258
+                       3: 267
+                       4: 276
+                       5: 285
+                 default: 294
+            }
+       240: ldc_w         #261                // String voxlink.room_lost.host_closed
+       243: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       246: goto          300
+       249: ldc_w         #269                // String voxlink.room_lost.host_disconnected
+       252: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       255: goto          300
+       258: ldc_w         #271                // String voxlink.room_lost.host_gone
+       261: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       264: goto          300
+       267: ldc_w         #273                // String voxlink.room_closed
+       270: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       273: goto          300
+       276: ldc_w         #275                // String voxlink.room_lost.room_expired
+       279: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       282: goto          300
+       285: ldc_w         #277                // String voxlink.room_lost.room_evicted
+       288: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       291: goto          300
+       294: ldc_w         #279                // String voxlink.room_lost.default
+       297: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       300: astore_3
+       301: aload_0
+       302: getfield      #202                // Field net/minecraft/client/Minecraft.player:Lnet/minecraft/client/player/LocalPlayer;
+       305: ldc_w         #281                // String voxlink.chat.error_prefix
+       308: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       311: getstatic     #283                // Field net/minecraft/ChatFormatting.RED:Lnet/minecraft/ChatFormatting;
+       314: invokevirtual #289                // Method net/minecraft/network/chat/MutableComponent.withStyle:(Lnet/minecraft/ChatFormatting;)Lnet/minecraft/network/chat/MutableComponent;
+       317: aload_3
+       318: invokevirtual #295                // Method net/minecraft/network/chat/MutableComponent.append:(Lnet/minecraft/network/chat/Component;)Lnet/minecraft/network/chat/MutableComponent;
+       321: invokevirtual #299                // Method net/minecraft/client/player/LocalPlayer.sendSystemMessage:(Lnet/minecraft/network/chat/Component;)V
+       324: aload_0
+       325: getfield      #202                // Field net/minecraft/client/Minecraft.player:Lnet/minecraft/client/player/LocalPlayer;
+       328: ldc_w         #305                // String voxlink.room_lost.hint
+       331: invokestatic  #263                // InterfaceMethod net/minecraft/network/chat/Component.translatable:(Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;
+       334: getstatic     #307                // Field net/minecraft/ChatFormatting.GRAY:Lnet/minecraft/ChatFormatting;
+       337: invokevirtual #289                // Method net/minecraft/network/chat/MutableComponent.withStyle:(Lnet/minecraft/ChatFormatting;)Lnet/minecraft/network/chat/MutableComponent;
+       340: invokevirtual #299                // Method net/minecraft/client/player/LocalPlayer.sendSystemMessage:(Lnet/minecraft/network/chat/Component;)V
+       343: return
+
+  static {};
+    Code:
+         0: iconst_0
+         1: putstatic     #213                // Field autoLeaveTicks:I
+         4: iconst_0
+         5: putstatic     #17                 // Field inited:Z
+         8: iconst_0
+         9: putstatic     #158                // Field wasInWorld:Z
+        12: return
+}

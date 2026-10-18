@@ -1,0 +1,506 @@
+模板总数 28
+
+== A leaveRoom 头部  变体 39c71bb3  命中 1 个模板
+   forge/26.3 [未匹配]
+
+--- 代表源码 (room/RoomManager.java) ---
+<未匹配>
+
+== A leaveRoom 头部  变体 efe43c3b  命中 27 个模板
+   fabric/1.20.2_1.20.6, fabric/1.20_1.20.1, fabric/1.21.11, fabric/1.21.6_1.21.8, fabric/1.21.9_1.21.10, fabric/1.21_1.21.5, fabric/26.1_26.1.2, fabric/26.2, fabric/26.3, forge/1.20.2_1.20.4, forge/1.20.6, forge/1.20_1.20.1, forge/1.21.11, forge/1.21.6_1.21.8, forge/1.21.9_1.21.10, forge/1.21_1.21.5, forge/26.1_26.1.2, forge/26.2, neoforge/1.20.1, neoforge/1.20.4_1.20.6, neoforge/1.21.11, neoforge/1.21.6_1.21.8, neoforge/1.21.9_1.21.10, neoforge/1.21_1.21.5, neoforge/26.1_26.1.2, neoforge/26.2, neoforge/26.3
+
+--- 代表源码 (room/RoomManager.java) ---
+public void leaveRoom() {
+      this.leaveRoom("用户主动离开");
+   }
+
+== B leaveRoom(String) 头部  变体 74b1ebc7  命中 27 个模板
+   fabric/1.20.2_1.20.6, fabric/1.20_1.20.1, fabric/1.21.11, fabric/1.21.6_1.21.8, fabric/1.21.9_1.21.10, fabric/1.21_1.21.5, fabric/26.1_26.1.2, fabric/26.2, fabric/26.3, forge/1.20.2_1.20.4, forge/1.20.6, forge/1.20_1.20.1, forge/1.21.11, forge/1.21.6_1.21.8, forge/1.21.9_1.21.10, forge/1.21_1.21.5, forge/26.1_26.1.2, forge/26.2, neoforge/1.20.1, neoforge/1.20.4_1.20.6, neoforge/1.21.11, neoforge/1.21.6_1.21.8, neoforge/1.21.9_1.21.10, neoforge/1.21_1.21.5, neoforge/26.1_26.1.2, neoforge/26.2, neoforge/26.3
+
+--- 代表源码 (room/RoomManager.java) ---
+public void leaveRoom(String detail) {
+      if (this.connectionManager.isConnectionInHandoff() && "用户主动离开".equals(detail)) {
+         return;
+      }
+
+      this.intentionalLeave = true;
+      this.stopScheduledTasks();
+      this.roomLostHandled.set(true);
+
+== B leaveRoom(String) 头部  变体 7d8ce007  命中 1 个模板
+   forge/26.3
+
+--- 代表源码 (room/RoomManager.java) ---
+public void leaveRoom(String detail) {
+      // handoff 宽限防线：连接桥刚建立（含陶瓦通道）、MC 尚未真正连上的 5 秒窗口内，
+      // 忽略内部路径的 leaveRoom（LoggingOut 幽灵/迟到回调曾拆掉陶瓦进程导致 refused）。
+      // 豁免用户在界面上点的显式操作——点取消必须立即生效，不能让玩家觉得按钮是死的。
+      boolean userInitiated = "取消加入".equals(detail) || "返回上一界面".equals(detail);
+      if (!userInitiated && this.connectionManager.isConnectionInHandoff()) {
+         VoxLinkMod.LOGGER.warn("[RoomManager] leaveRoom({}) ignored: connection in handoff grace window", detail);
+         return;
+
+== C closeRoom  变体 4c08bb56  命中 1 个模板
+   forge/26.3
+
+--- 代表源码 (room/RoomManager.java) ---
+public void closeRoom(String detail) {
+      this.leaveRoom(detail);
+   }
+
+== C closeRoom  变体 bbc0ed2b  命中 27 个模板
+   fabric/1.20.2_1.20.6, fabric/1.20_1.20.1, fabric/1.21.11, fabric/1.21.6_1.21.8, fabric/1.21.9_1.21.10, fabric/1.21_1.21.5, fabric/26.1_26.1.2, fabric/26.2, fabric/26.3, forge/1.20.2_1.20.4, forge/1.20.6, forge/1.20_1.20.1, forge/1.21.11, forge/1.21.6_1.21.8, forge/1.21.9_1.21.10, forge/1.21_1.21.5, forge/26.1_26.1.2, forge/26.2, neoforge/1.20.1, neoforge/1.20.4_1.20.6, neoforge/1.21.11, neoforge/1.21.6_1.21.8, neoforge/1.21.9_1.21.10, neoforge/1.21_1.21.5, neoforge/26.1_26.1.2, neoforge/26.2, neoforge/26.3
+
+--- 代表源码 (room/RoomManager.java) ---
+public void closeRoom() {
+      this.leaveRoom();
+   }
+
+== D notifyAllPeersGone  变体 81fffad8  命中 28 个模板
+   fabric/1.20.2_1.20.6, fabric/1.20_1.20.1, fabric/1.21.11, fabric/1.21.6_1.21.8, fabric/1.21.9_1.21.10, fabric/1.21_1.21.5, fabric/26.1_26.1.2, fabric/26.2, fabric/26.3, forge/1.20.2_1.20.4, forge/1.20.6, forge/1.20_1.20.1, forge/1.21.11, forge/1.21.6_1.21.8, forge/1.21.9_1.21.10, forge/1.21_1.21.5, forge/26.1_26.1.2, forge/26.2, forge/26.3, neoforge/1.20.1, neoforge/1.20.4_1.20.6, neoforge/1.21.11, neoforge/1.21.6_1.21.8, neoforge/1.21.9_1.21.10, neoforge/1.21_1.21.5, neoforge/26.1_26.1.2, neoforge/26.2, neoforge/26.3
+
+--- 代表源码 (room/ConnectionManager.java) ---
+public void notifyAllPeersGone() {
+
+      RoomManager.RoomState state = this.roomManager.currentRoom.get();
+
+      if (state != null && state != RoomManager.PENDING && state.roomInfo.isHost()) {
+
+         if (state.roomInfo.hasRecentPeer(60000L)) {
+
+            VoxLinkMod.LOGGER.info("[Connection] Peers still active in signaling, skip all-peers-gone");
+
+         } else if (!state.roomInfo.hasEverHadPeer()) {
+
+            VoxLinkMod.LOGGER.info("[Connection] No peer ever joined, keep waiting");
+
+         } else if (ConnectionState.getCurrent() == ConnectionState.IDLE) {
+
+            VoxLinkMod.LOGGER.info("[Connection] IDLE state, clear stale flags and keep waiting");
+
+            this.connectionCycleActive.set(false);
+
+            this.continuousRetryRound.set(0);
+
+         } else {
+
+            boolean inConnection = this.connectionCycleActive.get() || this.continuousRetryRound.get() > 0;
+
+            this.continuousRetryCancelled.set(true);
+
+            VoxLinkMod.LOGGER.info("[Connection] All peers gone (host alone), inConnection={}, abort persistent retry", inConnection);
+
+            state.roomInfo.clearPeers();
+
+            if (!inConnection) {
+
+               this.connectionCycleActive.set(false);
+
+               ConnectionState.transitionTo(ConnectionState.IDLE, "对方离开,回等待");
+
+            } else {
+
+               this.showConnectFailedFinal(state, "voxlink.connection.peer_left");
+
+            }
+
+         }
+
+      }
+
+   }
+
+== E connectTerracottaToMC  变体 02535396  命中 28 个模板
+   fabric/1.20.2_1.20.6, fabric/1.20_1.20.1, fabric/1.21.11, fabric/1.21.6_1.21.8, fabric/1.21.9_1.21.10, fabric/1.21_1.21.5, fabric/26.1_26.1.2, fabric/26.2, fabric/26.3, forge/1.20.2_1.20.4, forge/1.20.6, forge/1.20_1.20.1, forge/1.21.11, forge/1.21.6_1.21.8, forge/1.21.9_1.21.10, forge/1.21_1.21.5, forge/26.1_26.1.2, forge/26.2, forge/26.3, neoforge/1.20.1, neoforge/1.20.4_1.20.6, neoforge/1.21.11, neoforge/1.21.6_1.21.8, neoforge/1.21.9_1.21.10, neoforge/1.21_1.21.5, neoforge/26.1_26.1.2, neoforge/26.2, neoforge/26.3
+
+--- 代表源码 (room/ConnectionManager.java) ---
+private void connectTerracottaToMC(String connectUrl, String roomCode) {
+
+      if (connectUrl != null && !connectUrl.isEmpty()) {
+
+         int localPort = parsePortFromUrl(connectUrl);
+
+         if (localPort <= 0) {
+
+            throw new RuntimeException("陶瓦connectUrl解析端口失败: " + connectUrl);
+
+         }
+
+
+
+         RoomInfo roomInfo = this.roomManager.getCurrentRoom();
+
+         if (roomInfo == null) {
+
+            roomInfo = this.roomManager.setupTerracottaGuestRoom(roomCode);
+
+         }
+
+
+
+         ConnectionState.transitionTo(ConnectionState.TRANSPORT_SETUP, "陶瓦guest-ok port=" + localPort);
+
+         roomInfo.setConnectionMode(Component.translatable("voxlink.connection.bridge_setup"));
+
+         ConnectionHelper.connectToServer(localPort, roomInfo);
+
+         VoxLinkMod.LOGGER.info("[DualP2P] Terracotta connect MC port={}", localPort);
+
+      } else {
+
+         throw new RuntimeException("陶瓦connectUrl为空 无法连接MC");
+
+      }
+
+   }
+
+== F LoggingOut  变体 39c71bb3  命中 9 个模板
+   fabric/1.20.2_1.20.6 [未匹配], fabric/1.20_1.20.1 [未匹配], fabric/1.21.11 [未匹配], fabric/1.21.6_1.21.8 [未匹配], fabric/1.21.9_1.21.10 [未匹配], fabric/1.21_1.21.5 [未匹配], fabric/26.1_26.1.2 [未匹配], fabric/26.2 [未匹配], fabric/26.3 [未匹配]
+
+--- 代表源码 (VoxLinkClient.java) ---
+<未匹配>
+
+== F LoggingOut  变体 61d447fd  命中 4 个模板
+   forge/1.21.11, forge/1.21.6_1.21.8, forge/1.21.9_1.21.10, forge/26.1_26.1.2
+
+--- 代表源码 (VoxLinkClient.java) ---
+ClientPlayerNetworkEvent.LoggingOut event) {
+        RoomManager rm = VoxLinkMod.getRoomManager();
+        if (rm != null && rm.isInRoom()) {
+            rm.leaveRoom();
+        }
+        //debounce 兜底杀陶瓦 防止退出世界后残留
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
+        catch (Exception e) { VoxLinkMod.LOGGER.warn("Failed to stop Terracotta on world exit: {}", e.getMessage()); }
+    }
+
+    @SubscribeEvent
+    public static void onClientTickPost(TickEvent.ClientTickEvent.Post event) {
+        Minecraft client = Minecraft.getInstance();
+        //debounce AttemptingJoinScreen也驱动连接 不能在它存在时清connecting状态
+        if (ConnectionHelper.isConnecting()
+                && !(client.screen instanceof net.minecraft.client.gui.screens.ConnectScreen)
+                && !(client.
+
+== F LoggingOut  变体 76e1c2ba  命中 2 个模板
+   neoforge/26.2, neoforge/26.3
+
+--- 代表源码 (VoxLinkClient.java) ---
+ClientPlayerNetworkEvent.LoggingOut event) {
+        RoomManager rm = VoxLinkMod.getRoomManager();
+        if (rm != null && rm.isInRoom()) {
+            rm.leaveRoom();
+        }
+        //debounce 兜底杀陶瓦 防止退出世界后残留
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
+        catch (Exception e) { VoxLinkMod.LOGGER.warn("Failed to stop Terracotta on world exit: {}", e.getMessage()); }
+    }
+
+    @SubscribeEvent
+    public static void onClientTickPost(ClientTickEvent.Post event) {
+        Minecraft client = Minecraft.getInstance();
+        //debounce AttemptingJoinScreen也驱动连接 不能在它存在时清connecting状态
+        if (ConnectionHelper.isConnecting()
+                && !(client.gui.screen() instanceof net.minecraft.client.gui.screens.ConnectScreen)
+                && !(client.gui.
+
+== F LoggingOut  变体 8b940a9e  命中 5 个模板
+   forge/1.20.2_1.20.4, forge/1.20.6, forge/1.20_1.20.1, forge/1.21_1.21.5, neoforge/1.20.1
+
+--- 代表源码 (VoxLinkClient.java) ---
+ClientPlayerNetworkEvent.LoggingOut event) {
+        RoomManager rm = VoxLinkMod.getRoomManager();
+        if (rm != null && rm.isInRoom()) {
+            rm.leaveRoom();
+        }
+        //debounce 兜底杀陶瓦 防止退出世界后残留
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
+        catch (Exception e) { VoxLinkMod.LOGGER.warn("Failed to stop Terracotta on world exit: {}", e.getMessage()); }
+    }
+
+    @SubscribeEvent
+    public static void onClientTickPost(TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        Minecraft client = Minecraft.getInstance();
+        //debounce AttemptingJoinScreen也驱动连接 不能在它存在时清connecting状态
+        if (ConnectionHelper.isConnecting()
+                && !(client.screen instanceof net.minecraft.client.gui.
+
+== F LoggingOut  变体 e3f2d242  命中 1 个模板
+   forge/26.3
+
+--- 代表源码 (VoxLinkClient.java) ---
+ClientPlayerNetworkEvent.LoggingOut event) {
+        if (!wasInWorld) {
+            // 加入流程中的幽灵 LoggingOut：没进过世界就谈不上"退出世界"，什么都不清
+            return;
+        }
+
+        wasInWorld = false;
+        RoomManager rm = VoxLinkMod.getRoomManager();
+        if (rm != null && rm.isInRoom()) {
+            rm.leaveRoom("退出世界");
+        }
+        //debounce 兜底杀陶瓦 防止退出世界后残留
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
+        catch (Exception e) { VoxLinkMod.LOGGER.warn("Failed to stop Terracotta on world exit: {}", e.getMessage()); }
+    }
+
+    @SubscribeEvent
+    public static void onClientTickPost(TickEvent.ClientTickEvent.Post event) {
+        Minecraft client = Minecraft.getInstance();
+        //debounce AttemptingJoinScreen也驱动连接 不能在它存在时清connecting状态
+        if (Conne
+
+== F LoggingOut  变体 e60be210  命中 1 个模板
+   forge/26.2
+
+--- 代表源码 (VoxLinkClient.java) ---
+ClientPlayerNetworkEvent.LoggingOut event) {
+        RoomManager rm = VoxLinkMod.getRoomManager();
+        if (rm != null && rm.isInRoom()) {
+            rm.leaveRoom();
+        }
+        //debounce 兜底杀陶瓦 防止退出世界后残留
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
+        catch (Exception e) { VoxLinkMod.LOGGER.warn("Failed to stop Terracotta on world exit: {}", e.getMessage()); }
+    }
+
+    @SubscribeEvent
+    public static void onClientTickPost(TickEvent.ClientTickEvent.Post event) {
+        Minecraft client = Minecraft.getInstance();
+        //debounce AttemptingJoinScreen也驱动连接 不能在它存在时清connecting状态
+        if (ConnectionHelper.isConnecting()
+                && !(client.gui.screen() instanceof net.minecraft.client.gui.screens.ConnectScreen)
+                && !(c
+
+== F LoggingOut  变体 fd482bc8  命中 6 个模板
+   neoforge/1.20.4_1.20.6, neoforge/1.21.11, neoforge/1.21.6_1.21.8, neoforge/1.21.9_1.21.10, neoforge/1.21_1.21.5, neoforge/26.1_26.1.2
+
+--- 代表源码 (VoxLinkClient.java) ---
+ClientPlayerNetworkEvent.LoggingOut event) {
+        RoomManager rm = VoxLinkMod.getRoomManager();
+        if (rm != null && rm.isInRoom()) {
+            rm.leaveRoom();
+        }
+        //debounce 兜底杀陶瓦 防止退出世界后残留
+        try { icu.wuhui.voxlink.terracotta.TerracottaManager.shutdown(); }
+        catch (Exception e) { VoxLinkMod.LOGGER.warn("Failed to stop Terracotta on world exit: {}", e.getMessage()); }
+    }
+
+    @SubscribeEvent
+    public static void onClientTickPost(ClientTickEvent.Post event) {
+        Minecraft client = Minecraft.getInstance();
+        //debounce AttemptingJoinScreen也驱动连接 不能在它存在时清connecting状态
+        if (ConnectionHelper.isConnecting()
+                && !(client.screen instanceof net.minecraft.client.gui.screens.ConnectScreen)
+                && !(client.screen ins
+
+== G connectToServer  变体 8b29008e  命中 5 个模板
+   fabric/26.2, fabric/26.3, forge/26.2, neoforge/26.2, neoforge/26.3
+
+--- 代表源码 (network/ConnectionHelper.java) ---
+public static void connectToServer(int localPort, RoomInfo roomInfo) {
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(
+         () -> {
+            if (localPort > 0) {
+               if (!connecting.compareAndSet(false, true)) {
+                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] Already connecting, ignore duplicate call");
+                  return;
+               }
+
+               try {
+                  prevPlayerStrong = mc.player;
+                  long myStartAt = System.currentTimeMillis();
+                  connectInitiatedAt = myStartAt;
+                  roomInfo.setLocalBridgePort(localPort);
+                  String addr = ViaCompat.buildViaAddress("127.0.0.1", localPort, roomInfo.getServerProtocolVersion());
+                  ServerData serverData = createServerData(roomInfo.getName(), addr);
+                  // 返回入口页而非加入页
+                  Screen parentScreen = mc.gui.screen();
+                  if (parentScreen instanceof icu.wuhui.voxlink.ui.AttemptingJoinScreen ajs && ajs.entryScreen() != null) {
+                     parentScreen = ajs.entryScreen();
+                  }
+                  invokeStartConnecting(parentScreen, mc, addr, serverData);
+                  resetTask = RESET_SCHEDULER.schedule(() -> {
+                     if (connecting.get() && connectInitiatedAt == myStartAt) {
+                        VoxLinkMod.LOGGER.info("[ConnectionHelper] 30s timeout, auto reset connecting flag");
+                        connecting.set(false);
+                     }
+                  }, 30L, TimeUnit.SECONDS);
+               } catch (Exception e) {
+                  connecting.set(false);
+                  clearConnectInitiated();
+                  VoxLinkMod.LOGGER.error("[ConnectionHelper] Connection failed: {}", e.getMessage());
+                  String mode = roomInfo.getConnectionMode().getString();
+                  sendError(
+                     mc,
+                     Component.translatable(
+                           "voxlink.chat.connection_failed_detail",
+                           new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                        )
+                        .getString()
+                  );
+                  VoxLinkMod.getRoomManager().leaveRoom("连接失败");
+               }
+            } else {
+               connecting.set(false);
+               clearConnectInitiated();
+               String mode = roomInfo.getConnectionMode().getString();
+               sendError(
+                  mc,
+                  Component.translatable(
+                        "voxlink.chat.connection_failed_detail",
+                        new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                     )
+                     .getString()
+               );
+               VoxLinkMod.getRoomManager().leaveRoom("连接失败");
+            }
+         }
+      );
+   }
+
+== G connectToServer  变体 abed3903  命中 22 个模板
+   fabric/1.20.2_1.20.6, fabric/1.20_1.20.1, fabric/1.21.11, fabric/1.21.6_1.21.8, fabric/1.21.9_1.21.10, fabric/1.21_1.21.5, fabric/26.1_26.1.2, forge/1.20.2_1.20.4, forge/1.20.6, forge/1.20_1.20.1, forge/1.21.11, forge/1.21.6_1.21.8, forge/1.21.9_1.21.10, forge/1.21_1.21.5, forge/26.1_26.1.2, neoforge/1.20.1, neoforge/1.20.4_1.20.6, neoforge/1.21.11, neoforge/1.21.6_1.21.8, neoforge/1.21.9_1.21.10, neoforge/1.21_1.21.5, neoforge/26.1_26.1.2
+
+--- 代表源码 (network/ConnectionHelper.java) ---
+public static void connectToServer(int localPort, RoomInfo roomInfo) {
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(
+         () -> {
+            if (localPort > 0) {
+               if (!connecting.compareAndSet(false, true)) {
+                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] Already connecting, ignore duplicate call");
+                  return;
+               }
+
+               try {
+                  prevPlayerStrong = mc.player;
+                  long myStartAt = System.currentTimeMillis();
+                  connectInitiatedAt = myStartAt;
+                  roomInfo.setLocalBridgePort(localPort);
+                  String addr = ViaCompat.buildViaAddress("127.0.0.1", localPort, roomInfo.getServerProtocolVersion());
+                  ServerData serverData = createServerData(roomInfo.getName(), addr);
+                  // 返回入口页而非加入页
+                  Screen parentScreen = mc.screen;
+                  if (parentScreen instanceof icu.wuhui.voxlink.ui.AttemptingJoinScreen ajs && ajs.entryScreen() != null) {
+                     parentScreen = ajs.entryScreen();
+                  }
+                  invokeStartConnecting(parentScreen, mc, addr, serverData);
+                  resetTask = RESET_SCHEDULER.schedule(() -> {
+                     if (connecting.get() && connectInitiatedAt == myStartAt) {
+                        VoxLinkMod.LOGGER.info("[ConnectionHelper] 30s timeout, auto reset connecting flag");
+                        connecting.set(false);
+                     }
+                  }, 30L, TimeUnit.SECONDS);
+               } catch (Exception e) {
+                  connecting.set(false);
+                  clearConnectInitiated();
+                  VoxLinkMod.LOGGER.error("[ConnectionHelper] Connection failed: {}", e.getMessage());
+                  String mode = roomInfo.getConnectionMode().getString();
+                  sendError(
+                     mc,
+                     Component.translatable(
+                           "voxlink.chat.connection_failed_detail",
+                           new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                        )
+                        .getString()
+                  );
+                  VoxLinkMod.getRoomManager().leaveRoom("连接失败");
+               }
+            } else {
+               connecting.set(false);
+               clearConnectInitiated();
+               String mode = roomInfo.getConnectionMode().getString();
+               sendError(
+                  mc,
+                  Component.translatable(
+                        "voxlink.chat.connection_failed_detail",
+                        new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                     )
+                     .getString()
+               );
+               VoxLinkMod.getRoomManager().leaveRoom("连接失败");
+            }
+         }
+      );
+   }
+
+== G connectToServer  变体 d12bb7c1  命中 1 个模板
+   forge/26.3
+
+--- 代表源码 (network/ConnectionHelper.java) ---
+public static void connectToServer(int localPort, RoomInfo roomInfo) {
+      Minecraft mc = Minecraft.getInstance();
+      mc.execute(
+         () -> {
+            if (localPort > 0) {
+               // 竞态防御：连接回调落地时房间可能已被拆除（如陶瓦 GuestOK 后 leaveRoom 抢先：
+               // 陶瓦进程被 shutdown、EasyTier 端口转发消失）。此时继续发起 MC 连接
+               // 只会得到 "Connection refused" 弹窗，表现为连接莫名其妙失败。
+               if (VoxLinkMod.getRoomManager() == null || VoxLinkMod.getRoomManager().getCurrentRoom() == null) {
+                  connecting.set(false);
+                  clearConnectInitiated();
+                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] Room already left before MC connect, skip (port={})", localPort);
+                  return;
+               }
+
+               if (!connecting.compareAndSet(false, true)) {
+                  VoxLinkMod.LOGGER.warn("[ConnectionHelper] Already connecting, ignore duplicate call");
+                  return;
+               }
+
+               try {
+                  prevPlayerStrong = mc.player;
+                  long myStartAt = System.currentTimeMillis();
+                  connectInitiatedAt = myStartAt;
+                  roomInfo.setLocalBridgePort(localPort);
+                  String addr = ViaCompat.buildViaAddress("127.0.0.1", localPort, roomInfo.getServerProtocolVersion());
+                  ServerData serverData = createServerData(roomInfo.getName(), addr);
+                  // 返回入口页而非加入页
+                  Screen parentScreen = mc.gui.screen();
+                  if (parentScreen instanceof icu.wuhui.voxlink.ui.AttemptingJoinScreen ajs && ajs.entryScreen() != null) {
+                     parentScreen = ajs.entryScreen();
+                  }
+                  invokeStartConnecting(parentScreen, mc, addr, serverData);
+                  resetTask = RESET_SCHEDULER.schedule(() -> {
+                     if (connecting.get() && connectInitiatedAt == myStartAt) {
+                        VoxLinkMod.LOGGER.info("[ConnectionHelper] 30s timeout, auto reset connecting flag");
+                        connecting.set(false);
+                     }
+                  }, 30L, TimeUnit.SECONDS);
+               } catch (Exception e) {
+                  connecting.set(false);
+                  clearConnectInitiated();
+                  VoxLinkMod.LOGGER.error("[ConnectionHelper] Connection failed: {}", e.getMessage());
+                  String mode = roomInfo.getConnectionMode().getString();
+                  sendError(
+                     mc,
+                     Component.translatable(
+                           "voxlink.chat.connection_failed_detail",
+                           new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                        )
+                        .getString()
+                  );
+                  VoxLinkMod.getRoomManager().leaveRoom("连接失败");
+               }
+            } else {
+               connecting.set(false);
+               clearConnectInitiated();
+               String mode = roomInfo.getConnectionMode().getString();
+               sendError(
+                  mc,
+                  Component.translatable(
+                        "voxlink.chat.connection_failed_detail",
+                        new Object[]{mode != null && !mode.isEmpty() ? mode : Component.translatable("voxlink.connection.cannot_establish").getString()}
+                     )
+                     .getString()
+               );
+               VoxLinkMod.getRoomManager().leaveRoom("连接失败");
+            }
+         }
+      );
+   }
+

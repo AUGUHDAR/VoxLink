@@ -1,0 +1,46 @@
+953	[handleJoinRequest] joiner MC version differs from host (joiner={}, proto={}, host={}, proto={}) — proceeding, vanilla/Via will handle compatibility
+1156	[handleHolePunchOffer] 忽略 1 个不可达 IPv6 候选(hostIpv6)，本端无全局IPv6
+1377	[RoomManager] Punch host mapped ports raw={} (delta={} skipped: 同socket双STUN差值非跨socket步长), target={}:{}
+1443	[HostPunchInfo] Punch joiner raw port={} (delta={} skipped: 同socket双STUN差值非跨socket步长)
+1620	[ReversePunch] Punch joiner raw port={} (delta={} skipped: 同socket双STUN差值非跨socket步长)
+1700	[ReversePunch] Joiner is symmetric NAT — use small range (±30) to open NAT mapping
+1834	PREDICTION_OFF 封顶
+1951	CGNAT同公网IP
+2053	Wave 2 TCP兜底
+2188	[Connection] Punch target keeps host mapped port {} (delta={} skipped: 同socket双STUN差值非跨socket步长)
+2362	[ReversePunch] Detected local symmetric (local={}, host={}) — birthday attack {} sockets (easySym={})
+2870	所有连接方式失败
+2896	连接失败
+2934	用户取消
+2997	对方离开,回等待
+3011	收到对端ice_restart信号
+3025	传输层断开
+3066	VoxLink桥建立失败
+3189	陶瓦connectUrl为空 无法连接MC
+3231	桥接启动失败
+3258	[ConnState] 对端 {} 已断开/取消连接，立即中止本轮打洞与持续重试，回IDLE / peer cancelled, stop punching now
+3270	[ConnState] 打洞最终失败：双向零收包(持续重试{}轮全程recvPunch=0/recvAck=0)，当前网络环境无法直连，建议开启中继或更换网络 / Punch finally failed: zero packets received in both directions, try relay or another network
+3274	持续重试耗尽且双向零收包
+3289	[ConnState] Host MC version incompatible: host={} you={} / 与房主版本不匹配
+3305	[AddrFilter] 忽略不可达 IPv6 候选 {}:{} ({})：本端无全局IPv6 / dropped unreachable IPv6 candidate (no local global IPv6)
+3313	[AddrFilter] 忽略不可达候选 {}:{} ({})：环回地址 / dropped loopback candidate
+3366	Joiner ReliableUdp启动
+3496	[joinRoom] attempt {}/{} failed in {}ms: {} — {}
+3528	Terracotta已赢 VoxLink放弃
+3553	host未上传陶瓦房间号
+3562	VoxLink桥建立超时
+4140	[ReversePunch] Joiner received peer punch packet {}:{} — send peer_port signal
+4389	[RoomManager] Host NAT: {} — 8 concurrent STUN ({} servers)
+5566	持续重试 round 
+5568	超过最大周期
+5570	周期/
+5619	尝试/3 目标:
+5650	首轮失败+
+5896	陶瓦connectUrl解析端口失败: 
+5898	陶瓦guest-ok port=
+5912	Joiner桥接建立 port=
+5917	Host桥接就绪(对端就绪确认) client=
+5929	与房主MC版本不兼容 host=
+5939	Host ReliableUdp启动 client=
+5961	Host桥断开 client=
+6118	Host开始打洞 client=

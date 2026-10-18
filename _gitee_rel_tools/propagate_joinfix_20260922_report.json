@@ -1,0 +1,908 @@
+{
+  "fabric/1.20.2_1.20.6": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "fabric/1.20_1.20.1": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "fabric/1.21.11": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "fabric/1.21.6_1.21.8": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "fabric/1.21.9_1.21.10": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "fabric/1.21_1.21.5": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "fabric/26.1_26.1.2": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "fabric/26.2": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/1.20.2_1.20.4": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/1.20.6": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/1.20_1.20.1": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/1.21.11": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/1.21.6_1.21.8": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/1.21.9_1.21.10": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/1.21_1.21.5": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/26.1_26.1.2": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/26.2": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "forge/26.3": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/1.20.1": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/1.20.4_1.20.6": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/1.21.11": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/1.21.6_1.21.8": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/1.21.9_1.21.10": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/1.21_1.21.5": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/26.1_26.1.2": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/26.2": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "neoforge/26.3": {
+    "A1": "already",
+    "A2": "already",
+    "A3": "already",
+    "B1": "already",
+    "B2": "already",
+    "B3": "already",
+    "C1": "already",
+    "C2": "already",
+    "C3": "already",
+    "D": {
+      "applied": 0,
+      "already": 13,
+      "error": 0,
+      "files": {
+        "ar_sa.json": "already_has_keys md5match=False",
+        "de_de.json": "already_has_keys md5match=False",
+        "en_us.json": "already_has_keys md5match=False",
+        "es_es.json": "already_has_keys md5match=False",
+        "fr_fr.json": "already_has_keys md5match=False",
+        "ja_jp.json": "already_has_keys md5match=False",
+        "ko_kr.json": "already_has_keys md5match=False",
+        "lzh.json": "already_has_keys md5match=False",
+        "pt_br.json": "already_has_keys md5match=False",
+        "ru_ru.json": "already_has_keys md5match=False",
+        "zh_cn.json": "already_has_keys md5match=False",
+        "zh_hk.json": "already_has_keys md5match=False",
+        "zh_tw.json": "already_has_keys md5match=False"
+      }
+    }
+  },
+  "_summary": {
+    "aggregate": {
+      "A1": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "A2": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "A3": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "B1": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "B2": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "B3": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "C1": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "C2": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "C3": {
+        "applied": 0,
+        "already": 27,
+        "error": 0
+      },
+      "D": {
+        "applied": 0,
+        "already": 351,
+        "error": 0
+      }
+    },
+    "json_check": {
+      "total_files": 364,
+      "valid": 364,
+      "invalid": []
+    },
+    "grep_stats": {
+      "A1": 28,
+      "A2": 28,
+      "A3": 28,
+      "B1": 168,
+      "B3": 84,
+      "C1": 28,
+      "C2": 28,
+      "C3": 28
+    }
+  }
+}
