@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import net.minecraft.client.Minecraft;
+import icu.wuhui.voxlink.platform.ClientInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,7 +88,7 @@ public final class TicketClient {
    }
 
    private static Path storePath() {
-      return Minecraft.getInstance().gameDirectory.toPath().resolve("voxlink_tickets.json");
+      return ClientInfo.gameDir().toPath().resolve("voxlink_tickets.json");
    }
 
    private static synchronized void load() {

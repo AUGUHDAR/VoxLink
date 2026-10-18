@@ -30,9 +30,10 @@ public final class UiLogBus {
    public static void push(int level, String key, Object... args) {
       String msg;
       try {
-         msg = net.minecraft.client.Minecraft.getInstance() != null
-            ? net.minecraft.network.chat.Component.translatable(key, args).getString()
-            : key;
+         // 经 TextRenderer 渲染; 未注入时回退裸 key, 与旧 mc==null 分支等价
+         Object rendered = icu.wuhui.voxlink.platform.TextBridge.renderOrNull(
+            icu.wuhui.voxlink.platform.Text.translatable(key, args));
+         msg = rendered != null ? rendered.toString() : key;
       } catch (Throwable t) {
          msg = key;
       }

@@ -16,7 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import net.minecraft.network.chat.Component;
+import icu.wuhui.voxlink.platform.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +34,7 @@ public class ConnectionFallback {
    private final AtomicBoolean cancelled = new AtomicBoolean(false);
    private final AtomicBoolean settled = new AtomicBoolean(false);
    private final AtomicBoolean won = new AtomicBoolean(false);
-   private volatile Component statusText = Component.empty();
+   private volatile Text statusText = Text.empty();
    private static volatile Boolean ipv6ConnectivityCached = null;
    private static volatile long ipv6ConnectivityCheckTime = 0L;
    private static final long IPV6_CHECK_CACHE_MS = 60000L;
@@ -56,7 +56,7 @@ public class ConnectionFallback {
       this.cancelled.set(true);
    }
 
-   public Component getStatusText() {
+   public Text getStatusText() {
       return this.statusText;
    }
 
@@ -70,7 +70,7 @@ public class ConnectionFallback {
 
    public CompletableFuture<ConnectionFallback.ConnectResult> tryIpv6Direct(String hostIpv6, int hostPort) {
       if (hostIpv6 != null && !hostIpv6.isEmpty()) {
-         this.statusText = Component.translatable("voxlink.connection.probing");
+         this.statusText = Text.translatable("voxlink.connection.probing");
          return CompletableFuture.supplyAsync(() -> {
             if (!this.won.get() && !this.cancelled.get() && !this.settled.get()) {
                Socket socket = null;
@@ -83,7 +83,7 @@ public class ConnectionFallback {
                   socket.close();
                   socket = null;
                   LOGGER.info("IPv6 connected: [{}]:{}", hostIpv6, hostPort);
-                  this.statusText = Component.translatable("voxlink.connection.bridge_setup");
+                  this.statusText = Text.translatable("voxlink.connection.bridge_setup");
                   if (!this.won.compareAndSet(false, true)) {
                      return ConnectionFallback.ConnectResult.cancelled();
                   }
@@ -92,25 +92,25 @@ public class ConnectionFallback {
                   return ConnectionFallback.ConnectResult.success("IPv6", hostIpv6, hostPort, ConnectionFallback.ConnectionMode.IPV6_DIRECT);
                } catch (SocketTimeoutException e) {
                   LOGGER.info("IPv6 timeout: [{}]:{}", hostIpv6, hostPort);
-                  this.statusText = Component.translatable("voxlink.connection.timeout");
+                  this.statusText = Text.translatable("voxlink.connection.timeout");
                   return ConnectionFallback.ConnectResult.failed("IPV6_TIMEOUT", "IPv6 timeout");
                } catch (NoRouteToHostException e) {
                   LOGGER.info("IPv6 no route: [{}]:{}", hostIpv6, hostPort);
-                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  this.statusText = Text.translatable("voxlink.connection.failed");
                   return ConnectionFallback.ConnectResult.failed("IPV6_NO_ROUTE", "IPv6 no route");
                } catch (ConnectException e) {
                   String msg = e.getMessage();
                   LOGGER.info("IPv6 connect failed: [{}]:{} - {}", new Object[]{hostIpv6, hostPort, msg});
                   if (msg != null && msg.contains("Connection refused")) {
-                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     this.statusText = Text.translatable("voxlink.connection.failed");
                      return ConnectionFallback.ConnectResult.failed("IPV6_REFUSED", "IPv6 refused");
                   } else {
-                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     this.statusText = Text.translatable("voxlink.connection.failed");
                      return ConnectionFallback.ConnectResult.failed("IPV6_ERROR", "IPv6 failed");
                   }
                } catch (IOException e) {
                   LOGGER.info("IPv6 exception: [{}]:{} - {}", new Object[]{hostIpv6, hostPort, e.getMessage()});
-                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  this.statusText = Text.translatable("voxlink.connection.failed");
                   return ConnectionFallback.ConnectResult.failed("IPV6_EXCEPTION", "IPv6 exception: " + e.getMessage());
                } finally {
                   if (socket != null) {
@@ -131,7 +131,7 @@ public class ConnectionFallback {
 
    public CompletableFuture<ConnectionFallback.ConnectResult> tryIpv4Direct(String hostIp, int hostPort) {
       if (hostIp != null && !hostIp.isEmpty()) {
-         this.statusText = Component.translatable("voxlink.connection.probing");
+         this.statusText = Text.translatable("voxlink.connection.probing");
          return CompletableFuture.supplyAsync(() -> {
             if (!this.won.get() && !this.cancelled.get() && !this.settled.get()) {
                Socket socket = null;
@@ -144,7 +144,7 @@ public class ConnectionFallback {
                   socket.close();
                   socket = null;
                   LOGGER.info("IPv4 connected: {}:{}", hostIp, hostPort);
-                  this.statusText = Component.translatable("voxlink.connection.bridge_setup");
+                  this.statusText = Text.translatable("voxlink.connection.bridge_setup");
                   if (!this.won.compareAndSet(false, true)) {
                      return ConnectionFallback.ConnectResult.cancelled();
                   }
@@ -153,25 +153,25 @@ public class ConnectionFallback {
                   return ConnectionFallback.ConnectResult.success("IPv4", hostIp, hostPort, ConnectionFallback.ConnectionMode.IPV4_DIRECT);
                } catch (SocketTimeoutException e) {
                   LOGGER.info("IPv4 timeout: {}:{}", hostIp, hostPort);
-                  this.statusText = Component.translatable("voxlink.connection.timeout");
+                  this.statusText = Text.translatable("voxlink.connection.timeout");
                   return ConnectionFallback.ConnectResult.failed("IPV4_TIMEOUT", "IPv4 timeout");
                } catch (NoRouteToHostException e) {
                   LOGGER.info("IPv4 no route: {}:{}", hostIp, hostPort);
-                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  this.statusText = Text.translatable("voxlink.connection.failed");
                   return ConnectionFallback.ConnectResult.failed("IPV4_NO_ROUTE", "IPv4 no route");
                } catch (ConnectException e) {
                   String msg = e.getMessage();
                   LOGGER.info("IPv4 connect failed: {}:{} - {}", new Object[]{hostIp, hostPort, msg});
                   if (msg != null && msg.contains("Connection refused")) {
-                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     this.statusText = Text.translatable("voxlink.connection.failed");
                      return ConnectionFallback.ConnectResult.failed("IPV4_REFUSED", "IPv4 refused");
                   } else {
-                     this.statusText = Component.translatable("voxlink.connection.failed");
+                     this.statusText = Text.translatable("voxlink.connection.failed");
                      return ConnectionFallback.ConnectResult.failed("IPV4_ERROR", "IPv4 failed");
                   }
                } catch (IOException e) {
                   LOGGER.info("IPv4 exception: {}:{} - {}", new Object[]{hostIp, hostPort, e.getMessage()});
-                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  this.statusText = Text.translatable("voxlink.connection.failed");
                   return ConnectionFallback.ConnectResult.failed("IPV4_EXCEPTION", "IPv4 exception: " + e.getMessage());
                } finally {
                   if (socket != null) {
@@ -301,7 +301,7 @@ public class ConnectionFallback {
 
    public CompletableFuture<ConnectionFallback.ConnectResult> tryTcpSimultaneousOpen(String remoteIp, int remotePort, int localPort) {
       if (remoteIp != null && !remoteIp.isEmpty()) {
-         this.statusText = Component.translatable("voxlink.connection.probing");
+         this.statusText = Text.translatable("voxlink.connection.probing");
          return CompletableFuture.supplyAsync(
             () -> {
                if (!this.won.get() && !this.cancelled.get() && !this.settled.get()) {
@@ -357,7 +357,7 @@ public class ConnectionFallback {
                         );
                         clientSocket.connect(new InetSocketAddress(addr, remotePort), 3000);
                         LOGGER.info("TCP SimOpen: attempt {} connected {}:{}", new Object[]{attempts, remoteIp, remotePort});
-                        this.statusText = Component.translatable("voxlink.connection.bridge_setup");
+                        this.statusText = Text.translatable("voxlink.connection.bridge_setup");
                         if (!this.won.compareAndSet(false, true)) {
                            if (clientSocket != null) {
                               try {
@@ -398,7 +398,7 @@ public class ConnectionFallback {
                      }
                   }
 
-                  this.statusText = Component.translatable("voxlink.connection.failed");
+                  this.statusText = Text.translatable("voxlink.connection.failed");
                   return ConnectionFallback.ConnectResult.failed("TCP_SIMOPEN_FAILED", "TCP SimOpen failed after " + attempts + " attempts");
                } else {
                   return ConnectionFallback.ConnectResult.cancelled();

@@ -1,6 +1,7 @@
 package icu.wuhui.voxlink.mixin;
 
 import icu.wuhui.voxlink.VoxLinkMod;
+import icu.wuhui.voxlink.platform.Text;
 import icu.wuhui.voxlink.room.RoomInfo;
 import icu.wuhui.voxlink.room.RoomManager;
 import java.util.concurrent.Executors;
@@ -158,9 +159,9 @@ public abstract class DirectConnectMixin extends Screen {
                         mc.execute(
                            () -> {
                               if (mc.player != null) {
-                                 Component connMode = roomInfo.getConnectionMode();
+                                 Text connMode = roomInfo.getConnectionMode();
                                  String reason = roomInfo.isConnectionFailed() && connMode != null
-                                    ? connMode.getString()
+                                    ? connMode.toPlainString()
                                     : Component.translatable("voxlink.connection.timeout_retry").getString();
                                  if (reason == null || reason.isEmpty()) {
                                     reason = Component.translatable("voxlink.connection.all_failed").getString();

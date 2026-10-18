@@ -143,12 +143,12 @@ public final class CreateFlowState {
          ? new Terminal(Phase.FAILED, failDetail)
          : t;
       if (l != null) {
-         net.minecraft.client.Minecraft.getInstance().execute(() -> l.onTerminal(fin));
+         icu.wuhui.voxlink.platform.ClientThread.runOnClientThread(() -> l.onTerminal(fin));
       } else {
          // 没有任何监听者（理论不会发生）：teardown 也必须在主线程执行
          Runnable h = hook;
          if (h != null) {
-            net.minecraft.client.Minecraft.getInstance().execute(h);
+            icu.wuhui.voxlink.platform.ClientThread.runOnClientThread(h);
          }
       }
 
@@ -159,7 +159,7 @@ public final class CreateFlowState {
    public static void runTeardownOnMainThread() {
       Runnable h = teardownHook;
       if (h != null) {
-         net.minecraft.client.Minecraft.getInstance().execute(h);
+         icu.wuhui.voxlink.platform.ClientThread.runOnClientThread(h);
       }
    }
 
@@ -179,6 +179,11 @@ public final class CreateFlowState {
       if (w != null) {
         w.stop();
       }
+   }
+
+   /** 批3接 ServerHandle 前的降级探针: 宿主未注入(仍为 FALLBACK)时跳过 WORLD_EXITED 判定。 */
+   private static boolean serverProbeActive() {
+      return icu.wuhui.voxlink.platform.Platform.host() != icu.wuhui.voxlink.platform.Platform.Host.FALLBACK;
    }
 
    private static final class Watchdog implements Runnable {
@@ -203,9 +208,8 @@ public final class CreateFlowState {
                return;
             }
 
-            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-            // 坑1：存档退出 → 单机服务器实例消失，必须立刻作废整个流程
-            if (mc.getSingleplayerServer() == null) {
+            // 坑1：存档退出 → 单机服务器实例消失，必须立刻作废整个流程（批3接 ServerHandle，先降级为不判）
+            if (serverProbeActive() && icu.wuhui.voxlink.platform.ServerHandle.localServer() == null) {
                finishFailure("WORLD_EXITED");
                return;
             }

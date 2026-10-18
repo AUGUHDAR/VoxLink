@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import net.minecraft.client.Minecraft;
+import icu.wuhui.voxlink.platform.ClientThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -144,7 +144,7 @@ public class TopologyClient implements P2POverlayManager.PacketHandler {
 
    private void executeOnClientThread(Runnable action) {
       try {
-         Minecraft.getInstance().execute(action);
+         ClientThread.runOnClientThread(action);
       } catch (NoClassDefFoundError e) {
          action.run();
       }

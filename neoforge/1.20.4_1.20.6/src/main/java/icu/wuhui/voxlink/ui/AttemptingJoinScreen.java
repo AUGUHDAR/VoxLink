@@ -5,6 +5,7 @@ import icu.wuhui.voxlink.network.ConnectionHelper;
 import icu.wuhui.voxlink.network.LogUploadManager;
 import icu.wuhui.voxlink.network.NatClass;
 import icu.wuhui.voxlink.network.NatLabels;
+import icu.wuhui.voxlink.platform.Text;
 import icu.wuhui.voxlink.room.ConnectionManager;
 import icu.wuhui.voxlink.room.RoomInfo;
 import java.util.ArrayList;
@@ -134,7 +135,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       boolean bridgeReady = room != null && room.getLocalBridgePort() > 0 && ConnectionHelper.isMcTrulyConnected();
       if (bridgeReady) {
          this.active = false;
-         room.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+         room.setConnectionMode(Text.translatable("voxlink.connection.connected"));
          this.voxlinkFinal = true;
          // 经中继建立时文案必须是"已通过中继连接"，不能谎报 P2P 已建立
          this.voxlinkStatusText = Component.translatable(room.isUsingRelay() ? "voxlink.relay.connected_via" : "voxlink.dual.p2p_established").getString();
@@ -545,7 +546,7 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                      if (ConnectionHelper.isMcTrulyConnected()) {
                         monitorActive.set(false);
                         ConnectionHelper.clearConnectInitiated();
-                        roomInfo.setConnectionMode(Component.translatable("voxlink.connection.connected"));
+                        roomInfo.setConnectionMode(Text.translatable("voxlink.connection.connected"));
                         mc.execute(() -> {
                            if (mc.screen == AttemptingJoinScreen.this) {
                               AttemptingJoinScreen.this.voxlinkFinal = true;
@@ -602,10 +603,10 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
 
                      mc.execute(() -> {
                         if (mc.screen == AttemptingJoinScreen.this) {
-                           Component connModex = roomInfo.getConnectionMode();
+                           Text connModex = roomInfo.getConnectionMode();
                            String failReason;
-                           if (roomInfo.isConnectionFailed() && connModex != null && !connModex.getString().isEmpty()) {
-                              failReason = connModex.getString();
+                           if (roomInfo.isConnectionFailed() && connModex != null && !connModex.toPlainString().isEmpty()) {
+                              failReason = connModex.toPlainString();
                            } else if (handshakeTimeout) {
                               failReason = Component.translatable("voxlink.connection.timeout_retry").getString();
                            } else {
@@ -622,14 +623,14 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
                      return;
                   }
 
-                  Component connMode = roomInfo.getConnectionMode();
-                  if (connMode != null && !connMode.getString().isEmpty()) {
+                  Text connMode = roomInfo.getConnectionMode();
+                  if (connMode != null && !connMode.toPlainString().isEmpty()) {
                      mc.execute(
                         () -> {
                            if (mc.screen == AttemptingJoinScreen.this) {
                               if (!AttemptingJoinScreen.this.voxlinkFinal) {
                                  long now = System.currentTimeMillis();
-                                 String newText = connMode.getString();
+                                 String newText = connMode.toPlainString();
                                  if (!newText.equals(AttemptingJoinScreen.this.voxlinkStatusText)
                                     && now - AttemptingJoinScreen.this.voxlinkStatusLastUpdate < 2000L) {
                                     return;
@@ -752,15 +753,15 @@ public class AttemptingJoinScreen extends VoxLinkScreenBase {
       // 下方状态行 = 专用中继槽位：TURN 状态 > 玩家中继进度 > Terracotta 通道状态。
       // 三者互斥占用；绝不能嵌套在 terracotta 非空分支里——Terracotta 未启用时中继进度会整场不可见。
       ConnectionManager cm = VoxLinkMod.getRoomManager().getConnectionManager();
-      Component turnStatus = cm != null ? cm.getTurnStatusText() : null;
-      Component relayProgress = cm != null ? cm.getRelayProgressText() : null;
+      Text turnStatus = cm != null ? cm.getTurnStatusText() : null;
+      Text relayProgress = cm != null ? cm.getRelayProgressText() : null;
       String line2 = null;
       int line2Color = VoxLinkColors.WARNING;
       if (turnStatus != null) {
-         line2 = turnStatus.getString();
+         line2 = turnStatus.toPlainString();
          line2Color = cm.isTurnActive() ? VoxLinkColors.SUCCESS : VoxLinkColors.WARNING;
       } else if (relayProgress != null) {
-         line2 = relayProgress.getString();
+         line2 = relayProgress.toPlainString();
       } else if (!this.terracottaStatusText.isEmpty()) {
          line2 = Component.translatable("voxlink.dual.terracotta_label").getString() + ": " + this.terracottaStatusText;
          line2Color = this.terracottaStatusColor;

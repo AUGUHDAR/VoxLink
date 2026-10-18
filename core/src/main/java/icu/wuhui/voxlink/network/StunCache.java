@@ -10,7 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Enumeration;
 import java.util.List;
-import net.minecraft.client.Minecraft;
+import icu.wuhui.voxlink.platform.ClientInfo;
 
 public class StunCache {
    private static final long CACHE_TTL_MS = 300000L;
@@ -18,7 +18,7 @@ public class StunCache {
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
    private static Path getCachePath() {
-      File gameDir = Minecraft.getInstance().gameDirectory;
+      File gameDir = ClientInfo.gameDir();
       File voxlinkDir = new File(gameDir, "voxlink");
       if (!voxlinkDir.exists() && !voxlinkDir.mkdirs()) {
          // 安全/健壮性修复：mkdirs 返回值必须检查，失败时给出可诊断日志

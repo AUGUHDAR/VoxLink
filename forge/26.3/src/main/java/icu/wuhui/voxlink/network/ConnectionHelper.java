@@ -2,6 +2,7 @@ package icu.wuhui.voxlink.network;
 
 import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.compat.ViaCompat;
+import icu.wuhui.voxlink.platform.Text;
 import icu.wuhui.voxlink.room.RoomInfo;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -135,7 +136,7 @@ public final class ConnectionHelper {
                   connecting.set(false);
                   clearConnectInitiated();
                   VoxLinkMod.LOGGER.error("[ConnectionHelper] Connection failed: {}", e.getMessage());
-                  String mode = roomInfo.getConnectionMode().getString();
+                  String mode = roomInfo.getConnectionMode().toPlainString();
                   sendError(
                      mc,
                      Component.translatable(
@@ -149,7 +150,7 @@ public final class ConnectionHelper {
             } else {
                connecting.set(false);
                clearConnectInitiated();
-               String mode = roomInfo.getConnectionMode().getString();
+               String mode = roomInfo.getConnectionMode().toPlainString();
                sendError(
                   mc,
                   Component.translatable(

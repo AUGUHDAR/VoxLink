@@ -4,6 +4,7 @@ import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.config.LogUploadState;
 import icu.wuhui.voxlink.network.NatLabels;
 import icu.wuhui.voxlink.network.PunchProfile;
+import icu.wuhui.voxlink.platform.Text;
 import icu.wuhui.voxlink.room.ConnectionManager;
 import icu.wuhui.voxlink.room.ConnectionState;
 import icu.wuhui.voxlink.room.RoomInfo;
@@ -418,15 +419,15 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
          }
 
          if (!currentRoom.isHost()) {
-            Component connMode;
+            Text connMode;
             if (Minecraft.getInstance().player != null) {
-               connMode = Component.translatable("voxlink.connection.connected");
+               connMode = Text.translatable("voxlink.connection.connected");
             } else {
                connMode = currentRoom.getConnectionMode();
             }
 
-            if (connMode != null && !connMode.getString().isEmpty()) {
-               this.drawCenteredClipped(graphics, connMode.getString(), centerX, modeY, VoxLinkColors.GRAY, maxWidth);
+            if (connMode != null && !connMode.toPlainString().isEmpty()) {
+               this.drawCenteredClipped(graphics, connMode.toPlainString(), centerX, modeY, VoxLinkColors.GRAY, maxWidth);
                ConnectionState cs = ConnectionState.getCurrent();
                if (cs != ConnectionState.CONNECTED && cs != ConnectionState.IDLE && cs != ConnectionState.FAILED) {
                   StringBuilder detail = new StringBuilder();

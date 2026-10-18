@@ -21,8 +21,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPOutputStream;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import icu.wuhui.voxlink.platform.ChatSink;
+import icu.wuhui.voxlink.platform.ClientInfo;
+import icu.wuhui.voxlink.platform.ClientThread;
+import icu.wuhui.voxlink.platform.Text;
 
 public final class LogUploadManager
 {
@@ -282,25 +284,8 @@ public final class LogUploadManager
 
    private static void notifyUploadedInChat()
    {
-      Minecraft mc = Minecraft.getInstance();
-      if (mc == null || mc.player == null) {
-         return;
-      }
-      mc.execute(() -> {
-         if (mc.player == null) {
-            return;
-         }
-         try {
-            Component msg = Component.translatable("voxlink.log_upload.uploaded");
-            try {
-               mc.player.getClass().getMethod("sendSystemMessage", Component.class).invoke(mc.player, msg);
-            } catch (NoSuchMethodException e) {
-               mc.player.getClass().getMethod("displayClientMessage", Component.class, boolean.class).invoke(mc.player, msg, false);
-            }
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[LogUpload] chat notify failed: {}", e.getMessage());
-         }
-      });
+      // 纯 UI 通道: 无头/未注入时 chatSink 降级 no-op, 不抛异常不阻断上传链路
+      ClientThread.runOnClientThread(() -> ChatSink.chat(Text.translatable("voxlink.log_upload.uploaded")));
    }
 
    private static void reportStatus()
@@ -439,14 +424,8 @@ public final class LogUploadManager
    {
       try {
          String url = buildUrl(ROUTE_UPLOAD);
-         String playerName = "";
-         try {
-            Minecraft mc = Minecraft.getInstance();
-            if (mc != null && mc.getUser() != null && mc.getUser().getName() != null) {
-               playerName = mc.getUser().getName();
-            }
-         } catch (Throwable ignored) {
-         }
+         // ClientInfo 未注入时返回 "", 保证无头(关游戏兜底钩子)路径绝不抛异常
+         String playerName = ClientInfo.userName();
          long durationMs = Math.max(0L, System.currentTimeMillis() - punchStartMs);
          HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
@@ -502,7 +481,7 @@ public final class LogUploadManager
    private static byte[] readLogTail()
    {
       try {
-         java.io.File logFile = new java.io.File(Minecraft.getInstance().gameDirectory, "logs/latest.log");
+         java.io.File logFile = new java.io.File(ClientInfo.gameDir(), "logs/latest.log");
          if (!logFile.isFile()) {
             VoxLinkMod.LOGGER.info("[LogUpload] latest.log missing, skip");
             return null;
@@ -549,7 +528,7 @@ public final class LogUploadManager
       String url = buildUrl(path);
       String sha = sha256(payload);
       long durationMs = Math.max(0, System.currentTimeMillis() - punchStartMs);
-      String playerName = Minecraft.getInstance().getUser().getName();
+      String playerName = ClientInfo.userName();
       HttpRequest request = HttpRequest.newBuilder()
          .uri(URI.create(url))
          .header("Content-Type", "application/octet-stream")

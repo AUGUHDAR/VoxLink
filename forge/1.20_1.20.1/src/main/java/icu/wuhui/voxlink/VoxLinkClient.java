@@ -1,6 +1,7 @@
 package icu.wuhui.voxlink;
 
 import icu.wuhui.voxlink.command.LanHostRegistry;
+import icu.wuhui.voxlink.compat.PlatformImpl;
 import icu.wuhui.voxlink.network.ConnectionHelper;
 import icu.wuhui.voxlink.network.PeerServer;
 import icu.wuhui.voxlink.network.SignalingClient;
@@ -38,6 +39,7 @@ public class VoxLinkClient {
     private static void initClient() {
         if (inited) return;
         inited = true;
+        PlatformImpl.install();
 
         SignalingClient signalingClient = VoxLinkMod.getSignalingClient();
         if (signalingClient != null) {

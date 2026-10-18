@@ -1,6 +1,7 @@
 package icu.wuhui.voxlink;
 
 import icu.wuhui.voxlink.command.LanHostRegistry;
+import icu.wuhui.voxlink.compat.PlatformImpl;
 import icu.wuhui.voxlink.network.ConnectionHelper;
 import icu.wuhui.voxlink.network.PeerServer;
 import icu.wuhui.voxlink.network.UPnPManager;
@@ -25,6 +26,7 @@ public class VoxLinkClient implements ClientModInitializer {
    private int autoLeaveTicks = 0;
 
    public void onInitializeClient() {
+      PlatformImpl.install();
       ServerLifecycleEvents.SERVER_STARTING.register((ServerStarting)server -> {
          if (server instanceof IntegratedServer && VoxLinkMod.getConfig().isOfflineMode()) {
             RoomManager rmStart = VoxLinkMod.getRoomManager();

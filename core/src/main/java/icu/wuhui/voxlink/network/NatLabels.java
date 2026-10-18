@@ -1,7 +1,7 @@
 package icu.wuhui.voxlink.network;
 
 import icu.wuhui.voxlink.VoxLinkMod;
-import net.minecraft.network.chat.Component;
+import icu.wuhui.voxlink.platform.Text;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -87,11 +87,11 @@ public final class NatLabels {
       String key = natClass != null && natClass != NatClass.UNKNOWN
          ? CLASS_TO_LANG_KEY.getOrDefault(natClass, UNKNOWN_KEY)
          : langKey(rawNatType);
-      return Component.translatable(key).getString();
+      return Text.translatable(key).toPlainString();
    }
 
    /** 只有原始串的场合(主页状态行/大厅卡片)。 */
    public static String nameOfRaw(String rawNatType) {
-      return Component.translatable(langKey(rawNatType)).getString();
+      return Text.translatable(langKey(rawNatType)).toPlainString();
    }
 }
