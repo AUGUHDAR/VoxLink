@@ -147,7 +147,7 @@ public class ConnectionManager {
 
    private final RoomManager roomManager;
 
-   private final SignalingClient signalingClient;
+   final SignalingClient signalingClient ;
 
    private final ScheduledExecutorService scheduler;
    private static final int JOIN_TRANSIENT_MAX_ATTEMPTS = 3;
@@ -337,11 +337,11 @@ public class ConnectionManager {
 
    private volatile ScenarioTier.Tier scenarioTier = ScenarioTier.Tier.NORMAL;
 
-   private volatile PunchProfile activePunchProfile = PunchProfile.DEFAULT;
+   volatile PunchProfile activePunchProfile = PunchProfile.DEFAULT;
 
-   private volatile PunchParams activePunchParams;
+   volatile PunchParams activePunchParams ;
 
-   private volatile CompletableFuture<Void> relayPrefetchFuture;
+   volatile CompletableFuture<Void> relayPrefetchFuture ;
 
 
    private static final long[] BACKOFF_DELAYS_MS = new long[]{1000L, 2000L, 4000L};
@@ -358,9 +358,9 @@ public class ConnectionManager {
    // PREDICTION_OFF 封顶: birthday attack 风暴(joiner 进程/网络异常导致 host 永收不到 PUNCH 时)
    // 同会话连续累计 50 次 PREDICTION_OFF 后提前终止打洞, 防止 2 秒 2520 次 PUNCH / 420 次日志烧带宽 + 刷爆日志。
    // 与 ZERO_RECV_FINAL_ROUND_LIMIT 正交: 后者管"整个会话零收包", 本常量管"PREDICTION_OFF 累计频次"。
-   private static final int PREDICTION_OFF_CAP = 50;
+   static final int PREDICTION_OFF_CAP = 50;
 
-   private final AtomicInteger sessionPredictionOffCount = new AtomicInteger(0);
+   final AtomicInteger sessionPredictionOffCount = new AtomicInteger(0);
 
    // 幽灵连接防护：joiner的"connected"就绪信令先于host桥建立到达时暂存，startHostUdpPunchBridge时消费
    private final Set<String> peerReadyConfirmations = ConcurrentHashMap.newKeySet();
@@ -371,9 +371,9 @@ public class ConnectionManager {
    // 排队中的join_request载荷(按peer记录)，host连接获胜后立即放行
    private final ConcurrentHashMap<String, JsonObject> queuedJoinPayloads = new ConcurrentHashMap<>();
 
-   private final AddressBlacklist addressBlacklist = AddressBlacklist.get();
+   final AddressBlacklist addressBlacklist = AddressBlacklist.get();
    // punchAuthV1：当前连接周期的打洞认证密钥（applyPunchTemplate 注入每个 puncher）
-   private volatile byte[] activePunchAuthKey;
+   volatile byte[] activePunchAuthKey ;
    // punch_info 信号去重(防打洞重试风暴撞服务器限流): 上次已发送的 mapped 地址与时间
    private volatile String lastPunchInfoPayload = "";
    private volatile long lastPunchInfoSendMs = 0L;
@@ -714,52 +714,8 @@ public class ConnectionManager {
 
 
 
-   static int calculatePortDelta(List<Integer> samples) {
-
-      if (samples != null && samples.size() >= 2) {
-
-         List<Integer> deltas = new ArrayList<>();
-
-
-
-         for (int i = 1; i < samples.size(); i++) {
-
-            deltas.add(samples.get(i) - samples.get(i - 1));
-
-         }
-
-
-
-         Collections.sort(deltas);
-
-         int trim = deltas.size() / 4;
-
-         List<Integer> trimmed = deltas.subList(trim, deltas.size() - trim);
-
-         double ema = trimmed.get(0).intValue();
-
-         double alpha = 0.4;
-
-
-
-         for (int i = 1; i < trimmed.size(); i++) {
-
-            ema += alpha * (trimmed.get(i).intValue() - ema);
-
-         }
-
-
-
-         int result = (int)Math.round(ema);
-
-         return result > 0 ? result : 1;
-
-      } else {
-
-         return 1;
-
-      }
-
+static int calculatePortDelta(List<Integer> samples) {
+      return PunchProfileCtrl.calculatePortDelta(samples);
    }
 
 
@@ -796,7 +752,7 @@ public class ConnectionManager {
 
 
 
-   private PunchProfile punchProfile() {
+   PunchProfile punchProfile() {
 
       PunchProfile p = this.activePunchProfile;
 
@@ -806,28 +762,14 @@ public class ConnectionManager {
 
 
 
-   public PunchProfile getActivePunchProfile() {
-
-      return this.punchProfile();
-
+public PunchProfile getActivePunchProfile() {
+      return PunchProfileCtrl.getActivePunchProfile(this);
    }
 
 
 
-   private void applyPunchTemplate(UdpHolePuncher puncher) {
-
-      if (puncher != null) {
-
-         puncher.setProfile(this.punchProfile());
-
-         puncher.setPunchParams(this.activePunchParams);
-
-         // punchAuthV1：双方声明能力时启用打洞控制面 MAC 认证；否则 null=旧线上格式
-
-         puncher.setAuthKey(this.activePunchAuthKey);
-
-      }
-
+private void applyPunchTemplate(UdpHolePuncher puncher) {
+      PunchProfileCtrl.applyPunchTemplate(this, puncher);
    }
 
 
@@ -844,74 +786,16 @@ public class ConnectionManager {
 
     */
 
-   private byte[] derivePunchAuthKey(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
-
-      try {
-
-         if (state == null || state.roomInfo == null) {
-
-            return null;
-
-         }
-
-
-
-         boolean peerSupports;
-
-         if (peerIsHost) {
-
-            peerSupports = ProtocolNegotiator.hostSupportsPunchAuth(state.roomInfo);
-
-         } else {
-
-            RoomInfo.PeerInfo peer = state.roomInfo.getPeer(peerClientId);
-
-            peerSupports = ProtocolNegotiator.supportsPunchAuth(peer);
-
-         }
-
-
-
-         if (!peerSupports) {
-
-            return null;
-
-         }
-
-
-
-         // 密钥材料=房间码+加入者ID（两端一致；token 两端不同不可用）
-
-         String code = state.roomInfo.getCode();
-
-         String joinerId = peerIsHost ? state.roomInfo.getClientId() : peerClientId;
-
-         return PunchAuth.deriveDirectKey(code, joinerId);
-
-      } catch (Exception e) {
-
-         return null;
-
-      }
-
+   byte[] derivePunchAuthKey(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
+      return PunchProfileCtrl.derivePunchAuthKey(this, state, peerClientId, peerIsHost);
    }
 
 
 
    /** 装载当前连接周期的打洞认证密钥（在打洞发起前的信令处理点调用）。 */
 
-   private void setupPunchAuthForPeer(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
-
-      byte[] key = this.derivePunchAuthKey(state, peerClientId, peerIsHost);
-
-      this.activePunchAuthKey = key;
-
-      if (key != null) {
-
-         VoxLinkMod.LOGGER.info("[PunchAuth] Auth mode armed for peer {} ({})", new Object[]{peerClientId != null ? peerClientId : "host", peerIsHost ? "isHost" : "isJoiner"});
-
-      }
-
+private void setupPunchAuthForPeer(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
+      PunchProfileCtrl.setupPunchAuthForPeer(this, state, peerClientId, peerIsHost);
    }
 
 
@@ -928,51 +812,18 @@ private List<String> stunUrlsProbedFirst() {
 
 
 
-private volatile long lastProfileSwitchMs = 0L;
+   volatile long lastProfileSwitchMs = 0L;
 
 
 
-   private void switchPunchProfile(PunchProfile target, String reason) {
-
-      if (target != null && target != this.activePunchProfile) {
-
-         long now = System.currentTimeMillis();
-
-         if (this.lastProfileSwitchMs != 0L && now - this.lastProfileSwitchMs < 20000L) {
-
-            // 节流丢弃必须留痕：28 个会话日志里 recommendProfile 命中 108 次，
-            // 却只有 54 次 Instance switch —— 差值全被这里静默 return 吞掉，
-            // 于是"模板有没有生效"从日志上根本区分不出是判定不给力还是被节流挡住。
-            VoxLinkMod.LOGGER.info(
-               "[PunchProfile] switch dropped by 20s throttle: wanted {}, {}ms left in cooldown, staying on {}",
-               new Object[]{target.name, 20000L - (now - this.lastProfileSwitchMs), this.activePunchProfile.name}
-            );
-            return;
-
-         }
-
-
-
-         this.lastProfileSwitchMs = now;
-
-         PunchProfile old = this.activePunchProfile;
-
-         this.activePunchProfile = target;
-
-         VoxLinkMod.LOGGER.info("[PunchProfile] Instance switch: {} -> {} reason: {}", old, target.name, reason);
-
-      }
-
+   void switchPunchProfile(PunchProfile target, String reason) {
+      PunchProfileCtrl.switchPunchProfile(this, target, reason);
    }
 
 
 
-   private boolean punchSkipDirect() {
-
-      PunchParams p = this.activePunchParams;
-
-      return p != null && p.skipDirectPunch;
-
+private boolean punchSkipDirect() {
+      return PunchProfileCtrl.punchSkipDirect(this);
    }
 
 
@@ -1013,62 +864,8 @@ public StunProbe.ProbeResult getStunProbeResult() {
 
 
 
-   public String getConnectionDifficultyKey() {
-
-      NatClass l = this.localNatClass;
-
-      NatClass r = this.remoteNatClass;
-
-      // 有一方未知: 按已知侧最坏推断, 难度后由UI加(存疑)
-
-      if (l == NatClass.UNKNOWN || r == NatClass.UNKNOWN) {
-
-         NatClass known = l == NatClass.UNKNOWN ? r : l;
-
-         if (known == NatClass.CONE) {
-
-            return "voxlink.nat.diff_medium";
-
-         } else if (known.isSymmetric()) {
-
-            return "voxlink.nat.diff_hell";
-
-         } else {
-
-            return "voxlink.nat.diff_medium";
-
-         }
-
-      }
-
-
-
-      if (l == NatClass.CONE && r == NatClass.CONE) {
-
-         return "voxlink.nat.diff_easy";
-
-      } else if (l == NatClass.HARD_SYM && r == NatClass.HARD_SYM) {
-
-         return "voxlink.nat.diff_hell";
-
-      } else if (l == NatClass.HARD_SYM || r == NatClass.HARD_SYM) {
-
-         return "voxlink.nat.diff_hard";
-
-      } else if (l.isSymmetric() && r.isSymmetric()) {
-
-         return "voxlink.nat.diff_hard";
-
-      } else if (l.isSymmetric() || r.isSymmetric()) {
-
-         return "voxlink.nat.diff_medium";
-
-      } else {
-
-         return "voxlink.nat.diff_medium";
-
-      }
-
+public String getConnectionDifficultyKey() {
+      return PunchProfileCtrl.getConnectionDifficultyKey(this);
    }
 
 
@@ -6190,12 +5987,8 @@ public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFut
 
 
 
-   private static boolean sameIpFamily(String a, String b) {
-      if (a == null || b == null) {
-         return false;
-      } else {
-         return a.indexOf(58) >= 0 == b.indexOf(58) >= 0;
-      }
+private static boolean sameIpFamily(String a, String b) {
+      return PunchProfileCtrl.sameIpFamily(a, b);
    }
 
    private static final class HostPunchContext {
@@ -6283,46 +6076,14 @@ public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFut
 
 
 
-   private boolean shouldPrefetchRelay(NatClass local, NatClass remote, RoomManager.RoomState state) {
-      // 同CGNAT回环打洞命中率两极分化, 中继拓扑提前预热备胎
-      boolean sameCgnat = state != null && state.roomInfo != null && state.roomInfo.isSameCgnat();
-      return local.isSymmetric() || remote.isSymmetric() || sameCgnat;
+private boolean shouldPrefetchRelay(NatClass local, NatClass remote, RoomManager.RoomState state) {
+      return PunchProfileCtrl.shouldPrefetchRelay(this, local, remote, state);
    }
 
 
 
-   private CompletableFuture<Void> prefetchRelayCandidates(RoomManager.RoomState state) {
-
-      if (state != null && state.roomInfo != null) {
-
-         String code = state.roomInfo.getCode();
-
-         String token = state.roomInfo.getToken();
-
-         return code != null && token != null
-
-            ? this.signalingClient
-
-               .pollTopology(code, token, false, 0)
-
-               .thenAccept(resp -> VoxLinkMod.LOGGER.info("[Connection] Layer2 relay pre-check topology done"))
-
-               .exceptionally(e -> {
-
-                  VoxLinkMod.LOGGER.warn("[Connection] Layer2 relay pre-check topology failed: {}", e.getMessage());
-
-                  return null;
-
-               })
-
-            : CompletableFuture.completedFuture(null);
-
-      } else {
-
-         return CompletableFuture.completedFuture(null);
-
-      }
-
+private CompletableFuture<Void> prefetchRelayCandidates(RoomManager.RoomState state) {
+      return PunchProfileCtrl.prefetchRelayCandidates(this, state);
    }
 
 
@@ -6573,22 +6334,8 @@ public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFut
 
    // PREDICTION_OFF 封顶记账: 每次 punch 失败调用此方法, 若 reason=PREDICTION_OFF 则自增会话级计数。
    // 原始日志保留, 维持可观测性。abort 由调用方在每个 site 决定(本方法只负责计数 + 撞线日志)。
-   private void recordPunchFailure(PunchFailureClassifier.FailureReason reason, int recvPunch, int recvAck) {
-      VoxLinkMod.LOGGER.info(
-         "[ConnectionManager] Punch failed reason={} recvPunch={} recvAck={}",
-         new Object[]{reason, recvPunch, recvAck}
-      );
-      if (reason == PunchFailureClassifier.FailureReason.PREDICTION_OFF) {
-                  int count = this.sessionPredictionOffCount.incrementAndGet();
-
-                  // 只在跨阈值瞬间打一条(此前 count>=CAP 每次都打, 实测单会话刷 350 条 50→400)
-         if (count == PREDICTION_OFF_CAP) {
-            VoxLinkMod.LOGGER.warn(
-               "[UdpHolePuncher] PREDICTION_OFF cap reached ({}), stop direct punching this session (relay/TURN takes over)",
-               count
-            );
-         }
-      }
+private void recordPunchFailure(PunchFailureClassifier.FailureReason reason, int recvPunch, int recvAck) {
+      PunchProfileCtrl.recordPunchFailure(this, reason, recvPunch, recvAck);
    }
 
 
@@ -13769,30 +13516,8 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
 
 
 
-   private void escalateProfileForRound(int round) {
-
-      PunchProfile current = this.punchProfile();
-
-      if (current != PunchProfile.HARDSYM) {
-
-         PunchProfile target;
-
-         if (current == PunchProfile.AGGRESSIVE) {
-
-            target = PunchProfile.HARDSYM;
-
-         } else {
-
-            target = PunchProfile.AGGRESSIVE;
-
-         }
-
-
-
-         this.switchPunchProfile(target, "continuous_retry_round_" + round);
-
-      }
-
+private void escalateProfileForRound(int round) {
+      PunchProfileCtrl.escalateProfileForRound(this, round);
    }
 
 
