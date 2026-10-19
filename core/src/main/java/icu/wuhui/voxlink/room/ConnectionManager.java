@@ -252,7 +252,7 @@ public class ConnectionManager {
          return t;
       });
    // TCP 双向打洞在飞占位: 防同轮重复邀约
-   private final AtomicBoolean tcpPunchInFlight = new AtomicBoolean(false);
+   final AtomicBoolean tcpPunchInFlight = new AtomicBoolean(false);
 
    private final List<ConnectionFallback> activeFallbacks = new CopyOnWriteArrayList<>();
 
@@ -281,9 +281,9 @@ public class ConnectionManager {
 
    private volatile String savedConnectionHostIp;
 
-   private volatile int savedConnectionHostPort;
+   volatile int savedConnectionHostPort;
 
-   private volatile String savedConnectionHostMappedIp;
+   volatile String savedConnectionHostMappedIp;
 
    private volatile int savedConnectionHostMappedPort;
 
@@ -14609,358 +14609,32 @@ void closeVoiceForwardBridges() {
 
 
 
-   public void handleTcpPunchInfo(String from, JsonObject data) {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost()) {
-
-         return;
-
-      }
-
-
-
-      if (this.connectionWon.get() || this.localNatClass != NatClass.CONE) {
-
-         VoxLinkMod.LOGGER
-
-            .info("[TcpPunch] host skip tcp_punch_info (won={}, nat={})", new Object[]{this.connectionWon.get(), this.localNatClass});
-
-         return;
-
-      }
-
-
-
-      int port = data.has("tcpPunchPort") ? data.get("tcpPunchPort").getAsInt() : 0;
-
-      String joinerIp = data.has("tcpPunchIp") ? data.get("tcpPunchIp").getAsString() : null;
-
-      if (port <= 0 || port > 65535 || joinerIp == null || joinerIp.isEmpty()) {
-
-         return;
-
-      }
-
-
-
-      JsonObject go = new JsonObject();
-
-      go.addProperty("tcpPunchPort", port);
-
-      this.signalingClient
-
-         .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "tcp_punch_go", go, from)
-
-         .exceptionally(e -> {
-
-            VoxLinkMod.LOGGER.info("[TcpPunch] tcp_punch_go send failed: {}", e.getMessage());
-
-            return null;
-
-         });
-
-
-
-      TcpHolePuncher puncher = new TcpHolePuncher();
-
-      CompletableFuture<Socket> f = puncher.punchAsync(joinerIp, port, 5, this.connectionWon);
-
-      if (f != null) {
-
-         f.whenComplete((socket, ex) -> this.onTcpPunchSocket(state, socket, true));
-
-      }
-
-
-
-      VoxLinkMod.LOGGER.info("[TcpPunch] host go: connect {}:{} (10s window)", new Object[]{joinerIp, port});
-
+public void handleTcpPunchInfo(String from, JsonObject data) {
+      TcpPunchEngine.handleTcpPunchInfo(this, from, data);
    }
 
 
 
-   public void handleTcpPunchGo(String from, JsonObject data) {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state == null || state == RoomManager.PENDING || state.roomInfo.isHost()) {
-
-         return;
-
-      }
-
-
-
-      if (this.connectionWon.get()) {
-
-         this.tcpPunchInFlight.set(false);
-
-         return;
-
-      }
-
-
-
-      int port = data.has("tcpPunchPort") ? data.get("tcpPunchPort").getAsInt() : 0;
-
-      String targetIp = this.savedConnectionHostMappedIp;
-
-      if (port <= 0 || port > 65535 || targetIp == null || targetIp.isEmpty()) {
-
-         this.tcpPunchInFlight.set(false);
-
-         return;
-
-      }
-
-
-
-      TcpHolePuncher puncher = new TcpHolePuncher();
-
-      CompletableFuture<Socket> f = puncher.punchAsync(targetIp, port, 1, this.connectionWon);
-
-      if (f == null) {
-
-         this.tcpPunchInFlight.set(false);
-
-         return;
-
-      }
-
-
-
-      f.whenComplete((socket, ex) -> {
-
-         this.tcpPunchInFlight.set(false);
-
-         this.onTcpPunchSocket(state, socket, false);
-
-      });
-
-      VoxLinkMod.LOGGER.info("[TcpPunch] joiner go: connect {}:{} then listen", new Object[]{targetIp, port});
-
+public void handleTcpPunchGo(String from, JsonObject data) {
+      TcpPunchEngine.handleTcpPunchGo(this, from, data);
    }
 
 
 
-   private void tryTcpHolePunch(RoomManager.RoomState state, String hostMappedIp, int cycle) {
-
-      if (cycle < 1 || this.connectionWon.get() || state.roomInfo.isHost() || this.localNatClass != NatClass.CONE) {
-
-         return;
-
-      }
-
-
-
-      if (hostMappedIp == null || hostMappedIp.isEmpty() || this.signalingClient == null) {
-
-         return;
-
-      }
-
-
-
-      String myIp = state.roomInfo.getMyMappedIp();
-
-      if (myIp == null || myIp.isEmpty()) {
-
-         return;
-
-      }
-
-
-
-      if (!this.tcpPunchInFlight.compareAndSet(false, true)) {
-
-         return;
-
-      }
-
-
-
-      int punchPort = TcpHolePuncher.selectPunchPort();
-
-      if (punchPort <= 0) {
-
-         this.tcpPunchInFlight.set(false);
-
-         return;
-
-      }
-
-
-
-      JsonObject info = new JsonObject();
-
-      info.addProperty("tcpPunchIp", myIp);
-
-      info.addProperty("tcpPunchPort", punchPort);
-
-      // go 丢失看门狗: 释放占位, 下轮继续邀约
-
-      this.scheduler.schedule(() -> this.tcpPunchInFlight.set(false), 35L, TimeUnit.SECONDS);
-
-      this.signalingClient
-
-         .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "tcp_punch_info", info, "host")
-
-         .exceptionally(e -> {
-
-            VoxLinkMod.LOGGER.info("[TcpPunch] tcp_punch_info send failed: {}", e.getMessage());
-
-            return null;
-
-         });
-
-      VoxLinkMod.LOGGER.info("[TcpPunch] offer port {} to host {} (cycle {})", new Object[]{punchPort, hostMappedIp, cycle});
-
+void tryTcpHolePunch(RoomManager.RoomState state, String hostMappedIp, int cycle) {
+      TcpPunchEngine.tryTcpHolePunch(this, state, hostMappedIp, cycle);
    }
 
 
 
-   private void onTcpPunchSocket(RoomManager.RoomState state, Socket socket, boolean isHost) {
-
-      if (socket == null || this.roomManager.currentRoom.get() != state) {
-
-         if (socket != null) {
-
-            try {
-
-               socket.close();
-
-            } catch (Exception ignored) {
-
-            }
-
-         }
-
-
-
-         return;
-
-      }
-
-
-
-      if (!this.connectionWon.compareAndSet(false, true)) {
-
-         // 失败不拉黑, 静默等下轮
-
-         try {
-
-            socket.close();
-
-         } catch (Exception ignored) {
-
-         }
-
-
-
-         return;
-
-      }
-
-
-
-      if (isHost) {
-
-         int mcPort = state.roomInfo.getHostPort();
-
-         if (P2PBridge.bridgePunchedHostSocket(socket, mcPort)) {
-
-            VoxLinkMod.LOGGER.info("[TcpPunch] host bridged punched socket to MC port {}", mcPort);
-
-         } else {
-
-            this.connectionWon.set(false);
-
-         }
-
-      } else {
-
-         this.connectViaPunchedTcp(state, socket);
-
-      }
-
+void onTcpPunchSocket(RoomManager.RoomState state, Socket socket, boolean isHost) {
+      TcpPunchEngine.onTcpPunchSocket(this, state, socket, isHost);
    }
 
 
 
-   private void connectViaPunchedTcp(RoomManager.RoomState state, Socket punched) {
-
-      this.killAllConnectionAttempts();
-
-      P2PBridge.cancelPendingUdpTimeouts();
-
-      for (ReliableUdpTransport transport : this.activeUdpTransports.values()) {
-
-         try {
-
-            transport.close();
-
-         } catch (Exception ignored) {
-
-         }
-
-      }
-
-
-
-      this.activeUdpTransports.clear();
-
-      this.teardownTurn(state, null);
-
-      P2PBridge.connectToHostPreconnected(punched, this.savedConnectionHostMappedIp, this.savedConnectionHostPort).thenAccept(localPort -> {
-
-         if (localPort > 0) {
-
-            if (this.dualRaceActive) {
-
-               this.claimVoxlinkDualWin();
-
-            }
-
-
-
-            this.markConnectionEstablished();
-
-            this.connectionCycleActive.set(false);
-
-            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "connected", new JsonObject(), "host");
-
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_setup"));
-
-            ConnectionHelper.connectToServer(localPort, state.roomInfo);
-
-            this.notifyDualVoxlinkBridge(true);
-
-         } else {
-
-            this.connectionCycleActive.set(false);
-
-            ConnectionHelper.resetConnecting();
-
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_start_failed"), true);
-
-            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "disconnect", new JsonObject(), "host");
-
-            if (!this.dualRaceActive) {
-
-               this.handleConnectViaBridgeFailed(state);
-
-            }
-
-
-
-            this.notifyDualVoxlinkBridge(false);
-
-         }
-
-      });
-
+void connectViaPunchedTcp(RoomManager.RoomState state, Socket punched) {
+      TcpPunchEngine.connectViaPunchedTcp(this, state, punched);
    }
 
 }
