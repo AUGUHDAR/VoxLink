@@ -152,11 +152,11 @@ public class ConnectionManager {
    final ScheduledExecutorService scheduler ;
    private static final int JOIN_TRANSIENT_MAX_ATTEMPTS = 3;
    private static final long[] JOIN_RETRY_BACKOFF_MS = new long[]{1500L, 3000L};
-   private final java.util.concurrent.atomic.AtomicInteger joinAttemptGeneration = new java.util.concurrent.atomic.AtomicInteger();
+   final java.util.concurrent.atomic.AtomicInteger joinAttemptGeneration = new java.util.concurrent.atomic.AtomicInteger();
 
-   private final ExecutorService punchExecutor;
+   final ExecutorService punchExecutor;
 
-   private final ConcurrentHashMap<String, UdpHolePuncher> activeHolePunchers = new ConcurrentHashMap<>();
+   final ConcurrentHashMap<String, UdpHolePuncher> activeHolePunchers = new ConcurrentHashMap<>();
 
    final List<UdpForwardBridge> udpForwardBridges = new CopyOnWriteArrayList<>();
 
@@ -185,7 +185,7 @@ public class ConnectionManager {
 
 
 
-   private final Map<String, Long> failedRelayPeers = new ConcurrentHashMap<>();
+   final Map<String, Long> failedRelayPeers = new ConcurrentHashMap<>();
 
    private final AtomicReference<String> currentRelayPeer = new AtomicReference<>(null);
 
@@ -209,7 +209,7 @@ public class ConnectionManager {
    /** TURN 通路对端标识：guest 侧恒为 "host"，host 侧为 joiner 的 clientId。 */
    volatile String turnPeerId = null;
    /** TURN 数据面 transport（guest 侧建好后等 turn_ready 再 start）。 */
-   private volatile ReliableUdpTransport turnTransport = null;
+   volatile ReliableUdpTransport turnTransport = null;
    /** TURN 全流程进行中（防重复触发 + 按钮置灰）。 */
    private volatile boolean turnInProgress = false;
    /** 后台 P2P 升级监视器（10 分钟窗口，2026-10-05 用户规则）任务句柄与截止时刻。 */
@@ -257,9 +257,9 @@ public class ConnectionManager {
    private final List<ConnectionFallback> activeFallbacks = new CopyOnWriteArrayList<>();
 
 
-   private final AtomicBoolean continuousRetryCancelled = new AtomicBoolean(false);
+   final AtomicBoolean continuousRetryCancelled = new AtomicBoolean(false);
 
-   private final AtomicInteger continuousRetryRound = new AtomicInteger(0);
+   final AtomicInteger continuousRetryRound = new AtomicInteger(0);
 
    private volatile PunchFailureClassifier.FailureReason lastFailureReason;
 
@@ -273,9 +273,9 @@ public class ConnectionManager {
 
    private volatile RoomManager.RoomState savedConnectionState;
 
-   private volatile String savedConnectionFrom = "";
+   volatile String savedConnectionFrom = "";
 
-   private volatile String hostRevPunchPeer;
+   volatile String hostRevPunchPeer;
 
    private volatile String savedConnectionHostIpv6;
 
@@ -287,7 +287,7 @@ public class ConnectionManager {
 
    private volatile int savedConnectionHostMappedPort;
 
-   private volatile ScheduledFuture<?> connectionTimeoutFuture;
+   volatile ScheduledFuture<?> connectionTimeoutFuture;
 
    private volatile ScheduledFuture<?> connectionCycleSafetyTimeout;
 
@@ -315,15 +315,15 @@ public class ConnectionManager {
 
    volatile boolean terracottaWon = false;
 
-   private volatile boolean voxlinkWon = false;
+   volatile boolean voxlinkWon = false;
 
    volatile boolean voxlinkSideDisabled = false;
 
-   private volatile CompletableFuture<Void> dualResultRef;
+   volatile CompletableFuture<Void> dualResultRef;
 
-   private final AtomicInteger dualFailedCount = new AtomicInteger(0);
+   final AtomicInteger dualFailedCount = new AtomicInteger(0);
 
-   private final AtomicBoolean dualRaceWon = new AtomicBoolean(false);
+   final AtomicBoolean dualRaceWon = new AtomicBoolean(false);
 
    private static final long HANDOFF_GRACE_MS = 5000L;
 
@@ -346,7 +346,7 @@ public class ConnectionManager {
 
    private static final long[] BACKOFF_DELAYS_MS = new long[]{1000L, 2000L, 4000L};
 
-   private static final int JOIN_QUEUE_RETRY_SEC = 10;
+   static final int JOIN_QUEUE_RETRY_SEC = 10;
 
    // 零收包终态：持续重试已达该轮数且全会话从未收到对端任何UDP包时，宣布最终失败并通知对端停手。
    // 3轮（约2-3分钟）太激进，玩家感知为"无限打洞被砍"；20轮（约20分钟+）对真人会话等效无限，
@@ -366,10 +366,10 @@ public class ConnectionManager {
    final Set<String> peerReadyConfirmations = ConcurrentHashMap.newKeySet();
 
    // 打洞占用期间排队的join_request重放任务(按peer记录)，对端断开时作废
-   private final ConcurrentHashMap<String, List<ScheduledFuture<?>>> queuedJoinReplays = new ConcurrentHashMap<>();
+   final ConcurrentHashMap<String, List<ScheduledFuture<?>>> queuedJoinReplays = new ConcurrentHashMap<>();
 
    // 排队中的join_request载荷(按peer记录)，host连接获胜后立即放行
-   private final ConcurrentHashMap<String, JsonObject> queuedJoinPayloads = new ConcurrentHashMap<>();
+   final ConcurrentHashMap<String, JsonObject> queuedJoinPayloads = new ConcurrentHashMap<>();
 
    final AddressBlacklist addressBlacklist = AddressBlacklist.get();
    // punchAuthV1：当前连接周期的打洞认证密钥（applyPunchTemplate 注入每个 puncher）
@@ -420,7 +420,7 @@ public class ConnectionManager {
 
 
 
-   private void cancelAllFallbacks() {
+   void cancelAllFallbacks() {
 
       for (ConnectionFallback f : this.activeFallbacks) {
 
@@ -448,7 +448,7 @@ UdpSocketArray getOrCreateUdpArray(int requiredSize, boolean isEasySym, List<Str
 
 
 
-static int calculatePortDelta(List<Integer> samples) {
+   static int calculatePortDelta(List<Integer> samples) {
       return PunchProfileCtrl.calculatePortDelta(samples);
    }
 
@@ -496,7 +496,7 @@ static int calculatePortDelta(List<Integer> samples) {
 
 
 
-public PunchProfile getActivePunchProfile() {
+   public PunchProfile getActivePunchProfile() {
       return PunchProfileCtrl.getActivePunchProfile(this);
    }
 
@@ -528,7 +528,7 @@ public PunchProfile getActivePunchProfile() {
 
    /** 装载当前连接周期的打洞认证密钥（在打洞发起前的信令处理点调用）。 */
 
-private void setupPunchAuthForPeer(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
+   private void setupPunchAuthForPeer(RoomManager.RoomState state, String peerClientId, boolean peerIsHost) {
       PunchProfileCtrl.setupPunchAuthForPeer(this, state, peerClientId, peerIsHost);
    }
 
@@ -540,7 +540,7 @@ private void setupPunchAuthForPeer(RoomManager.RoomState state, String peerClien
     * 每轮先白烧 4×800ms（实测 FJXMKG 每轮拖慢约 10s）；用探测赢家前置可即答。
     */
 
-private List<String> stunUrlsProbedFirst() {
+   private List<String> stunUrlsProbedFirst() {
       return StunNatClassifier.stunUrlsProbedFirst(this);
    }
 
@@ -556,7 +556,7 @@ private List<String> stunUrlsProbedFirst() {
 
 
 
-private boolean punchSkipDirect() {
+   private boolean punchSkipDirect() {
       return PunchProfileCtrl.punchSkipDirect(this);
    }
 
@@ -576,7 +576,7 @@ private boolean punchSkipDirect() {
 
 
 
-public StunProbe.ProbeResult getStunProbeResult() {
+   public StunProbe.ProbeResult getStunProbeResult() {
       return StunNatClassifier.getStunProbeResult(this);
    }
 
@@ -598,19 +598,19 @@ public StunProbe.ProbeResult getStunProbeResult() {
 
 
 
-public String getConnectionDifficultyKey() {
+   public String getConnectionDifficultyKey() {
       return PunchProfileCtrl.getConnectionDifficultyKey(this);
    }
 
 
 
-public void setStunProbeResult(StunProbe.ProbeResult result) {
+   public void setStunProbeResult(StunProbe.ProbeResult result) {
       StunNatClassifier.setStunProbeResult(this, result);
    }
 
 
 
-public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFutureRef() {
+   public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFutureRef() {
       return StunNatClassifier.getStunProbeFutureRef(this);
    }
 
@@ -662,7 +662,7 @@ public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFut
 
 
 
-   private void cancelConnectionCycleSafety() {
+   void cancelConnectionCycleSafety() {
 
       if (this.connectionCycleSafetyTimeout != null) {
 
@@ -1040,57 +1040,14 @@ public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFut
 
 
 
-public void clearActiveUdpTransports() {
+   public void clearActiveUdpTransports() {
       TransportBridgeRegistry.clearActiveUdpTransports(this);
    }
 
 
 
    public void stopAllConnectionWork() {
-
-      this.stopAutoRelayAll();
-
-      this.clearHostPunchContexts();
-      this.cancelAllFallbacks();
-
-
-
-      for (UdpHolePuncher puncher : this.activeHolePunchers.values()) {
-
-         try {
-
-            puncher.cancel();
-
-            puncher.close();
-
-         } catch (Exception var5) {
-
-         }
-
-      }
-
-
-
-      this.activeHolePunchers.clear();
-
-
-
-      for (ReliableUdpTransport transport : this.activeUdpTransports.values()) {
-
-         try {
-
-            transport.close();
-
-         } catch (Exception var4) {
-
-         }
-
-      }
-
-
-
-      this.activeUdpTransports.clear();
-
+      JoinSession.stopAllConnectionWork(this);
    }
 
 
@@ -1103,22 +1060,20 @@ public void clearActiveUdpTransports() {
 
 
 
-public ReliableUdpTransport removeUdpTransport(String key) {
+   public ReliableUdpTransport removeUdpTransport(String key) {
       return TransportBridgeRegistry.removeUdpTransport(this, key);
    }
 
 
 
-public boolean hasUdpTransport(String key) {
+   public boolean hasUdpTransport(String key) {
       return TransportBridgeRegistry.hasUdpTransport(this, key);
    }
 
 
 
    public void handleJoinRequest(String from, JsonObject data) {
-
-      this.handleJoinRequest(from, data, 0);
-
+      JoinSession.handleJoinRequest(this, from, data);
    }
 
 
@@ -4451,25 +4406,7 @@ public boolean hasUdpTransport(String key) {
 
 
    public void handlePeerPort(String from, JsonObject data) {
-
-      String peerIp = data.has("peer_ip") ? data.get("peer_ip").getAsString() : null;
-
-      int peerPort = data.has("peer_port") ? data.get("peer_port").getAsInt() : 0;
-
-      if (peerIp != null && peerPort > 0) {
-
-         UdpHolePuncher puncher = this.activeHolePunchers.get(from.contains("host") ? "joiner" : "host");
-
-         if (puncher != null) {
-
-            VoxLinkMod.LOGGER.info("[RoomManager] Received peer_port signal: update target to {}:{}", peerIp, peerPort);
-
-            puncher.updateTarget(peerIp, peerPort);
-
-         }
-
-      }
-
+      JoinSession.handlePeerPort(this, from, data);
    }
 
 
@@ -5699,7 +5636,7 @@ public boolean hasUdpTransport(String key) {
 
 
 
-private static boolean sameIpFamily(String a, String b) {
+   private static boolean sameIpFamily(String a, String b) {
       return PunchProfileCtrl.sameIpFamily(a, b);
    }
 
@@ -5717,7 +5654,7 @@ private static boolean sameIpFamily(String a, String b) {
       return this.hostPunchContexts.computeIfAbsent(peerId != null ? peerId : "", k -> new ConnectionManager.HostPunchContext());
    }
 
-   private boolean isAnyHostPunching() {
+   boolean isAnyHostPunching() {
       for (ConnectionManager.HostPunchContext c : this.hostPunchContexts.values()) {
          if (c.punching) {
             return true;
@@ -5727,7 +5664,7 @@ private static boolean sameIpFamily(String a, String b) {
       return false;
    }
 
-   private void clearHostPunchContexts() {
+   void clearHostPunchContexts() {
       this.hostPunchContexts.clear();
    }
  
@@ -5788,13 +5725,13 @@ private static boolean sameIpFamily(String a, String b) {
 
 
 
-private boolean shouldPrefetchRelay(NatClass local, NatClass remote, RoomManager.RoomState state) {
+   private boolean shouldPrefetchRelay(NatClass local, NatClass remote, RoomManager.RoomState state) {
       return PunchProfileCtrl.shouldPrefetchRelay(this, local, remote, state);
    }
 
 
 
-private CompletableFuture<Void> prefetchRelayCandidates(RoomManager.RoomState state) {
+   private CompletableFuture<Void> prefetchRelayCandidates(RoomManager.RoomState state) {
       return PunchProfileCtrl.prefetchRelayCandidates(this, state);
    }
 
@@ -6046,7 +5983,7 @@ private CompletableFuture<Void> prefetchRelayCandidates(RoomManager.RoomState st
 
    // PREDICTION_OFF 封顶记账: 每次 punch 失败调用此方法, 若 reason=PREDICTION_OFF 则自增会话级计数。
    // 原始日志保留, 维持可观测性。abort 由调用方在每个 site 决定(本方法只负责计数 + 撞线日志)。
-private void recordPunchFailure(PunchFailureClassifier.FailureReason reason, int recvPunch, int recvAck) {
+   private void recordPunchFailure(PunchFailureClassifier.FailureReason reason, int recvPunch, int recvAck) {
       PunchProfileCtrl.recordPunchFailure(this, reason, recvPunch, recvAck);
    }
 
@@ -8540,7 +8477,7 @@ private void recordPunchFailure(PunchFailureClassifier.FailureReason reason, int
 
 
 
-public List<String> selectReachableStunGroup(int cycle) {
+   public List<String> selectReachableStunGroup(int cycle) {
       return StunNatClassifier.selectReachableStunGroup(this, cycle);
    }
 
@@ -9787,9 +9724,7 @@ public List<String> selectReachableStunGroup(int cycle) {
 
 
    public void showConnectFailed(RoomManager.RoomState state) {
-
-      this.showConnectFailed(state, "voxlink.connection.all_failed");
-
+      JoinSession.showConnectFailed(this, state);
    }
 
 
@@ -10134,7 +10069,7 @@ public List<String> selectReachableStunGroup(int cycle) {
 
 
 
-   private void clearRelayTracking() {
+   void clearRelayTracking() {
 
       this.currentRelayPeer.set(null);
 
@@ -12037,11 +11972,11 @@ public List<String> selectReachableStunGroup(int cycle) {
       }
    }
 
-private boolean isDeadNatCombo(RoomManager.RoomState state) {
+   private boolean isDeadNatCombo(RoomManager.RoomState state) {
       return StunNatClassifier.isDeadNatCombo(this, state);
    }
 
-private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
+   private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
       return StunNatClassifier.isSamePublicIpAsHost(this, state);
    }
 
@@ -12742,9 +12677,7 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
 
 
    public void showConnectFailedFinal(RoomManager.RoomState state) {
-
-      this.showConnectFailedFinal(state, "voxlink.connection.all_failed");
-
+      JoinSession.showConnectFailedFinal(this, state);
    }
 
 
@@ -12887,152 +12820,14 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
 
 
 
-      void leaveRoomOnFailure(RoomManager.RoomState state) {
-   
-      if (this.roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
-   
-         if (state.roomInfo != null && state.roomInfo.isHost()) {
-   
-            // 房主侧连接失败≠房间失败：回IDLE继续等人，关房只能由房主本人操作触发
-   
-            // (修复前此分支leaveRoom→服务端强制关房，任何房客失败/取消都能关掉整个房间)
-   
-            this.connectionCycleActive.set(false);
-   
-            this.connectionWon.set(false);
-   
-            ConnectionState.transitionTo(ConnectionState.IDLE, "连接失败,回等待");
-   
-         }
-   
+void leaveRoomOnFailure(RoomManager.RoomState state) {
+         JoinSession.leaveRoomOnFailure(this, state);
       }
-   
-   }
 
 
 
    public void killAllConnectionAttempts() {
-      this.joinAttemptGeneration.incrementAndGet();
-
-
-      boolean alreadyWon = this.connectionWon.get();
-
-      if (!alreadyWon && !this.continuousRetryCancelled.getAndSet(true) && this.continuousRetryRound.get() > 0) {
-
-         this.sendCancelConnectionSignal();
-
-      } else {
-
-         this.continuousRetryCancelled.set(true);
-
-      }
-
-
-
-      this.connectionCycleActive.set(false);
-
-      this.connectionWon.set(true);
-
-      if (!alreadyWon) {
-
-         ConnectionState.reset();
-
-      }
-
-
-
-      if (this.connectionTimeoutFuture != null) {
-
-         this.connectionTimeoutFuture.cancel(false);
-
-         this.connectionTimeoutFuture = null;
-
-      }
-
-
-
-      this.cancelConnectionCycleSafety();
-
-
-
-      for (UdpHolePuncher puncher : this.activeHolePunchers.values()) {
-
-         try {
-
-            puncher.cancel();
-
-         } catch (Exception var9) {
-
-         }
-
-
-
-         try {
-
-            puncher.stopPunch();
-
-         } catch (Exception var8) {
-
-         }
-
-
-
-         try {
-
-            puncher.close();
-
-         } catch (Exception var7) {
-
-         }
-
-      }
-
-
-
-      this.activeHolePunchers.clear();
-      this.hostRevPunchPeer = null;
-
-
-
-      for (ReliableUdpTransport t : this.activeUdpTransports.values()) {
-
-         try {
-
-            t.close();
-
-         } catch (Exception var6) {
-
-         }
-
-      }
-
-
-
-      this.activeUdpTransports.clear();
-
-
-
-      for (ReliableUdpTransport t : this.oldUdpTransports.values()) {
-
-         try {
-
-            t.close();
-
-         } catch (Exception var5) {
-
-         }
-
-      }
-
-
-
-      this.oldUdpTransports.clear();
-      this.cancelAllFallbacks();
-      this.clearHostPunchContexts();
-      this.closeVoiceForwardBridges();
-      this.peerReadyConfirmations.clear();
-      this.queuedJoinReplays.clear();
-
+      JoinSession.killAllConnectionAttempts(this);
    }
 
 
@@ -13092,37 +12887,7 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
 
 
    public void killDualRace() {
-
-      this.dualRaceActive = false;
-
-      this.voxlinkSideDisabled = true;
-
-      this.killAllConnectionAttempts("voxlink");
-
-      this.killAllConnectionAttempts("terracotta");
-
-      CompletableFuture<Void> bf = this.dualVoxlinkBridgeFuture;
-
-      if (bf != null && !bf.isDone()) {
-
-         bf.completeExceptionally(new RuntimeException("用户取消"));
-
-      }
-
-
-
-      this.dualVoxlinkBridgeFuture = null;
-
-      this.dualResultRef = null;
-
-      this.dualFailedCount.set(0);
-
-      this.terracottaWon = false;
-
-      this.voxlinkWon = false;
-
-      this.dualRaceWon.set(false);
-
+      JoinSession.killDualRace(this);
    }
 
 
@@ -13228,146 +12993,26 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
 
 
 
-private void escalateProfileForRound(int round) {
+   private void escalateProfileForRound(int round) {
       PunchProfileCtrl.escalateProfileForRound(this, round);
    }
 
 
 
    public void handleCancelConnection(String from, JsonObject data) {
-
-      VoxLinkMod.LOGGER.info("[Connection] Received cancel_connection signal from peer ({}), abort persistent retry", from);
-
-      this.continuousRetryCancelled.set(true);
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING) {
-
-                  state.roomInfo.removePeer(from);
-         
-            if (state.roomInfo.isHost()) {
-         
-               // 对端取消不是本机连接失败：房主只清该房客回等待，绝不能终态关房
-         
-               this.clearHostPunchingState();
-         
-               // 房客取消同样清TURN对端
-         
-               if (this.isTurnPeer(from)) {
-         
-                  this.cleanupTurnQuietly();
-         
-               }
-         
-               this.abortPunchOnPeerDisconnect(from);
-         
-               ReliableUdpTransport transport = this.removeUdpTransport(from);
-         
-               if (transport != null) {
-         
-                  try {
-         
-                     transport.close();
-         
-                  } catch (Exception e) {
-         
-                  }
-         
-               }
-         
-               icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.peer_left");
-         
-            } else {
-         
-               this.showConnectFailedFinal(state, "voxlink.connection.peer_cancelled");
-         
-               ClientThread.runOnClientThread(
-         
-                  () -> ChatSink.chat(Text.translatable("voxlink.chat.error_prefix").append(Text.translatable("voxlink.connection.peer_cancelled"))))
-         
-               ;
-         
-            }
-         
-         }
+      JoinSession.handleCancelConnection(this, from, data);
    }
 
 
 
    public void notifyAllPeersGone() {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING && state.roomInfo.isHost()) {
-
-         if (state.roomInfo.hasRecentPeer(60000L)) {
-
-            VoxLinkMod.LOGGER.info("[Connection] Peers still active in signaling, skip all-peers-gone");
-
-         } else if (!state.roomInfo.hasEverHadPeer()) {
-
-            VoxLinkMod.LOGGER.info("[Connection] No peer ever joined, keep waiting");
-
-         } else if (ConnectionState.getCurrent() == ConnectionState.IDLE) {
-
-            VoxLinkMod.LOGGER.info("[Connection] IDLE state, clear stale flags and keep waiting");
-
-            this.connectionCycleActive.set(false);
-
-            this.continuousRetryRound.set(0);
-
-         } else {
-
-            boolean inConnection = this.connectionCycleActive.get() || this.continuousRetryRound.get() > 0;
-
-            this.continuousRetryCancelled.set(true);
-
-            VoxLinkMod.LOGGER.info("[Connection] All peers gone (host alone), inConnection={}, abort persistent retry", inConnection);
-
-            state.roomInfo.clearPeers();
-
-            // "对端全走光"不是"本机连接失败"：一律回 IDLE 继续等人。
-            // 修复前这里在 inConnection 分支走"连接失败终态"→ leaveRoom，
-            // 于是房客加入失败离开，会把房主自己的房间关掉。
-               this.connectionCycleActive.set(false);
-
-               ConnectionState.transitionTo(ConnectionState.IDLE, "对方离开,回等待");
-
-         }
-
-      }
-
+      JoinSession.notifyAllPeersGone(this);
    }
 
 
 
-   private void sendCancelConnectionSignal() {
-
-      try {
-
-         RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-         if (state == null || state == RoomManager.PENDING || state.roomInfo == null) {
-
-            return;
-
-         }
-
-
-
-         String target = state.roomInfo.isHost() ? "all" : "host";
-
-         this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "cancel_connection", new JsonObject(), target);
-
-         VoxLinkMod.LOGGER.info("[Connection] Sent cancel_connection signal to peer ({})", target);
-
-      } catch (Exception e) {
-
-         VoxLinkMod.LOGGER.warn("[Connection] Send cancel_connection signal failed: {}", e.getMessage());
-
-      }
-
+   void sendCancelConnectionSignal() {
+      JoinSession.sendCancelConnectionSignal(this);
    }
 
 
@@ -13629,7 +13274,7 @@ private void escalateProfileForRound(int round) {
 
 
 
-public void notifyDualVoxlinkBridge(boolean success) {
+   public void notifyDualVoxlinkBridge(boolean success) {
       TransportBridgeRegistry.notifyDualVoxlinkBridge(this, success);
    }
 
@@ -13981,36 +13626,14 @@ public void notifyDualVoxlinkBridge(boolean success) {
 
 
 
-private void connectTerracottaToMC(String connectUrl, String roomCode) {
+   private void connectTerracottaToMC(String connectUrl, String roomCode) {
       TransportBridgeRegistry.connectTerracottaToMC(this, connectUrl, roomCode);
    }
 
 
 
    static int parsePortFromUrl(String url) {
-
-      if (url == null) {
-
-         return -1;
-
-      }
-
-
-
-      try {
-
-         URI u = URI.create(url.contains("://") ? url : "tcp://" + url);
-
-         int port = u.getPort();
-
-         return port > 0 ? port : 25565;
-
-      } catch (Exception e) {
-
-         return -1;
-
-      }
-
+      return JoinSession.parsePortFromUrl(url);
    }
 
 
@@ -14058,28 +13681,18 @@ private void connectTerracottaToMC(String connectUrl, String roomCode) {
 
 
    public void sendDisconnectOnFailure(RoomManager.RoomState state) {
-
-      try {
-
-         this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "disconnect", new JsonObject(), "host");
-
-      } catch (Exception e) {
-
-         VoxLinkMod.LOGGER.debug("Send disconnect failed on connection failure: {}", e.getMessage());
-
-      }
-
+      JoinSession.sendDisconnectOnFailure(this, state);
    }
 
 
 
-public void startUdpPunchBridge(RoomManager.RoomState state, ReliableUdpTransport transport) {
+   public void startUdpPunchBridge(RoomManager.RoomState state, ReliableUdpTransport transport) {
       TransportBridgeRegistry.startUdpPunchBridge(this, state, transport);
    }
 
 
 
-public void startHostUdpPunchBridge(RoomManager.RoomState state, String clientId, ReliableUdpTransport transport) {
+   public void startHostUdpPunchBridge(RoomManager.RoomState state, String clientId, ReliableUdpTransport transport) {
       TransportBridgeRegistry.startHostUdpPunchBridge(this, state, clientId, transport);
    }
 
@@ -14087,7 +13700,7 @@ public void startHostUdpPunchBridge(RoomManager.RoomState state, String clientId
 
    // ===== 幽灵连接防护：host侧进入CONNECTED需要对端就绪确认(joiner桥建立后发送的"connected"信令) =====
 
-public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
+   public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
       TransportBridgeRegistry.onPeerBridgeReady(this, state, from);
    }
 
@@ -14100,49 +13713,14 @@ public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
    // ===== 对端取消不停手修复：打洞进行中收到对端disconnect信号立即中止本轮打洞与持续重试 =====
 
    public void abortPunchOnPeerDisconnect(String from) {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost()) {
-
-         return;
-
-      }
-
-      this.cancelQueuedJoinReplays(from);
-
-      boolean punchingBusy = this.connectionCycleActive.get() || this.continuousRetryRound.get() > 0 || this.isAnyHostPunching();
-
-      // 仅当断开的对端正是当前打洞/建链目标时才整体中止，避免多peer房间误杀其他会话
-
-      boolean targetsThisPeer = this.hostPunchContexts.containsKey(from)
-         || this.activeUdpTransports.containsKey(from)
-         || from.equals(this.hostRevPunchPeer)
-         || from.equals(this.savedConnectionFrom);
-
-      if (!punchingBusy || !targetsThisPeer || this.connectionWon.get()) {
-
-         return;
-
-      }
-
-      VoxLinkMod.LOGGER.warn("[ConnState] 对端 {} 已断开/取消连接，立即中止本轮打洞与持续重试，回IDLE / peer cancelled, stop punching now", from);
-
-      this.continuousRetryCancelled.set(true);
-
-      this.killAllConnectionAttempts("peer_disconnect");
-
-      this.peerReadyConfirmations.remove(from);
-
-      state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.peer_left"), true);
-
+      JoinSession.abortPunchOnPeerDisconnect(this, from);
    }
 
 
 
    // ===== punching标志复位修复：打洞组已撤销但ctx.punching未清时及时过期，避免join_request被永久排队饿死(MM6SDJ) =====
 
-   private void expireStaleHostPunchContexts() {
+   void expireStaleHostPunchContexts() {
 
       long nowMs = System.currentTimeMillis();
 
@@ -14184,143 +13762,23 @@ public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
 
    }
 
-   private void registerQueuedJoinReplay(String from, ScheduledFuture<?> future) {
-
-      if (from == null || future == null) {
-
-         return;
-
-      }
-
-      List<ScheduledFuture<?>> list = this.queuedJoinReplays.computeIfAbsent(from, k -> new CopyOnWriteArrayList<>());
-
-      list.add(future);
-
+   void registerQueuedJoinReplay(String from, ScheduledFuture<?> future) {
+      JoinSession.registerQueuedJoinReplay(this, from, future);
    }
 
-   private void cancelQueuedJoinReplays(String from) {
-
-      if (from == null) {
-
-         return;
-
-      }
-
-      this.queuedJoinPayloads.remove(from);
-
-      List<ScheduledFuture<?>> list = this.queuedJoinReplays.remove(from);
-
-      if (list != null && !list.isEmpty()) {
-
-         VoxLinkMod.LOGGER.info("[RoomManager] Invalidate {} queued join_request replay(s) for disconnected peer {}", list.size(), from);
-
-         for (ScheduledFuture<?> f : list) {
-
-            f.cancel(false);
-
-         }
-
-      }
-
+   void cancelQueuedJoinReplays(String from) {
+      JoinSession.cancelQueuedJoinReplays(this, from);
    }
 
    // host任一对端获胜后立即放行排队join_request(打洞已停，busy必为false)
    public void flushQueuedJoinRequestsAfterWin() {
-      if (this.queuedJoinPayloads.isEmpty()) {
-         return;
-      }
-      for (String peer : this.queuedJoinPayloads.keySet().toArray(new String[0])) {
-         JsonObject payload = this.queuedJoinPayloads.remove(peer);
-         this.cancelQueuedJoinReplays(peer);
-         RoomManager.RoomState st = this.roomManager.currentRoom.get();
-         if (st == null || st == RoomManager.PENDING || !st.roomInfo.isHost() || peer == null) {
-            continue;
-         }
-         VoxLinkMod.LOGGER.info("[RoomManager] Host connection won, flush queued join_request from {}", peer);
-         this.handleJoinRequest(peer, payload != null ? payload : new JsonObject(), 0);
-      }
+      JoinSession.flushQueuedJoinRequestsAfterWin(this);
    }
 
    // 打洞占用期结束后的join_request重放：不再默默丢弃，等打洞一停立即处理
 
-   private void scheduleDeferredJoinReplay(RoomManager.RoomState state, String from, JsonObject data, int waitCount) {
-
-      // H3a: 闭包创建时捕获房间码,执行时校验,避免换房后旧任务在新房间重放
-      String capturedRoomCode = state.roomInfo.getCode();
-
-      ScheduledFuture<?> future = this.scheduler.schedule(() -> {
-
-         try {
-
-            RoomManager.RoomState st = this.roomManager.currentRoom.get();
-
-            if (st == null || st == RoomManager.PENDING || !st.roomInfo.isHost()) {
-
-               return;
-
-            }
-
-            if (capturedRoomCode == null || !capturedRoomCode.equals(st.roomInfo.getCode())) {
-
-               VoxLinkMod.LOGGER.warn("[RoomManager] Drop deferred join_request from {}: room changed (captured={}, current={})", new Object[]{from, capturedRoomCode, st.roomInfo.getCode()});
-
-               return;
-
-            }
-
-            if (this.activeUdpTransports.containsKey(from)) {
-
-               VoxLinkMod.LOGGER.info("[RoomManager] Client {} connected, drop deferred join_request", from);
-
-               return;
-
-            }
-
-            this.expireStaleHostPunchContexts();
-
-            boolean busy = this.isAnyHostPunching() || this.connectionCycleActive.get();
-
-            if (!busy) {
-
-               VoxLinkMod.LOGGER.info("[RoomManager] Punch cycle ended, replay deferred join_request from {}", from);
-
-               this.handleJoinRequest(from, data, 0);
-
-            } else if (waitCount < 12) {
-
-               this.scheduleDeferredJoinReplay(st, from, data, waitCount + 1);
-
-            } else {
-
-               // H3b: 排队满120s仍无可用打洞槽位,通知房客放弃等待,避免无限挂死
-               VoxLinkMod.LOGGER.warn("[RoomManager] Deferred join_request from {} dropped after 120s of waiting, notify peer to give up", from);
-
-               try {
-
-                  JsonObject giveUpData = new JsonObject();
-
-                  giveUpData.addProperty("reason", "join_queue_timeout");
-
-                  this.signalingClient.sendSignal(st.roomInfo.getCode(), st.roomInfo.getToken(), st.roomInfo.isHost(), "disconnect", giveUpData, from);
-
-               } catch (Exception sigEx) {
-
-                  VoxLinkMod.LOGGER.debug("[RoomManager] Send join_queue_timeout disconnect failed: {}", sigEx.getMessage());
-
-               }
-
-            }
-
-         } catch (Exception ex) {
-
-            VoxLinkMod.LOGGER.warn("[RoomManager] Deferred join_request replay error: {}", ex.getMessage());
-
-         }
-
-      }, JOIN_QUEUE_RETRY_SEC, TimeUnit.SECONDS);
-
-      this.registerQueuedJoinReplay(from, future);
-
+   void scheduleDeferredJoinReplay(RoomManager.RoomState state, String from, JsonObject data, int waitCount) {
+      JoinSession.scheduleDeferredJoinReplay(this, state, from, data, waitCount);
    }
 
 
@@ -14328,125 +13786,11 @@ public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
    // ===== 零收包终态广播：持续重试耗尽且全会话双向零收包时给出明确结论(WB4V72/MTNFW4) =====
 
    private void declareZeroRecvFinalFailure(RoomManager.RoomState state) {
-
-      if (this.connectionWon.get() || this.voxlinkWon || this.terracottaWon) {
-
-         return;
-
-      }
-
-      VoxLinkMod.LOGGER
-         .warn(
-            "[ConnState] 打洞最终失败：双向零收包(持续重试{}轮全程recvPunch=0/recvAck=0)，当前网络环境无法直连，建议开启中继或更换网络 / Punch finally failed: zero packets received in both directions, try relay or another network",
-            new Object[]{this.continuousRetryRound.get()}
-         );
-
-// TURN 中继已就位时: 中继正在承载数据面, 绝不能发 give-up/清状态——
-
-      // give-up 的 disconnect 信号会让 host 释放 TURN 会话, 把唯一可用的通路拆掉。
-
-      // 只停直连打洞, 会话保持在中继上(后台重试已被下面 continuousRetryCancelled 一并停掉, 符合"零收包无法直连"的事实)
-
-      if ((this.turnSession != null || this.stdTurnSession != null) && this.turnTransport != null && this.turnTransport.isConnected()) {
-
-         VoxLinkMod.LOGGER.info("[Turn] relay is up and carrying the session, keep relay alive instead of declaring final failure");
-
-         this.connectionCycleActive.set(false);
-
-         for (UdpHolePuncher puncher : this.activeHolePunchers.values()) {
-
-            try {
-
-               puncher.cancel();
-
-            } catch (Exception e) {
-
-            }
-
-            try {
-
-               puncher.close();
-
-            } catch (Exception e) {
-
-            }
-
-         }
-
-         this.activeHolePunchers.clear();
-
-         this.clearHostPunchContexts();
-
-         return;
-      }
-
-
-
-      this.continuousRetryCancelled.set(true);
-
-      this.connectionCycleActive.set(false);
-
-      ConnectionState.transitionTo(ConnectionState.FAILED, "持续重试耗尽且双向零收包");
-      icu.wuhui.voxlink.ui.UiLogBus.push(3, "voxlink.connection.zero_recv_failed");
-      // 后台重试耗尽=真终态: 无条件上传失败样本(2026-10-05 补: 此前该路径零上传, 玩家中继/后台重试失败样本全丢)
-      LogUploadManager.onTerminalFailure();
-
-      ConnectionHelper.resetConnecting();
-
-      for (UdpHolePuncher puncher : this.activeHolePunchers.values()) {
-
-         try {
-
-            puncher.cancel();
-
-         } catch (Exception e) {
-
-         }
-
-         try {
-
-            puncher.close();
-
-         } catch (Exception e) {
-
-         }
-
-      }
-
-      this.activeHolePunchers.clear();
-
-      this.clearHostPunchContexts();
-
-      if (state != null && state != RoomManager.PENDING && state.roomInfo != null) {
-
-         state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.zero_recv_failed"), true);
-
-         this.notifyPeerGiveUpOnZeroRecv(state);
-
-      }
-
+      JoinSession.declareZeroRecvFinalFailure(this, state);
    }
 
-   private void notifyPeerGiveUpOnZeroRecv(RoomManager.RoomState state) {
-
-      try {
-
-         JsonObject giveUpData = new JsonObject();
-
-         giveUpData.addProperty("reason", "zero_recv_final");
-
-         String target = state.roomInfo.isHost() ? "all" : "host";
-
-         this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), state.roomInfo.isHost(), "disconnect", giveUpData, target);
-
-         VoxLinkMod.LOGGER.info("[Connection] Sent give-up (disconnect, reason=zero_recv_final) to {}, peer will stop punching too", target);
-
-      } catch (Exception e) {
-
-         VoxLinkMod.LOGGER.debug("[Connection] Send give-up signal failed: {}", e.getMessage());
-
-      }
-
+   void notifyPeerGiveUpOnZeroRecv(RoomManager.RoomState state) {
+      JoinSession.notifyPeerGiveUpOnZeroRecv(this, state);
    }
 
 
@@ -14454,68 +13798,37 @@ public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
    // ===== joiner侧：收到host的"incompatible"信令(MC版本不匹配)，明确提示并终止加入流程(S822QF) =====
 
    public void handleIncompatibleVersion(String from, JsonObject data) {
-
-      String hostVer = data.has("hostVersion") && !data.get("hostVersion").isJsonNull() ? data.get("hostVersion").getAsString() : "unknown";
-
-      String myVer = VoxLinkConstants.GAME_VERSION;
-
-      VoxLinkMod.LOGGER.warn("[ConnState] Host MC version incompatible: host={} you={} / 与房主版本不匹配", hostVer, myVer);
-
-      Text mismatchMsg = Text.translatable("voxlink.chat.error_prefix")
-         .append(Text.translatable("voxlink.connection.mc_mismatch", hostVer, myVer));
-
-      ClientThread.runOnClientThread(() -> {
-
-         ChatSink.chat(mismatchMsg.withStyle(Text.Style.builder().color(Text.ChatFormat.RED).build()));
-
-      });
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING && !state.roomInfo.isHost()) {
-
-         state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.mc_mismatch_mode"), true);
-
-         ConnectionState.transitionTo(ConnectionState.FAILED, "与房主MC版本不兼容 host=" + hostVer);
-
-         this.leaveRoomOnFailure(state);
-
-      }
-
+      JoinSession.handleIncompatibleVersion(this, from, data);
    }
 
 
 
    // ===== 地址族过滤：本端无全局IPv6时丢弃IPv6打洞候选(S822QF/QWA6D3)，结果有60s缓存不会反复探测 =====
 
-private String filterAddressFamilyCandidate(String ip, int port, String tag) {
+   private String filterAddressFamilyCandidate(String ip, int port, String tag) {
       return StunNatClassifier.filterAddressFamilyCandidate(this, ip, port, tag);
    }
 
 
 
    /** host 视角查某个 joiner 的声明能力（找不到 peer 或无能力表 = false）。 */
-   boolean peerSupportsCapability(RoomManager.RoomState state, String clientId, String capability) {
-      if (state == null || clientId == null) {
-         return false;
-      }
-      RoomInfo.PeerInfo peer = state.roomInfo.getPeer(clientId);
-      return peer != null && peer.capabilities != null && peer.capabilities.contains(capability);
+boolean peerSupportsCapability(RoomManager.RoomState state, String clientId, String capability) {
+      return JoinSession.peerSupportsCapability(this, state, clientId, capability);
    }
 
-public void putTransportWithIcePool(String key, ReliableUdpTransport transport) {
+   public void putTransportWithIcePool(String key, ReliableUdpTransport transport) {
       TransportBridgeRegistry.putTransportWithIcePool(this, key, transport);
    }
 
 
 
-public void sendConfirmPackets(DatagramSocket socket, InetSocketAddress addr) {
+   public void sendConfirmPackets(DatagramSocket socket, InetSocketAddress addr) {
       TransportBridgeRegistry.sendConfirmPackets(this, socket, addr);
    }
 
 
 
-public void establishUdpTransport(
+   public void establishUdpTransport(
 
       RoomManager.RoomState state,
 
@@ -14550,72 +13863,20 @@ void closeVoiceForwardBridges() {
 
 
    public void shutdown() {
-
-      if (this.connectionTimeoutFuture != null) {
-
-         this.connectionTimeoutFuture.cancel(false);
-
-         this.connectionTimeoutFuture = null;
-
-      }
-
-
-
-      if (this.cachedUdpArray != null) {
-
-         try {
-
-            this.cachedUdpArray.close();
-
-         } catch (Exception var3) {
-
-         }
-
-
-
-         this.cachedUdpArray = null;
-
-      }
-
-
-
-      this.stopAllConnectionWork();
-
-      if (this.punchExecutor != null && !this.punchExecutor.isShutdown()) {
-
-         this.punchExecutor.shutdown();
-
-
-
-         try {
-
-            this.punchExecutor.awaitTermination(2L, TimeUnit.SECONDS);
-
-         } catch (InterruptedException var2) {
-
-         }
-
-      }
-
-
-
-      this.clearRelayTracking();
-
-      this.failedRelayPeers.clear();
-
+      JoinSession.shutdown(this);
    }
 
 
 
 
 
-public void handleTcpPunchInfo(String from, JsonObject data) {
+   public void handleTcpPunchInfo(String from, JsonObject data) {
       TcpPunchEngine.handleTcpPunchInfo(this, from, data);
    }
 
 
 
-public void handleTcpPunchGo(String from, JsonObject data) {
+   public void handleTcpPunchGo(String from, JsonObject data) {
       TcpPunchEngine.handleTcpPunchGo(this, from, data);
    }
 
