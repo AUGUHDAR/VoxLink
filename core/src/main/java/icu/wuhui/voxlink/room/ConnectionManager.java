@@ -187,11 +187,11 @@ public class ConnectionManager {
 
    final Map<String, Long> failedRelayPeers = new ConcurrentHashMap<>();
 
-   private final AtomicReference<String> currentRelayPeer = new AtomicReference<>(null);
+   final AtomicReference<String> currentRelayPeer = new AtomicReference<>(null);
 
-   private volatile ScheduledFuture<?> relayFailoverTask = null;
+   volatile ScheduledFuture<?> relayFailoverTask = null;
 
-   private volatile int nextRelayEligibleRound = 0;
+   volatile int nextRelayEligibleRound = 0;
 
    volatile boolean manualRelayInProgress = false;
 
@@ -199,7 +199,7 @@ public class ConnectionManager {
    volatile long manualRelayDeadline = 0L;
 
    /** 房主收到 relay_request 时 host_notice toast 节流：避免多房客同时请求刷屏。 */
-   private volatile long lastHostNoticeAt = 0L;
+   volatile long lastHostNoticeAt = 0L;
 
    // ================= TURN 中继（协议契约：SPECS/turn-protocol-v1.md） =================
    /** 本端 TURN 会话；null=未启用。发起方(guest)=ROLE_GUEST，自动配合方(host)=ROLE_HOST。 */
@@ -254,7 +254,7 @@ public class ConnectionManager {
    // TCP 双向打洞在飞占位: 防同轮重复邀约
    final AtomicBoolean tcpPunchInFlight = new AtomicBoolean(false);
 
-   private final List<ConnectionFallback> activeFallbacks = new CopyOnWriteArrayList<>();
+   final List<ConnectionFallback> activeFallbacks = new CopyOnWriteArrayList<>();
 
 
    final AtomicBoolean continuousRetryCancelled = new AtomicBoolean(false);
@@ -386,58 +386,20 @@ public class ConnectionManager {
 
 
 
-   private boolean isRelayPeerFailed(String clientId) {
-
-      Long t = this.failedRelayPeers.get(clientId);
-
-      if (t == null) {
-
-         return false;
-
-      } else if (System.currentTimeMillis() - t > 60000L) {
-
-         this.failedRelayPeers.remove(clientId, t);
-
-         return false;
-
-      } else {
-
-         return true;
-
-      }
-
+boolean isRelayPeerFailed(String clientId) {
+      return RelayOrchestrator.isRelayPeerFailed(this, clientId);
    }
 
 
 
-   ConnectionFallback trackFallback(ConnectionFallback f) {
-
-      this.activeFallbacks.add(f);
-
-      return f;
-
+ConnectionFallback trackFallback(ConnectionFallback f) {
+      return RelayOrchestrator.trackFallback(this, f);
    }
 
 
 
-   void cancelAllFallbacks() {
-
-      for (ConnectionFallback f : this.activeFallbacks) {
-
-         try {
-
-            f.cancel();
-
-         } catch (Exception var4) {
-
-         }
-
-      }
-
-
-
-      this.activeFallbacks.clear();
-
+void cancelAllFallbacks() {
+      RelayOrchestrator.cancelAllFallbacks(this);
    }
 
 
@@ -698,7 +660,7 @@ public void stopAllPunchingAfterHostBridge() {
 
 
 
-private void stopAllPunchingForRelay() {
+void stopAllPunchingForRelay() {
       UdpPunchEngine.stopAllPunchingForRelay(this);
    }
 
@@ -709,68 +671,32 @@ private void stopAllPunchingForRelay() {
 
 
 
-   public void triggerManualRelay() {
-
-      if (VoxLinkMod.getConfig().isRelayEnabled()) {
-
-         RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-         if (state != null && state != RoomManager.PENDING) {
-
-            if (!this.manualRelayInProgress) {
-
-               this.manualRelayInProgress = true;
-               icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.player_relay");
-
-               // 启动 90s 总超时：tryRelay 递归批次(8s/批) 多了会无限循环, 必须有兜底。
-               this.manualRelayDeadline = System.currentTimeMillis() + 90_000L;
-
-               int currentRound = this.continuousRetryRound.get();
-
-               boolean isSymmetric = this.stunProbeResult != null && this.stunProbeResult.natType.isSymmetric();
-
-               this.nextRelayEligibleRound = currentRound + (isSymmetric ? 2 : 4);
-
-               VoxLinkMod.LOGGER.info("[Relay] Manual relay triggered at round={}, next eligible round={}", currentRound, this.nextRelayEligibleRound);
-
-               this.stopAllPunchingForRelay();
-
-               state.roomInfo.setConnectionMode(Text.translatable("voxlink.relay.trying"));
-
-               this.tryRelay(state);
-
-            }
-
-         }
-
-      }
-
+public void triggerManualRelay() {
+      RelayOrchestrator.triggerManualRelay(this);
    }
 
 
 
-   public boolean isManualRelayInProgress() {
-
-      return this.manualRelayInProgress;
-
+public boolean isManualRelayInProgress() {
+      return RelayOrchestrator.isManualRelayInProgress(this);
    }
 
 
 
    /** 当前批尝试号（用于下方槽位显示「第 N 轮：M 个候选…」）。无进行中时返回 0。 */
 
-   private final java.util.concurrent.atomic.AtomicInteger relayBatchIndex = new java.util.concurrent.atomic.AtomicInteger(0);
+   final java.util.concurrent.atomic.AtomicInteger relayBatchIndex = new java.util.concurrent.atomic.AtomicInteger(0);
 
    /** 玩家中继 v2 子通道分配计数（chan 1..7 循环；0 保留给本端自有会话）。 */
-   private final java.util.concurrent.atomic.AtomicInteger relayMuxChanCounter = new java.util.concurrent.atomic.AtomicInteger(0);
+   final java.util.concurrent.atomic.AtomicInteger relayMuxChanCounter = new java.util.concurrent.atomic.AtomicInteger(0);
 
-   private int allocateRelayMuxChan() {
-      return 1 + (Math.abs(this.relayMuxChanCounter.getAndIncrement()) % 7);
+int allocateRelayMuxChan() {
+      return RelayOrchestrator.allocateRelayMuxChan(this);
    }
 
 
 
-   private final java.util.concurrent.atomic.AtomicInteger relayBatchSize = new java.util.concurrent.atomic.AtomicInteger(0);
+   final java.util.concurrent.atomic.AtomicInteger relayBatchSize = new java.util.concurrent.atomic.AtomicInteger(0);
 
 
 
@@ -782,10 +708,8 @@ private void stopAllPunchingForRelay() {
 
    /** 中继进行中时下方槽位显示文案（null 表示走原有的 terracotta 状态文本）。 */
 
-   public Text getRelayProgressText() {
-
-      return this.relayProgressText;
-
+public Text getRelayProgressText() {
+      return RelayOrchestrator.getRelayProgressText(this);
    }
 
 
@@ -815,72 +739,14 @@ private void stopAllPunchingForRelay() {
 
 
 
-   private void notifyRelayFailed() {
-
-      if (this.manualRelayInProgress) {
-
-         this.manualRelayInProgress = false;
-
-         // 失败后把 nextRelayEligibleRound 拉回当前轮: 玩家立即可再点按钮或回到直连,
-
-         // 与 "中继失败，继续尝试直连打洞..." 的按钮文案语义对齐。
-
-         int currentRound = this.continuousRetryRound.get();
-
-         if (currentRound > 0) {
-
-            this.nextRelayEligibleRound = currentRound;
-
-         }
-
-         this.relayProgressText = null;
-
-         this.manualRelayDeadline = 0L;
-
-         VoxLinkMod.LOGGER.info("[Relay] Manual relay failed, resume hole punching");
-
-      }
-
+void notifyRelayFailed() {
+      RelayOrchestrator.notifyRelayFailed(this);
    }
 
 
 
-   public void stopRelay() {
-
-      VoxLinkMod.LOGGER.info("[Relay] stopRelay: cleanup relay state");
-
-      this.manualRelayInProgress = false;
-
-      this.clearRelayTracking();
-
-      RelayBridge.getInstance(this.scheduler).stopAllRelays();
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING && state.roomInfo.isUsingRelay()) {
-
-         state.roomInfo.setUsingRelay(false);
-
-         ReliableUdpTransport t = this.activeUdpTransports.remove("relay_cone");
-
-         if (t != null) {
-
-            try {
-
-               t.close();
-
-            } catch (Exception var4) {
-
-            }
-
-         }
-
-
-
-         P2PBridge.disconnect();
-
-      }
-
+public void stopRelay() {
+      RelayOrchestrator.stopRelay(this);
    }
 
 
@@ -3593,256 +3459,24 @@ public void startBirthdayPunchPhase2(
 
 
 
-   public void connectViaBridge(RoomManager.RoomState state, ConnectionFallback.ConnectResult result) {
-
-      if (this.dualRaceActive) {
-
-         this.killAllConnectionAttempts("terracotta");
-
-      }
-
-
-
-      this.killAllConnectionAttempts();
-
-      P2PBridge.cancelPendingUdpTimeouts();
-
-
-
-      for (ReliableUdpTransport transport : this.activeUdpTransports.values()) {
-
-         try {
-
-            transport.close();
-
-         } catch (Exception var6) {
-
-         }
-
-      }
-
-
-
-      this.activeUdpTransports.clear();
-
-      state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.punching"));
-
-      String remoteHost = result.remoteHost;
-
-      int remotePort = result.remotePort;
-
-      if (result.mode == ConnectionFallback.ConnectionMode.IPV6_DIRECT) {
-
-         P2PBridge.connectToHostIpv6(remoteHost, remotePort).thenAccept(localPort -> {
-
-            if (localPort > 0) {
-
-               if (this.dualRaceActive) {
-
-                  this.claimVoxlinkDualWin();
-
-               }
-
-
-
-               this.connectionWon.set(true);
-
-               this.markConnectionEstablished();
-
-
-
-               this.connectionCycleActive.set(false);
-
-               this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "connected", new JsonObject(), "host");
-
-               state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_setup"));
-
-               ConnectionHelper.connectToServer(localPort, state.roomInfo);
-
-               this.notifyDualVoxlinkBridge(true);
-
-            } else {
-
-               this.connectionCycleActive.set(false);
-
-               ConnectionHelper.resetConnecting();
-
-               state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_start_failed"), true);
-
-               this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "disconnect", new JsonObject(), "host");
-
-               if (!this.dualRaceActive) {
-
-                  this.handleConnectViaBridgeFailed(state);
-
-               }
-
-
-
-               this.notifyDualVoxlinkBridge(false);
-
-            }
-
-         });
-
-      } else {
-
-         P2PBridge.connectToHost(remoteHost, remotePort).thenAccept(localPort -> {
-
-            if (localPort > 0) {
-
-               if (this.dualRaceActive) {
-
-                  this.claimVoxlinkDualWin();
-
-               }
-
-
-
-               this.connectionWon.set(true);
-
-               this.markConnectionEstablished();
-
-
-
-               this.connectionCycleActive.set(false);
-
-               this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "connected", new JsonObject(), "host");
-
-               state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_setup"));
-
-               ConnectionHelper.connectToServer(localPort, state.roomInfo);
-
-               this.notifyDualVoxlinkBridge(true);
-
-            } else {
-
-               this.connectionCycleActive.set(false);
-
-               ConnectionHelper.resetConnecting();
-
-               state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_start_failed"), true);
-
-               this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "disconnect", new JsonObject(), "host");
-
-               if (!this.dualRaceActive) {
-
-                  this.handleConnectViaBridgeFailed(state);
-
-               }
-
-
-
-               this.notifyDualVoxlinkBridge(false);
-
-            }
-
-         });
-
-      }
-
+public void connectViaBridge(RoomManager.RoomState state, ConnectionFallback.ConnectResult result) {
+      RelayOrchestrator.connectViaBridge(this, state, result);
    }
 
 
 
-   public void connectFed(RoomManager.RoomState state) {
-      String addr = state.roomInfo.getFedAddress();
-      int sep = addr == null ? -1 : addr.lastIndexOf(':');
-      if (sep <= 0 || sep == addr.length() - 1) {
-         state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.fed_failed"), true);
-         return;
-      }
-      String host = addr.substring(0, sep);
-      int port;
-      try {
-         port = Integer.parseInt(addr.substring(sep + 1));
-      } catch (NumberFormatException e) {
-         state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.fed_failed"), true);
-         return;
-      }
-      state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.fed_setup"));
-      P2PBridge.connectToHost(host, port).thenAccept(localPort -> {
-         if (localPort > 0) {
-            this.connectionWon.set(true);
-            this.markConnectionEstablished();
-            ConnectionHelper.connectToServer(localPort, state.roomInfo);
-         } else {
-            ConnectionHelper.resetConnecting();
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.fed_failed"), true);
-         }
-      });
+public void connectFed(RoomManager.RoomState state) {
+      RelayOrchestrator.connectFed(this, state);
    }
 
-   public void handleConnectViaBridgeFailed(RoomManager.RoomState state) {
-
-      this.leaveRoomOnFailure(state);
-
+public void handleConnectViaBridgeFailed(RoomManager.RoomState state) {
+      RelayOrchestrator.handleConnectViaBridgeFailed(this, state);
    }
 
 
 
-   public void startFallbackMonitor(ConnectionFallback fallback, RoomManager.RoomState state) {
-
-      Thread t = new Thread(() -> {
-
-         int loopCount = 0;
-
-
-
-         while (!fallback.isSettled() && !fallback.isCancelled()) {
-
-            if (loopCount >= 200) {
-
-               VoxLinkMod.LOGGER.warn("Fallback monitor timeout (about 60s)");
-
-               break;
-
-            }
-
-
-
-            Text status = fallback.getStatusText();
-
-            if (status != null) {
-
-               state.roomInfo.setConnectionMode(status);
-
-            }
-
-
-
-            loopCount++;
-
-
-
-            try {
-
-               Thread.sleep(300L);
-
-            } catch (InterruptedException e) {
-
-               return;
-
-            }
-
-         }
-
-
-
-         Text finalStatus = fallback.getStatusText();
-
-         if (finalStatus != null) {
-
-            state.roomInfo.setConnectionMode(finalStatus);
-
-         }
-
-      }, "VoxLink-FallbackMonitor");
-
-      t.setDaemon(true);
-
-      t.start();
-
+public void startFallbackMonitor(ConnectionFallback fallback, RoomManager.RoomState state) {
+      RelayOrchestrator.startFallbackMonitor(this, fallback, state);
    }
 
 
@@ -3993,789 +3627,44 @@ public void startBirthdayPunchPhase2(
 
 
 
-   private void tryRelay(RoomManager.RoomState state) {
-
-      // 总超时: 90s 内没成功就停递归, 走 failed_timeout 分桶; 房客 20s 等待不受影响。
-      if (this.manualRelayInProgress && this.manualRelayDeadline > 0L
-         && System.currentTimeMillis() >= this.manualRelayDeadline) {
-         VoxLinkMod.LOGGER.warn("[Relay] Manual relay overall timeout (90s) reached, abort recursive tryRelay");
-         this.manualRelayDeadline = 0L;
-         this.notifyRelayFailed();
-         this.relayFailOrAuto(state, "voxlink.relay.failed_timeout");
-         return;
-      }
-
-      if (!VoxLinkMod.getConfig().isRelayEnabled()) {
-
-         VoxLinkMod.LOGGER.info("[Relay] Relay disabled by config, skip tryRelay");
-
-         this.notifyRelayFailed();
-
-         this.relayFailOrAuto(state, "voxlink.connection.relay_unavailable");
-
-      } else if (this.currentRelayPeer.get() != null) {
-
-         VoxLinkMod.LOGGER.info("[Relay] Relay already trying (current={}), skip duplicate", this.currentRelayPeer.get());
-
-      } else {
-
-         if (!state.roomInfo.isHost()) {
-
-            if (this.currentRelayPeer.get() != null) {
-
-               return;
-
-            }
-
-
-
-            this.currentRelayPeer.set("joiner_requesting");
-
-            // 房客发起 relay_request 后下方槽位: "正在寻找适合中继的玩家…"
-            this.relayProgressText = Text.translatable("voxlink.relay.searching");
-
-            JsonObject data = new JsonObject();
-
-            data.addProperty("clientId", state.roomInfo.getClientId());
-
-            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_request", data, "host");
-
-            this.relayFailoverTask = this.scheduler.schedule(() -> {
-
-               if (!this.connectionWon.get()) {
-
-                  this.currentRelayPeer.set(null);
-
-                  this.relayFailoverTask = null;
-
-                  this.notifyRelayFailed();
-
-                  this.relayFailOrAuto(state, "voxlink.relay.failed_host_no_response");
-
-               }
-
-            }, 20L, TimeUnit.SECONDS);
-
-         } else {
-
-            List<RoomInfo.PeerInfo> candidates = new ArrayList<>();
-
-
-
-            for (RoomInfo.PeerInfo p : state.roomInfo.getPeers()) {
-
-               String nt = p.natType;
-
-               if (nt != null
-
-                  && p.mappedIp != null
-
-                  && p.mappedPort > 0
-
-                  && !this.isRelayPeerFailed(p.clientId)
-
-                  && this.activeUdpTransports.get(p.clientId) != null
-
-                  && !nt.contains("sym")
-
-                  && !nt.contains("strict")
-
-                  && !nt.equals("unknown")) {
-
-                  if (!ProtocolNegotiator.supportsRelay(p)) {
-
-                     VoxLinkMod.LOGGER.info("[Relay] Candidate {} is legacy, skip", p.clientId);
-
-                  } else if (!ProtocolNegotiator.supportsRelayMux(p) || !this.activeUdpTransports.get(p.clientId).isMuxEnabled()) {
-
-                     // v2 数据面门槛：候选者必须声明 relayMuxV1 且其传输已 mux 化，
-                     // 否则走不了子通道（v1 裸流转发已被实证为串流污染，绝不降级回去）
-                     VoxLinkMod.LOGGER.info("[Relay] Candidate {} lacks relayMuxV1/mux transport, skip", p.clientId);
-
-                  } else {
-
-                     candidates.add(p);
-
-                  }
-
-               }
-
-            }
-
-
-
-            if (candidates.isEmpty()) {
-
-               VoxLinkMod.LOGGER.info("[Relay] No available Cone relay node (excluded failed={})", this.failedRelayPeers.size());
-
-               this.failedRelayPeers.clear();
-
-               this.notifyRelayFailed();
-
-               this.relayFailOrAuto(state, "voxlink.relay.failed_no_candidates");
-
-               return;
-
-            }
-            // 阶段文本: 筛选到候选, 即将并行尝试 → "正在寻找适合中继的玩家…" 闪一瞬, 然后立刻被 trying_batch 覆盖。
-            this.relayProgressText = Text.translatable("voxlink.relay.searching");
-
-
-
-            RelayBridge relayBridge = RelayBridge.getInstance(this.scheduler);
-
-            candidates.sort((a, b) -> {
-
-               int loadA = relayBridge.getRelayCountForPeer(a.clientId);
-
-               int loadB = relayBridge.getRelayCountForPeer(b.clientId);
-
-               if (loadA != loadB) {
-
-                  return Integer.compare(loadA, loadB);
-
-               }
-
-
-
-               ReliableUdpTransport ta = this.activeUdpTransports.get(a.clientId);
-
-               ReliableUdpTransport tb = this.activeUdpTransports.get(b.clientId);
-
-               return Long.compare(ta != null ? ta.getRtoMs() : Long.MAX_VALUE, tb != null ? tb.getRtoMs() : Long.MAX_VALUE);
-
-            });
-
-            int parallelN = Math.min(3, candidates.size());
-
-            List<RoomInfo.PeerInfo> relayCandidates = candidates.subList(0, parallelN);
-
-            RoomInfo.PeerInfo symPeer = null;
-
-            Iterator i = state.roomInfo.getPeers().iterator();
-
-
-
-            while (true) {
-
-               if (i.hasNext()) {
-
-                  RoomInfo.PeerInfo p = (RoomInfo.PeerInfo)i.next();
-
-                  String nt = p.natType;
-
-                  if (nt == null || !nt.contains("sym") && !nt.contains("strict") && !nt.equals("unknown")) {
-
-                     continue;
-
-                  }
-
-
-
-                  if (!ProtocolNegotiator.supportsRelay(p)) {
-
-                     VoxLinkMod.LOGGER.info("[Relay] Target Sym player {} is legacy, skip relay", p.clientId);
-
-                     continue;
-
-                  }
-
-
-
-                  symPeer = p;
-
-               }
-
-
-
-               if (symPeer == null || symPeer.mappedIp == null) {
-
-                  VoxLinkMod.LOGGER.warn("[Relay] No symmetric NAT player needs relay");
-
-                  this.notifyRelayFailed();
-
-                  this.relayFailOrAuto(state, "voxlink.connection.relay_unavailable");
-
-                  return;
-
-               }
-
-
-
-               this.currentRelayPeer.set(relayCandidates.get(0).clientId);
-
-               int batchNo = this.relayBatchIndex.incrementAndGet();
-
-               this.relayBatchSize.set(parallelN);
-
-               // 阶段文案: 房主分支每次开始新批次时显示「第 N 轮：M 个候选…」, 失败/成功时清空。
-               this.relayProgressText = Text.translatable("voxlink.relay.trying_batch",
-
-                  new Object[]{Integer.toString(batchNo), Integer.toString(parallelN)});
-
-               VoxLinkMod.LOGGER.info("[Relay] Parallel try {} Cone relays, target Sym={}", parallelN, symPeer.clientId);
-
-
-
-               for (int ix = 0; ix < parallelN; ix++) {
-
-                  RoomInfo.PeerInfo relay = relayCandidates.get(ix);
-
-                  JsonObject setup = new JsonObject();
-
-                  setup.addProperty("targetClientId", symPeer.clientId);
-
-                  setup.addProperty("targetIp", symPeer.mappedIp);
-
-                  setup.addProperty("targetPort", symPeer.mappedPort);
-                  setup.addProperty("replyHostId", relayPeerId(state));
-
-                  this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_setup", setup, relay.clientId);
-
-                  JsonObject notify = new JsonObject();
-
-                  notify.addProperty("relayIp", relay.mappedIp);
-
-                  notify.addProperty("relayPort", relay.mappedPort);
-
-                  this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_notify", notify, symPeer.clientId);
-
-                  VoxLinkMod.LOGGER
-
-                     .info(
-
-                        "[Relay] Concurrent #{} relay={} (load={}) {}:{}",
-
-                        new Object[]{ix + 1, relay.clientId, relayBridge.getRelayCountForPeer(relay.clientId), relay.mappedIp, relay.mappedPort}
-
-                     );
-
-               }
-
-
-
-               this.relayFailoverTask = this.scheduler.schedule(() -> {
-
-                  if (!this.connectionWon.get() && this.roomManager.currentRoom.get() == state) {
-
-                     VoxLinkMod.LOGGER.warn("[Relay] Parallel relay all timeout, mark {} failed", parallelN);
-
-
-
-                     for (RoomInfo.PeerInfo r : relayCandidates) {
-
-                        this.failedRelayPeers.put(r.clientId, System.currentTimeMillis());
-
-                     }
-
-
-
-                     this.currentRelayPeer.set(null);
-
-                     this.relayFailoverTask = null;
-
-                     this.tryRelay(state);
-
-                  }
-
-               }, 8L, TimeUnit.SECONDS);
-
-               break;
-
-            }
-
-         }
-
-      }
-
+void tryRelay(RoomManager.RoomState state) {
+      RelayOrchestrator.tryRelay(this, state);
    }
 
 
 
-   void clearRelayTracking() {
-
-      this.currentRelayPeer.set(null);
-
-      if (this.relayFailoverTask != null) {
-
-         this.relayFailoverTask.cancel(false);
-
-         this.relayFailoverTask = null;
-
-      }
-
+void clearRelayTracking() {
+      RelayOrchestrator.clearRelayTracking(this);
    }
 
 
 
-   public void handleRelayRequest(String from, JsonObject data) {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING) {
-
-         String requestingClientId = data.has("clientId") ? data.get("clientId").getAsString() : from;
-
-         VoxLinkMod.LOGGER.info("[Relay] Received relay_request, requester={}", requestingClientId);
-
-         RoomInfo.PeerInfo requestingPeerCheck = state.roomInfo.getPeer(requestingClientId);
-
-         if (requestingPeerCheck != null && !ProtocolNegotiator.supportsRelay(requestingPeerCheck)) {
-
-            VoxLinkMod.LOGGER.info("[Relay] Requester {} is legacy, no relay_request response", requestingClientId);
-
-         } else {
-
-            // 仅房主向玩家展示中继提示；房客收到 relay_request 不弹"房主"提示
-            if (state.roomInfo.isHost()) {
-
-               // 信令线程不可直调 GUI：包一层主线程调度
-
-               // 节流: 多房客同时发 relay_request 时, 房主 toast 不再每请求一次弹一次, 改为 10s 一次。
-               long nowMs = System.currentTimeMillis();
-               boolean shouldShowNotice = (nowMs - this.lastHostNoticeAt) >= 10_000L;
-               if (shouldShowNotice) {
-                  this.lastHostNoticeAt = nowMs;
-               }
-
-               if (shouldShowNotice) {
-
-                  ClientThread.runOnClientThread(() -> {
-
-                     ChatSink.chat(Text.translatable("voxlink.relay.host_notice"));
-
-                  });
-
-               }
-
-            }
-
-
-
-            RoomInfo.PeerInfo requestingPeer = state.roomInfo.getPeer(requestingClientId);
-
-            if (requestingPeer != null && requestingPeer.mappedIp != null && requestingPeer.mappedPort > 0) {
-
-               // 玩家中继 v2 候选池（2026-10-05 用户裁决修订）：
-               // 优先本房间内已连接的非对称 NAT 玩家（mux 数据面要求候选者与请求方 host
-               // 之间有已建立传输）；跨房全局池需要"虚拟加入"对洞机制，下迭代接入同一套数据面。
-               // v1 全局池路径（fetchGlobalRelayCandidates）已被实证为跨房间数据注入（候选者
-               // 复用其连往自己房间 host 的传输转发），永久停用。
-               this.tryRelay(state);
-
-            } else {
-
-               this.signalingClient
-
-                  .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
-
-            }
-
-         }
-
-      }
-
+public void handleRelayRequest(String from, JsonObject data) {
+      RelayOrchestrator.handleRelayRequest(this, from, data);
    }
 
 
 
-   private void dispatchRelaySetup(RoomManager.RoomState state, List<RoomInfo.PeerInfo> candidates, String requestingClientId, RoomInfo.PeerInfo requestingPeer) {
-
-      RelayBridge relayBridge = RelayBridge.getInstance(this.scheduler);
-
-      candidates.sort((a, b) -> {
-
-         int loadA = relayBridge.getRelayCountForPeer(a.clientId);
-
-         int loadB = relayBridge.getRelayCountForPeer(b.clientId);
-
-         return Integer.compare(loadA, loadB);
-
-      });
-
-      RoomInfo.PeerInfo relay = candidates.get(0);
-
-      JsonObject setup = new JsonObject();
-
-      setup.addProperty("targetClientId", requestingClientId);
-
-      setup.addProperty("targetIp", requestingPeer.mappedIp);
-
-      setup.addProperty("targetPort", requestingPeer.mappedPort);
-      setup.addProperty("replyHostId", relayPeerId(state));
-
-      this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_setup", setup, relay.clientId);
-
-      JsonObject notify = new JsonObject();
-
-      notify.addProperty("relayIp", relay.mappedIp);
-
-      notify.addProperty("relayPort", relay.mappedPort);
-
-      this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_notify", notify, requestingClientId);
-
+void dispatchRelaySetup(RoomManager.RoomState state, List<RoomInfo.PeerInfo> candidates, String requestingClientId, RoomInfo.PeerInfo requestingPeer) {
+      RelayOrchestrator.dispatchRelaySetup(this, state, candidates, requestingClientId, requestingPeer);
    }
 
 
 
-   public void handleRelayAccept(String from, JsonObject data) {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING) {
-
-         String forClientId = data.has("forClientId") ? data.get("forClientId").getAsString() : null;
-
-         // 玩家中继 v2：relay_accept 携带候选者在其 joiner 传输上分配的子通道号。
-         // host 侧把该子通道桥到一个全新 MC socket（被中继房客的独立会话）。
-         int muxChan = data.has("chan") ? data.get("chan").getAsInt() : 0;
-
-         if (forClientId != null && muxChan > 0) {
-
-            ReliableUdpTransport candidateTransport = this.activeUdpTransports.get(from);
-
-            if (candidateTransport != null && candidateTransport.isMuxEnabled()) {
-
-               int mcPort = state.roomInfo.getHostPort();
-
-               P2PBridge.startUdpHostBridgeForRelayedClient(forClientId, candidateTransport, muxChan, mcPort, () ->
-
-                  VoxLinkMod.LOGGER.info("[Relay] relayed session {} via {} chan{} closed", forClientId, from, muxChan)
-
-               );
-
-               VoxLinkMod.LOGGER.info("[Relay] relay_accept from {} for {} chan={}, subchannel bridge armed", from, forClientId, muxChan);
-
-               JsonObject notify = new JsonObject();
-
-               notify.addProperty("connected", true);
-
-               this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_notify", notify, forClientId);
-
-            } else {
-
-               // 候选者传输缺失/未 mux 化（如候选者刚好退出）：不通知 connected，
-               // sym 侧 8s 超时自然走 failover 下一候选
-               VoxLinkMod.LOGGER.warn("[Relay] relay_accept from {} but carrier transport missing/not mux, ignore", from);
-
-            }
-
-         } else if (forClientId != null) {
-
-            // 旧版候选者（无 chan 字段）：v1 数据面已被实证为跨流污染，绝不接旧线
-
-            VoxLinkMod.LOGGER.warn("[Relay] relay_accept without chan (legacy candidate {}), ignore (v1 relay data plane retired)", from);
-
-         }
-
-      }
-
+public void handleRelayAccept(String from, JsonObject data) {
+      RelayOrchestrator.handleRelayAccept(this, from, data);
    }
 
 
 
-   public void handleRelayNotify(String from, JsonObject data) {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING) {
-
-         if (data.has("connected") && data.get("connected").getAsBoolean()) {
-
-            VoxLinkMod.LOGGER.info("[Relay] Received relay_notify(connected), relay ready");
-
-            this.relayConnectedSignaled = true;
-
-            this.clearRelayTracking();
-
-            this.connectionWon.set(true);
-
-            // 成功路径补: 不重置 manualRelayInProgress 会让 AttemptingJoinScreen 误闪 3s 失败文字。
-            this.manualRelayInProgress = false;
-
-            this.relayProgressText = null;
-
-            this.manualRelayDeadline = 0L;
-
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.relay.connected_via").withStyle(Text.Style.builder().color(Text.ChatFormat.YELLOW).build()));
-
-            state.roomInfo.setUsingRelay(true);
-
-         } else if (!VoxLinkMod.getConfig().isRelayEnabled()) {
-
-            VoxLinkMod.LOGGER.info("[Relay] Relay disabled by config, reject relay_notify");
-
-         } else {
-
-            String relayIp = data.has("relayIp") ? data.get("relayIp").getAsString() : null;
-
-            int relayPort = data.has("relayPort") ? data.get("relayPort").getAsInt() : 0;
-
-            if (relayIp != null && relayPort > 0) {
-
-               // TURN 已在承载：玩家中继仅作热备——punch 通中继玩家后只存不用，
-               // 不进入下方建桥流程（防止与 TURN 桥双桥冲突）
-               if (this.isTurnActive() && this.turnHotstandbyTransport == null) {
-                  this.establishHotstandby(state, relayIp, relayPort);
-                  return;
-               }
-
-               VoxLinkMod.LOGGER.info("[Relay] Received relay_notify, punch to Cone {}:{}", relayIp, relayPort);
-
-               state.roomInfo.setConnectionMode(Text.translatable("voxlink.relay.trying"));
-
-               List<UdpHolePuncher> relayPunchers = new ArrayList<>();
-
-               AtomicBoolean relayWon = new AtomicBoolean(false);
-
-               String fRelayIp = relayIp;
-
-               int fRelayPort = relayPort;
-
-
-
-               for (int i = 0; i < this.punchProfile().relaySocketCount; i++) {
-
-                  UdpHolePuncher rp = new UdpHolePuncher();
-
-                  this.applyPunchTemplate(rp);
-
-
-
-                  try {
-
-                     rp.createSocket();
-
-                  } catch (Exception e) {
-
-                     continue;
-
-                  }
-
-
-
-                  relayPunchers.add(rp);
-
-                  this.activeHolePunchers.put("relay_to_cone_" + i, rp);
-
-                  int idx = i;
-
-                  rp.punch(fRelayIp, fRelayPort)
-
-                     .orTimeout(15L, TimeUnit.SECONDS)
-
-                     .thenAccept(
-
-                        result -> {
-
-                           if (!result.isSuccess()) {
-
-                              PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
-
-                              this.lastPunchResult = result.withReason(reason);
-
-                              this.activePunchParams = 
-
-                                 PunchTuner.nextParams(this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
-
-                              ;
-
-                              this.recordPunchFailure(reason, result.socketsReceivedPunch, result.socketsReceivedAck);
-
-                           } else {
-
-                              DatagramSocket socket = result.getSuccessSocket();
-
-                              if (!relayWon.compareAndSet(false, true)) {
-
-                                 try {
-
-                                    rp.close();
-
-                                 } catch (Exception var13x) {
-
-                                 }
-
-                              } else if (this.connectionWon.compareAndSet(false, true)
-
-                                 || this.relayConnectedSignaled && !this.activeUdpTransports.containsKey("relay_cone")) {
-
-                                 VoxLinkMod.LOGGER.info("[Relay] Sym->Cone socket#{} punch success", idx);
-
-                                 rp.markSocketTransferred();
-
-                                 this.stopAllPunchingAfterHostBridge();
-
-                                 rp.stopPunch();
-
-
-
-                                 for (UdpHolePuncher op : relayPunchers) {
-
-                                    if (op != rp) {
-
-                                       try {
-
-                                          op.cancel();
-
-                                          op.close();
-
-                                       } catch (Exception var15) {
-
-                                       }
-
-                                    }
-
-                                 }
-
-
-
-                                 ReliableUdpTransport transport = new ReliableUdpTransport(socket, new InetSocketAddress(fRelayIp, fRelayPort));
-
-                                 this.activeUdpTransports.put("relay_cone", transport);
-
-                                 transport.start();
-
-                                 state.roomInfo.setConnectionMode(Text.translatable("voxlink.relay.connected_via"));
-
-                                 state.roomInfo.setUsingRelay(true);
-
-                                 this.startUdpPunchBridge(state, transport);
-
-                                 JsonObject readyData = new JsonObject();
-
-                                 readyData.addProperty("clientId", state.roomInfo.getClientId());
-
-                                 this.signalingClient
-
-                                    .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_ready", readyData, "host")
-
-                                    .exceptionally(e -> {
-
-                                       VoxLinkMod.LOGGER.debug("relay_ready send failed: {}", e.getMessage());
-
-                                       return null;
-
-                                    });
-
-                                 this.scheduler.schedule(() -> {
-
-                                    // 网络线程不可直调 GUI：包一层主线程调度
-
-                                    ClientThread.runOnClientThread(() -> {
-
-                                       ChatSink.chat(Text.translatable("voxlink.relay.connected_via"));
-
-                                    });
-
-                                 }, 2L, TimeUnit.SECONDS);
-
-                              } else {
-
-                                 try {
-
-                                    rp.close();
-
-                                 } catch (Exception var14) {
-
-                                 }
-
-                              }
-
-                           }
-
-                        }
-
-                     )
-
-                     .exceptionally(e -> {
-
-                        if (!relayWon.get()) {
-
-                           try {
-
-                              rp.close();
-
-                           } catch (Exception var6x) {
-
-                           }
-
-
-
-                           this.activeHolePunchers.remove("relay_to_cone_" + idx);
-
-                        }
-
-
-
-                        return null;
-
-                     });
-
-               }
-
-
-
-               this.scheduler.schedule(() -> {
-
-                  if (!relayWon.get() && !this.connectionWon.get()) {
-
-                     VoxLinkMod.LOGGER.warn("[Relay] Sym->Cone relay punch timeout (8s)");
-
-
-
-                     for (UdpHolePuncher op : relayPunchers) {
-
-                        try {
-
-                           op.cancel();
-
-                           op.close();
-
-                        } catch (Exception var7x) {
-
-                        }
-
-                     }
-
-
-
-                     this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("relay_to_cone_"));
-
-                     // 漏了这两步会让 manualRelayInProgress/currentRelayPeer 悬空:
-                     // 导演每拍被 manualRelayInProgress 挡住, 下一次 fireAutoTurn 被静默吞
-                     this.clearRelayTracking();
-                     this.notifyRelayFailed();
-                     this.relayFailOrAuto(state, "voxlink.connection.relay_failed");
-
-                  }
-
-               }, 8L, TimeUnit.SECONDS);
-
-            }
-
-         }
-
-      }
-
+public void handleRelayNotify(String from, JsonObject data) {
+      RelayOrchestrator.handleRelayNotify(this, from, data);
    }
 
 
 
-   public void handleRelayDeclined(String from, JsonObject data) {
-
-      this.clearRelayTracking();
-
-      this.notifyRelayFailed();
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING) {
-
-         this.relayFailOrAuto(state, "voxlink.connection.relay_failed");
-
-      }
-
+public void handleRelayDeclined(String from, JsonObject data) {
+      RelayOrchestrator.handleRelayDeclined(this, from, data);
    }
 
 
@@ -4784,87 +3673,18 @@ public void startBirthdayPunchPhase2(
     * 本端在 relay_peers 里的身份。房客=自己的 clientId；房主没有 clientId，
     * 由服务端验过 hostToken 后派生 host-&lt;房间号&gt;（客户端自报该形态一律被拒，冒充不了别人）。
     */
-   String relayPeerId(RoomManager.RoomState state) {
-      String cid = state != null ? state.roomInfo.getClientId() : null;
-      if (cid != null && !cid.isEmpty()) {
-         return cid;
-      }
-      return state != null && state.roomInfo.isHost() ? "host-" + state.roomInfo.getCode() : null;
+String relayPeerId(RoomManager.RoomState state) {
+      return RelayOrchestrator.relayPeerId(this, state);
    }
 
-   void scheduleRelayRegistrationRenewal(RoomManager.RoomState state, String natType, String ip, int port) {
-
-      this.scheduler
-
-         .schedule(
-
-            () -> {
-
-               if (this.roomManager.currentRoom.get() == state && !this.connectionWon.get() && relayPeerId(state) != null) {
-
-                  if (ip != null && port > 0) {
-
-                     boolean relayOk = VoxLinkMod.getConfig().isRelayEnabled();
-
-                     this.signalingClient
-
-                        .registerRelayPeer(relayPeerId(state), state.roomInfo.getCode(), natType, ip, port, relayOk)
-
-                        .thenRun(() -> this.scheduleRelayRegistrationRenewal(state, natType, ip, port))
-
-                        .exceptionally(e -> {
-
-                           VoxLinkMod.LOGGER.debug("relay renew failed: {}", e.getMessage());
-
-                           return null;
-
-                        });
-
-                  }
-
-               }
-
-            },
-
-            60L,
-
-            TimeUnit.SECONDS
-
-         );
-
+void scheduleRelayRegistrationRenewal(RoomManager.RoomState state, String natType, String ip, int port) {
+      RelayOrchestrator.scheduleRelayRegistrationRenewal(this, state, natType, ip, port);
    }
 
 
 
-   public void handleRelayReady(String from, JsonObject data) {
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING) {
-
-         VoxLinkMod.LOGGER.info("[Relay] Received relay_ready from joiner {}, mark relay connected", from);
-
-         this.clearRelayTracking();
-
-         // 成功路径补: 与 handleRelayNotify 同步, 避免 AttemptingJoinScreen 误闪失败文字。
-         this.manualRelayInProgress = false;
-
-         this.relayProgressText = null;
-
-         this.manualRelayDeadline = 0L;
-
-         this.stopAllPunchingAfterHostBridge();
-
-         this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("hp_"));
-         if (this.connectionWon.compareAndSet(false, true)) {
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.relay.connected_via").withStyle(Text.Style.builder().color(Text.ChatFormat.YELLOW).build()));
-
-            state.roomInfo.setUsingRelay(true);
-
-         }
-
-      }
-
+public void handleRelayReady(String from, JsonObject data) {
+      RelayOrchestrator.handleRelayReady(this, from, data);
    }
 
 
@@ -4924,162 +3744,15 @@ public void startBirthdayPunchPhase2(
     * 房客点击"使用中继"：拉节点列表 → UDP 应用层测延迟 → 选最低延迟 → allocate → BIND →
     * 发 turn_alloc 交 host 票据 → 等 host turn_ready。全程异步，失败走 teardownTurn。
     */
-   public void triggerTurnRelay() {
-      this.turnReadyApplied.set(false);
-      if (this.turnInProgress || this.turnSession != null || this.manualRelayInProgress) {
-         return;
-      }
-      // 新 TURN 会话复位旧标记: turnSwitchedToP2p=true 会短路 20s turn_ready 兜底、
-      // 自cancel 后台升级监视器、让按钮永久失效(1.1.5 TURN 审计 P1-3)
-      this.turnSwitchedToP2p = false;
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-      if (state == null || state == RoomManager.PENDING || state.roomInfo.isHost()) {
-         return;
-      }
-
-      // 边缘情况：玩家点按钮的瞬间原打洞恰好打通——直连已赢，TURN 没有必要，直接放弃
-      if (this.connectionWon.get()) {
-         VoxLinkMod.LOGGER.info("[Turn] direct connection already won, skip TURN request");
-         return;
-      }
-
-      this.turnInProgress = true;
-      final int turnEpoch = this.turnSessionEpoch.get();
-      icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.turn_relay");
-      state.roomInfo.setConnectionMode(Text.translatable("voxlink.turn.connecting"));
-      SignalingClient sc = this.signalingClient;
-      CompletableFuture
-         .supplyAsync(() -> {
-            List<TurnRelayClient.NodeInfo> nodes = TurnRelayClient.fetchNodeList(sc).join();
-            if (nodes.isEmpty()) {
-               throw new IllegalStateException("NO_NODES");
-            }
-
-            List<TurnRelayClient.ProbeResult> probed = TurnRelayClient.probeNodes(nodes).join();
-            if (probed.isEmpty()) {
-               throw new IllegalStateException("UNREACHABLE");
-            }
-
-            // 探测全超时不直接判死（弱网丢包下探测包全丢很常见）：照常 allocate+bind，
-            // bind 自带重试，网络缓过来即可成功；真不通会以 BIND_FAILED_* 落到同一失败分支
-            if (probed.get(0).rttMs < 0) {
-               VoxLinkMod.LOGGER.warn("[Turn] all {} node probes timed out, attempting bind anyway (lossy network?)", probed.size());
-            } else {
-               VoxLinkMod.LOGGER.info("[Turn] guest picked node {} rtt={}ms (nodes={})", probed.get(0).node.id, probed.get(0).rttMs, nodes.size());
-               icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.turn_node", probed.get(0).rttMs);
-            }
-            return probed.get(0).node;
-         })
-         .thenCompose(node -> {
-            // 标准 TURN（双方 stdTurnV1 + 节点双栈 stdTurnPort>0）→ RFC 5766 流程；
-            // 任一端旧版/节点未启用 → 自定义协议 v1（现有路径，零行为变化）
-            if (node.stdTurnPort > 0 && ProtocolNegotiator.hostSupportsStdTurn(state.roomInfo)) {
-               VoxLinkMod.LOGGER.info("[Turn] node {} stdTurnPort={}, host stdTurnV1: using standard TURN (RFC 5766)", node.id, node.stdTurnPort);
-               return this.startStdTurnGuestFlow(state, sc, node).thenApply(ok -> (Object)ok);
-            }
-            icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.turn_allocating");
-            return TurnRelayClient.allocate(sc, state.roomInfo.getCode(), state.roomInfo.getClientId(), state.roomInfo.getToken(), node.id)
-               .thenCompose(alloc -> {
-            if (alloc == null) {
-               throw new IllegalStateException("ALLOC_FAILED");
-            }
-
-            // 竞态二次检查：列表+测延迟+allocate 耗费数秒，期间直连可能已打通
-            if (this.connectionWon.get() && this.turnSession == null) {
-               TurnRelayClient
-                  .release(sc, state.roomInfo.getCode(), state.roomInfo.getClientId(), state.roomInfo.getToken(), alloc.sessionIdHex)
-                  .exceptionally(e -> null);
-               throw new IllegalStateException("P2P_WON");
-            }
-
-            byte[] sid = new byte[16];
-
-            for (int i = 0; i < 16; i++) {
-               sid[i] = (byte)Integer.parseInt(alloc.sessionIdHex.substring(i * 2, i * 2 + 2), 16);
-            }
-
-            TurnRelayClient.TurnSession session =
-               new TurnRelayClient.TurnSession(alloc.sessionIdHex, sid, alloc.host, alloc.port, TurnRelayClient.ROLE_GUEST, alloc.guestTicket, alloc.expireSec);
-                        // 3 轮重试(每轮5发): 弱网单轮全丢很常见(实证 09-11 22:42 guest 5发全丢)
-            int code = TurnRelayClient.bindWithRetry(session, 3);
-            // code=4 对齐 host 容忍: 首发响应丢失重放被判冲突, 会话实际已绑定
-            if (code == TurnRelayClient.BIND_ROLE_CONFLICT) {
-               code = TurnRelayClient.BIND_OK;
-               VoxLinkMod.LOGGER.info("[Turn] guest bind ROLE_CONFLICT tolerated (session already bound)");
-            }
-            if (code != TurnRelayClient.BIND_OK) {
-               session.unbind();
-               throw new IllegalStateException("BIND_FAILED_" + code);
-            }
-
-            // 1.1.5 写回屏障: 35s 总超时触发的 teardown 已把 turnInProgress 置 false 时,
-            // 异步链在此中止写回(否则"复活"出无看门狗的孤儿会话, 审计 P1-1)
-            if (!this.turnInProgress || turnEpoch != this.turnSessionEpoch.get()) {
-               session.unbind();
-               VoxLinkMod.LOGGER.warn("[Turn] guest flow cancelled during bind (timeout teardown won), discard session");
-               throw new IllegalStateException("TURN_CANCELLED");
-            }
-
-            this.turnSession = session;
-            this.startTurnKeepalive(session);
-            VoxLinkMod.LOGGER.info("[Turn] guest session {} bound via {}:{}, sending turn_alloc", alloc.sessionIdHex.substring(0, 8), alloc.host, alloc.port);
-            UdpPath.Codec codec = new TurnRelayClient.TurnPathCodec(sid, TurnRelayClient.ROLE_GUEST, TurnRelayClient.ROLE_HOST);
-            ReliableUdpTransport transport = new ReliableUdpTransport(session.socket, session.endpoint(), codec);
-            // TURN 路径密钥现场重派生, 不沿用打洞阶段的 activePunchAuthKey:
-            // 打洞阶段密钥可能陈旧(重进房/join_request 被 defer), 沿用会与 host 互丢
-            // (实证 RBW6HX 1.1.4: TURN path up 后双方互丢 rudp-data, 30s 内链路死亡)
-            byte[] turnAuthKey = this.derivePunchAuthKey(state, null, true);
-            if (turnAuthKey != null) {
-               transport.setAuthKey(turnAuthKey);
-               this.activePunchAuthKey = turnAuthKey;
-               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport auth enabled (guest side)");
-            } else {
-               VoxLinkMod.LOGGER.info("[PunchAuth] TURN transport without auth (host caps missing)");
-            }
-            // 互操作降级开关: 对端为旧引擎(未武装密钥)时连续认证失败自动回明文, 不再互丢致死
-            transport.allowAuthDowngradeForInterop();
-            // TURN载具补接ICE重启回调
-            transport.setOnIceRestartRequested(this::triggerIceRestart);
-
-            this.turnTransport = transport;
-            this.turnPeerId = "host";
-
-            JsonObject data = new JsonObject();
-            data.addProperty("sessionId", alloc.sessionIdHex);
-            data.addProperty("host", alloc.host);
-            data.addProperty("port", alloc.port);
-            data.addProperty("ticket", alloc.hostTicket);
-            data.addProperty("expire", alloc.expireSec);
-            data.addProperty("clientId", state.roomInfo.getClientId());
-            // 显式声明本端 punchAuthV1 能力: host 侧 TURN 建链时据此直接派生密钥,
-            // 不再依赖 host 本地 peer 表(join_request 被 defer 时表项可能缺失/陈旧)
-            data.addProperty("punchAuth", ProtocolNegotiator.selfSupports(ProtocolNegotiator.CAP_PUNCH_AUTH_V1));
-            return sc
-               .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "turn_alloc", data, "host")
-               .thenApply(r -> session);
-               })
-               .thenApply(s -> (Object)s);
-         })
-                  // 35s: bind 升级为 3 轮重试后最长 ~16s, 加上列表/探测/allocate 需要更大总预算
-         .orTimeout(35L, TimeUnit.SECONDS)
-         .whenComplete((session, ex) -> {
-            if (ex != null || session == null) {
-               VoxLinkMod.LOGGER.warn("[Turn] guest flow failed: {}", ex != null ? ex.getMessage() : "null");
-               this.teardownTurn(state, "voxlink.turn.failed");
-            } else {
-               // host 数据面就绪回执有 20s 兜底（handleTurnReady 到达即 start+桥接）
-               // 保险 v2: 20s 先强制补拉一次再判死; 信令不健康时延寿重查, 总窗≤65s(≤90s 有界)
-               this.scheduler.schedule(() -> this.turnReadyWatchdog(state, 0), 20L, TimeUnit.SECONDS);
-            }
-         });
+public void triggerTurnRelay() {
+      RelayOrchestrator.triggerTurnRelay(this);
    }
 
    /**
     * 标准 TURN guest 流程（RFC 5766）：签 cred → Allocate → 发 turn_alloc（带本端 relay 地址）
     * → 等 host turn_ready（handleStdTurnReady 里 ChannelBind + 建 transport + 桥接）。
     */
-private CompletableFuture<Boolean> startStdTurnGuestFlow(RoomManager.RoomState state, SignalingClient sc, TurnRelayClient.NodeInfo node) {
+CompletableFuture<Boolean> startStdTurnGuestFlow(RoomManager.RoomState state, SignalingClient sc, TurnRelayClient.NodeInfo node) {
       return TurnCarrier.startStdTurnGuestFlow(this, state, sc, node);
    }
 
@@ -5114,7 +3787,7 @@ private void scheduleTurnReadyResend(
     * 每轮补拉+延寿 20s, 至多 2 轮, 65s 封顶后诚实 teardown。信令健康则 25s 即判死,
     * 死 host 的失败路径仅多等 5s。
     */
-private void turnReadyWatchdog(RoomManager.RoomState state, int round) {
+void turnReadyWatchdog(RoomManager.RoomState state, int round) {
       TurnCarrier.turnReadyWatchdog(this, state, round);
    }
 
@@ -5150,7 +3823,7 @@ public void handleTurnNack(String from, JsonObject data) {
    }
 
    /** TURN 会话保活：15s 一次 KEEPALIVE（节点 90s 无包踢角色）。句柄存字段，teardown 取消。 */
-private void startTurnKeepalive(TurnRelayClient.TurnSession session) {
+void startTurnKeepalive(TurnRelayClient.TurnSession session) {
       TurnCarrier.startTurnKeepalive(this, session);
    }
 
@@ -5210,7 +3883,7 @@ private void onBgDirectPath(RoomManager.RoomState state, DatagramSocket socket, 
    }
 
    /** TURN 模式下的玩家中继热备：punch 通中继玩家后仅保存备用线路，不建桥、不动连接状态。 */
-private void establishHotstandby(RoomManager.RoomState state, String relayIp, int relayPort) {
+void establishHotstandby(RoomManager.RoomState state, String relayIp, int relayPort) {
       TurnCarrier.establishHotstandby(this, state, relayIp, relayPort);
    }
 
@@ -5245,173 +3918,59 @@ public void cleanupTurnQuietly() {
    // TURN 优先（建立快）；中继传输建立 ≠ 成功——25s 真连接验证窗盯 MC 会话下行首包，
    // 验证失败判该道"建立但死"，无缝换道（joiner 本地桥/MC TCP 全程不动，只换承载 +
    // 重放上行日志；host 侧旧桥随旧传输死亡自拆，新桥已由 relay_accept 预先武装）。
-   private volatile ScheduledFuture<?> autoRelayDirectorTask;
+   volatile ScheduledFuture<?> autoRelayDirectorTask;
    /** 房间态未就绪时的挂载复查任务(就绪/会话终结/退房即自取消) */
-   private volatile ScheduledFuture<?> autoRelayArmWaiterTask;
-   private volatile ScheduledFuture<?> relayVerifyWatchdogTask;
+   volatile ScheduledFuture<?> autoRelayArmWaiterTask;
+   volatile ScheduledFuture<?> relayVerifyWatchdogTask;
    /** 验证后下行保鲜窗: 持续零下行判该道停滞 */
-   private static final long RELAY_DOWNLINK_FRESH_MS = 6000L;
-   private volatile boolean autoRelayTurnAttempted;
-   private volatile boolean autoRelayTurnUnhealthy;
-   private volatile boolean autoRelayPlayerAttempted;
+   static final long RELAY_DOWNLINK_FRESH_MS = 6000L;
+   volatile boolean autoRelayTurnAttempted;
+   volatile boolean autoRelayTurnUnhealthy;
+   volatile boolean autoRelayPlayerAttempted;
    /** 自动尝试进行中：中继失败路径走换道/回打洞而非失败屏。 */
    volatile boolean autoRelayMode;
    /** 触发时的持续重试轮（轮次推进→重置两条道的尝试位，新一轮打洞=新中继机会）。 */
-   private volatile int autoRelayArmedRound = -1;
+   volatile int autoRelayArmedRound = -1;
    /** 无缝换道挂起中的新承载（换道确认后热切，此前由旧道继续扛）。 */
-   private volatile ReliableUdpTransport pendingCarrierSwapTransport;
+   volatile ReliableUdpTransport pendingCarrierSwapTransport;
    /** pendingCarrierSwapTransport 的旧道形态（"turn"/"player"），换道成功后据此拆旧。 */
-   private volatile String carrierSwapFrom;
+   volatile String carrierSwapFrom;
 
-   public void startAutoRelayDirector(RoomManager.RoomState state) {
-      this.stopAutoRelayDirector();
-      this.autoRelayDirectorTask = this.scheduler.scheduleAtFixedRate(() -> {
-         try {
-            if (this.connectionWon.get() || this.roomManager.currentRoom.get() != state) {
-               this.stopAutoRelayDirector();
-               return;
-            }
-
-            // 已有任何中继在途/在跑：不重复触发
-            if (this.isTurnActive() || this.isTurnInProgress() || this.manualRelayInProgress) {
-               return;
-            }
-
-            long punchMs = this.punchUiStartMs > 0L ? System.currentTimeMillis() - this.punchUiStartMs : 0L;
-            if (punchMs < 10_000L) {
-               return;
-            }
-
-            // 零收包是所有档位的硬前提：收过对端包说明直连还有戏
-            if (this.sessionPunchRecvEver.get()) {
-               return;
-            }
-
-            boolean tierA = this.isDeadNatCombo(state) && punchMs >= 15_000L;
-            boolean tierB = (this.sessionPredictionOffCount.get() >= 10 || this.isSamePublicIpAsHost(state)) && punchMs >= 30_000L;
-            boolean tierC = punchMs >= 45_000L;
-            if (!(tierA || tierB || tierC)) {
-               return;
-            }
-
-            // 轮次推进时重置尝试位
-            int round = this.continuousRetryRound.get();
-            if (round != this.autoRelayArmedRound) {
-               this.autoRelayArmedRound = round;
-               this.autoRelayTurnAttempted = false;
-               this.autoRelayPlayerAttempted = false;
-            }
-
-            VoxLinkMod.LOGGER.info(
-               "[AutoRelay] evidence tier hit (punchMs={}, predOff={}, deadCombo={}, sameIp={}), auto relay",
-               punchMs, this.sessionPredictionOffCount.get(), this.isDeadNatCombo(state), this.isSamePublicIpAsHost(state)
-            );
-            this.fireAutoRelay(state);
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[AutoRelay] director tick error: {}", e.getMessage());
-         }
-      }, 1L, 1L, TimeUnit.SECONDS);
+public void startAutoRelayDirector(RoomManager.RoomState state) {
+      RelayOrchestrator.startAutoRelayDirector(this, state);
    }
 
-   public void stopAutoRelayDirector() {
-      ScheduledFuture<?> f = this.autoRelayDirectorTask;
-      if (f != null) {
-         f.cancel(false);
-         this.autoRelayDirectorTask = null;
-      }
+public void stopAutoRelayDirector() {
+      RelayOrchestrator.stopAutoRelayDirector(this);
    }
 
-   private boolean isDeadNatCombo(RoomManager.RoomState state) {
+   boolean isDeadNatCombo(RoomManager.RoomState state) {
       return StunNatClassifier.isDeadNatCombo(this, state);
    }
 
-   private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
+   boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
       return StunNatClassifier.isSamePublicIpAsHost(this, state);
    }
 
-   private void fireAutoRelay(RoomManager.RoomState state) {
-      if (!this.autoRelayTurnUnhealthy && !this.autoRelayTurnAttempted) {
-         this.fireAutoTurn(state);
-      } else if (!this.autoRelayPlayerAttempted) {
-         this.fireAutoPlayerRelay(state);
-      }
+void fireAutoRelay(RoomManager.RoomState state) {
+      RelayOrchestrator.fireAutoRelay(this, state);
    }
 
-   private void fireAutoTurn(RoomManager.RoomState state) {
-      this.autoRelayTurnAttempted = true;
-      this.autoRelayMode = true;
-      icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.auto_turn");
-      state.roomInfo.setConnectionMode(Text.translatable("voxlink.auto_relay.turn"));
-      VoxLinkMod.LOGGER.info("[AutoRelay] auto TURN fired");
-      this.triggerTurnRelay();
+void fireAutoTurn(RoomManager.RoomState state) {
+      RelayOrchestrator.fireAutoTurn(this, state);
    }
 
-   private void fireAutoPlayerRelay(RoomManager.RoomState state) {
-      this.autoRelayPlayerAttempted = true;
-      this.autoRelayMode = true;
-      icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.logui.auto_player_relay");
-      state.roomInfo.setConnectionMode(Text.translatable("voxlink.auto_relay.player"));
-      VoxLinkMod.LOGGER.info("[AutoRelay] auto player relay fired");
-      this.triggerManualRelay();
+void fireAutoPlayerRelay(RoomManager.RoomState state) {
+      RelayOrchestrator.fireAutoPlayerRelay(this, state);
    }
 
    /** 中继失败路径统一口：自动模式走换道/回打洞，手动(旧版对端触发等)保持失败屏。 */
-   private void relayFailOrAuto(RoomManager.RoomState state, String reasonKey) {
-      if (this.autoRelayMode) {
-         this.autoRelayFailoverOrEnd(state, reasonKey);
-      } else {
-         this.showConnectFailed(state, reasonKey);
-      }
+void relayFailOrAuto(RoomManager.RoomState state, String reasonKey) {
+      RelayOrchestrator.relayFailOrAuto(this, state, reasonKey);
    }
 
-   void autoRelayFailoverOrEnd(RoomManager.RoomState state, String reasonKey) {
-      if (state == null || state == RoomManager.PENDING) {
-         state = this.roomManager.currentRoom.get();
-      }
-      if (state == null || state == RoomManager.PENDING) {
-         this.autoRelayMode = false;
-         return;
-      }
-
-      if (!this.autoRelayTurnUnhealthy && !this.autoRelayTurnAttempted) {
-         this.fireAutoTurn(state);
-         return;
-      }
-      if (!this.autoRelayPlayerAttempted) {
-         this.fireAutoPlayerRelay(state);
-         return;
-      }
-
-      // 两条道都尽：不弹失败屏，交回打洞，诚实文案
-      this.autoRelayMode = false;
-      VoxLinkMod.LOGGER.warn("[AutoRelay] both relay paths exhausted ({}), back to punching", reasonKey);
-      icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.auto_relay_exhausted");
-      state.roomInfo.setConnectionMode(Text.translatable("voxlink.auto_relay.exhausted"));
-
-      // 旧注释声称"持续重试仍活着"——实际首桥建立时 stopAllPunchingAfterHostBridge 已杀打洞,
-      // 轮次随之冻结, 两道耗尽后会话静默挂死(无打洞/无中继/无失败屏)。房客侧诚实复位并复活:
-      // 桥已拆/从未建立才复位 connectionWon; 再走与打洞失败同一条 enterContinuousRetryRound 链
-      // (零收包终局/能力缺失由其内部分流); 复活不了至少给终态失败屏, 不再无声挂死
-      if (!state.roomInfo.isHost()) {
-         if (this.connectionWon.get() && !this.isTurnActive() && !this.isManualRelayInProgress()
-            && (P2PBridge.getJoinerCarrier() == null || !P2PBridge.getJoinerCarrier().isConnected())) {
-            this.connectionWon.set(false);
-         }
-
-         if (!this.connectionWon.get() && !this.isTurnActive() && !this.isTurnInProgress()
-            && !this.isManualRelayInProgress() && this.activeHolePunchers.isEmpty()
-            && !this.connectionCycleActive.get()) {
-            this.continuousRetryCancelled.set(false);
-            try {
-               if (!this.enterContinuousRetryRound(state)) {
-                  this.showConnectFailedFinal(state, reasonKey);
-               }
-            } catch (Exception reviveEx) {
-               VoxLinkMod.LOGGER.warn("[AutoRelay] revive punching failed: {}", String.valueOf(reviveEx));
-               this.showConnectFailedFinal(state, reasonKey);
-            }
-         }
-      }
+void autoRelayFailoverOrEnd(RoomManager.RoomState state, String reasonKey) {
+      RelayOrchestrator.autoRelayFailoverOrEnd(this, state, reasonKey);
    }
 
    /**
@@ -5420,81 +3979,17 @@ public void cleanupTurnQuietly() {
     * 连接期上行字节被 P2PBridge 记账（journal），换道后重放——MC 服务器侧旧会话
     * 本就未完成登录，重放一条完整握手无副作用。
     */
-   void armRelayVerifyWatchdog(RoomManager.RoomState state, boolean turnPath) {
-      this.cancelRelayVerifyWatchdog();
-      P2PBridge.resetJoinerDownlink();
-      final long armMs = System.currentTimeMillis();
-      this.relayVerifyWatchdogTask = this.scheduler.scheduleAtFixedRate(() -> {
-         try {
-            if (ConnectionHelper.isMcTrulyConnected()) {
-               this.cancelRelayVerifyWatchdog();
-               this.autoRelayMode = false;
-               P2PBridge.stopJoinerJournal();
-               if (!turnPath) {
-                  // 玩家中继模式：起 10 分钟后台直连探测（本轮仅探测+日志，
-                  // 无缝升级需 host 侧载具热切配套，随跨房虚拟加入迭代落地）
-                  this.startRelayBgProbe(state);
-               }
-               VoxLinkMod.LOGGER.info("[AutoRelay] relay verified ({} path, {}ms)", turnPath ? "turn" : "player", System.currentTimeMillis() - armMs);
-               return;
-            }
-
-            if (!P2PBridge.isRunning() || this.roomManager.currentRoom.get() != state) {
-               this.cancelRelayVerifyWatchdog();
-               return;
-            }
-
-            if (P2PBridge.hasJoinerDownlink()) {
-               // 验证后转下行保鲜盯守: 停滞即换道
-               if (!P2PBridge.isJoinerDownlinkFresh(RELAY_DOWNLINK_FRESH_MS)) {
-                  VoxLinkMod.LOGGER.warn("[AutoRelay] relay downlink stalled {}ms after first byte, failover", RELAY_DOWNLINK_FRESH_MS);
-                  this.cancelRelayVerifyWatchdog();
-                  this.autoRelayMode = false;
-                  P2PBridge.stopJoinerJournal();
-                  this.onRelayVerifyDead(state, turnPath);
-               }
-               return;
-            }
-
-            if (System.currentTimeMillis() - armMs >= 25_000L) {
-               this.cancelRelayVerifyWatchdog();
-               this.onRelayVerifyDead(state, turnPath);
-            }
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[AutoRelay] verify watchdog error: {}", e.getMessage());
-         }
-      }, 1L, 1L, TimeUnit.SECONDS);
+void armRelayVerifyWatchdog(RoomManager.RoomState state, boolean turnPath) {
+      RelayOrchestrator.armRelayVerifyWatchdog(this, state, turnPath);
    }
 
-   private void cancelRelayVerifyWatchdog() {
-      ScheduledFuture<?> f = this.relayVerifyWatchdogTask;
-      if (f != null) {
-         f.cancel(false);
-         this.relayVerifyWatchdogTask = null;
-      }
+void cancelRelayVerifyWatchdog() {
+      RelayOrchestrator.cancelRelayVerifyWatchdog(this);
    }
 
    /** 验证失败：该道"建立但死"。挂起无缝换道（新道建好→热切+重放→拆旧道）。 */
-   private void onRelayVerifyDead(RoomManager.RoomState state, boolean turnPath) {
-      VoxLinkMod.LOGGER.warn("[AutoRelay] relay path verified DEAD ({}), seamless failover starting", turnPath ? "turn" : "player");
-      icu.wuhui.voxlink.ui.UiLogBus.push(2, "voxlink.logui.auto_relay_dead");
-      this.carrierSwapFrom = turnPath ? "turn" : "player";
-      if (turnPath) {
-         this.autoRelayTurnUnhealthy = true;
-         if (!this.autoRelayPlayerAttempted) {
-            this.fireAutoPlayerRelay(state);
-         } else {
-            // 玩家中继也试过：诚实失败
-            this.teardownTurn(state, "voxlink.turn.failed");
-         }
-      } else {
-         if (!this.autoRelayTurnUnhealthy && !this.autoRelayTurnAttempted) {
-            this.fireAutoTurn(state);
-         } else {
-            this.stopRelay();
-            this.autoRelayFailoverOrEnd(state, "voxlink.relay.failed");
-         }
-      }
+void onRelayVerifyDead(RoomManager.RoomState state, boolean turnPath) {
+      RelayOrchestrator.onRelayVerifyDead(this, state, turnPath);
    }
 
    /**
@@ -5503,88 +3998,26 @@ public void cleanupTurnQuietly() {
     * 旧传输关闭后 host 旧桥自拆，新桥已由 relay_accept/turn_alloc 流程预先武装；
     * 早到的字节会在子通道接收缓冲里排队，host 新桥就绪即排干。
     */
-   boolean tryCarrierSwap(RoomManager.RoomState state, ReliableUdpTransport newTransport) {
-      String from = this.carrierSwapFrom;
-      if (from == null || !P2PBridge.isRunning() || P2PBridge.getJoinerCarrier() == null) {
-         return false;
-      }
-
-      this.carrierSwapFrom = null;
-      byte[] uplinkJournal = P2PBridge.takeJoinerUplinkJournal();
-      boolean swapped = P2PBridge.swapJoinerCarrier(newTransport, uplinkJournal);
-      if (!swapped) {
-         VoxLinkMod.LOGGER.warn("[AutoRelay] carrier swap failed (no local bridge?), falling back to fresh bridge");
-         return false;
-      }
-
-      if (uplinkJournal != null && uplinkJournal.length > 0) {
-         VoxLinkMod.LOGGER.info("[AutoRelay] uplink journal seeded {} bytes onto new carrier", uplinkJournal.length);
-      }
-
-      // 拆旧道
-      if ("turn".equals(from)) {
-         this.teardownTurnQuietly();
-      } else if ("player".equals(from)) {
-         this.stopRelay();
-      }
-
-      this.armRelayVerifyWatchdog(state, !"player".equals(from));
-      icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.auto_relay_swapped");
-      return true;
+boolean tryCarrierSwap(RoomManager.RoomState state, ReliableUdpTransport newTransport) {
+      return RelayOrchestrator.tryCarrierSwap(this, state, newTransport);
    }
 
    /** 换道成功后拆旧 TURN（不再触发失败文案/重连，桥已由新道承载）。 */
-private void teardownTurnQuietly() {
+void teardownTurnQuietly() {
       TurnCarrier.teardownTurnQuietly(this);
    }
 
-   public void stopAutoRelayAll() {
-      this.cancelAutoRelayDirectorArm();
-      this.stopAutoRelayDirector();
-      this.cancelRelayVerifyWatchdog();
-      this.cancelRelayBgProbe();
-      this.pendingCarrierSwapTransport = null;
-      this.carrierSwapFrom = null;
-      this.autoRelayMode = false;
-      this.autoRelayTurnAttempted = false;
-      this.autoRelayTurnUnhealthy = false;
-      this.autoRelayPlayerAttempted = false;
-      this.autoRelayArmedRound = -1;
+public void stopAutoRelayAll() {
+      RelayOrchestrator.stopAutoRelayAll(this);
    }
 
    /** startDualP2P 早于房间态就绪时：每秒复查挂载, 直到就绪/会话终结/退房(修 joinRoom>1s 整场落空)。 */
-   void scheduleAutoRelayDirectorArm() {
-      ScheduledFuture<?> old = this.autoRelayArmWaiterTask;
-      if (old != null) {
-         old.cancel(false);
-      }
-
-      this.autoRelayArmWaiterTask = this.scheduler.scheduleWithFixedDelay(() -> {
-         try {
-            RoomManager.RoomState state = this.roomManager.currentRoom.get();
-            if (state == null || this.connectionWon.get()) {
-               this.cancelAutoRelayDirectorArm();
-               return;
-            }
-
-            if (state != RoomManager.PENDING) {
-               this.cancelAutoRelayDirectorArm();
-               if (!state.roomInfo.isHost()) {
-                  this.startAutoRelayDirector(state);
-               }
-            }
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[AutoRelay] arm waiter error: {}", e.getMessage());
-         }
-      }, 1L, 1L, TimeUnit.SECONDS);
+void scheduleAutoRelayDirectorArm() {
+      RelayOrchestrator.scheduleAutoRelayDirectorArm(this);
    }
 
-   private void cancelAutoRelayDirectorArm() {
-      ScheduledFuture<?> f = this.autoRelayArmWaiterTask;
-      if (f != null) {
-         f.cancel(false);
-         this.autoRelayArmWaiterTask = null;
-      }
+void cancelAutoRelayDirectorArm() {
+      RelayOrchestrator.cancelAutoRelayDirectorArm(this);
    }
 
    /**
@@ -5593,397 +4026,24 @@ private void teardownTurnQuietly() {
     * host 侧为被中继会话热切直连载具需要跨房虚拟加入同一套配套，下迭代落地；
     * TURN 模式不受此限（startTurnBgMonitor 全功能协同+平滑切换）。
     */
-   private volatile ScheduledFuture<?> relayBgProbeTask;
+   volatile ScheduledFuture<?> relayBgProbeTask;
 
-   private void startRelayBgProbe(RoomManager.RoomState state) {
-      this.cancelRelayBgProbe();
-      final long deadlineMs = System.currentTimeMillis() + 600_000L;
-      this.relayBgProbeTask = this.scheduler.scheduleAtFixedRate(() -> {
-         try {
-            if (this.roomManager.currentRoom.get() != state || System.currentTimeMillis() > deadlineMs) {
-               this.cancelRelayBgProbe();
-               return;
-            }
-
-            ReliableUdpTransport relayLeg = this.activeUdpTransports.get("relay_cone");
-            if (relayLeg == null || !relayLeg.isConnected()) {
-               this.cancelRelayBgProbe();
-               return;
-            }
-
-            String ip = state.roomInfo.getHostMappedIp();
-            int port = state.roomInfo.getHostMappedPort();
-            if (ip == null || port <= 0) {
-               return;
-            }
-
-            UdpHolePuncher probe = new UdpHolePuncher();
-            this.applyPunchTemplate(probe);
-            try {
-               probe.createSocket();
-            } catch (Exception e) {
-               return;
-            }
-
-            probe
-               .punch(ip, port)
-               .orTimeout(5L, TimeUnit.SECONDS)
-               .thenAccept(r -> {
-                  if (r.isSuccess()) {
-                     VoxLinkMod.LOGGER.info("[Relay] bg direct probe: host answered — direct viable (seamless upgrade lands with cross-room iteration)");
-                  }
-                  probe.close();
-               })
-               .exceptionally(e -> {
-                  probe.close();
-                  return null;
-               });
-         } catch (Exception e) {
-            VoxLinkMod.LOGGER.debug("[Relay] bg probe tick error: {}", e.getMessage());
-         }
-      }, 30L, 30L, TimeUnit.SECONDS);
+void startRelayBgProbe(RoomManager.RoomState state) {
+      RelayOrchestrator.startRelayBgProbe(this, state);
    }
 
-   private void cancelRelayBgProbe() {
-      ScheduledFuture<?> f = this.relayBgProbeTask;
-      if (f != null) {
-         f.cancel(false);
-         this.relayBgProbeTask = null;
-      }
+void cancelRelayBgProbe() {
+      RelayOrchestrator.cancelRelayBgProbe(this);
    }
 
-   public void handleRelaySetup(String from, JsonObject data) {
-      // 候选者若本身就是房主，它没有"自家房主"可回执：只能按 relay_setup 里的 replyHostId
-      // 直投请求方房主（服务端把 to=host-<CODE> 落到对方房间并归一成该房房主的 pollerID）
-      RoomManager.RoomState setupState = this.roomManager.currentRoom.get();
-      final boolean setupAsHost = setupState != null
-         && setupState != RoomManager.PENDING
-         && setupState.roomInfo.isHost();
-      final String setupReplyTo = setupAsHost && data.has("replyHostId")
-         ? data.get("replyHostId").getAsString()
-         : "host";
-      if (setupAsHost && "host".equals(setupReplyTo)) {
-         VoxLinkMod.LOGGER.warn("[Relay] 被选为候选但对方未留 replyHostId（旧版房主），回执可能落到本房房主");
-      }
-
-
-      if (!VoxLinkMod.getConfig().isRelayEnabled()) {
-
-         RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-         if (state != null && state != RoomManager.PENDING) {
-
-            this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), setupAsHost, "relay_declined", new JsonObject(), setupAsHost ? setupReplyTo : from);
-
-         }
-
-      } else {
-
-         RoomManager.RoomState state0 = this.roomManager.currentRoom.get();
-
-         if (state0 != null && state0 != RoomManager.PENDING) {
-
-            String targetClientId = data.has("targetClientId") ? data.get("targetClientId").getAsString() : null;
-
-            String targetIp = data.has("targetIp") ? data.get("targetIp").getAsString() : null;
-
-            int targetPort = data.has("targetPort") ? data.get("targetPort").getAsInt() : 0;
-
-            if (targetIp != null && targetPort > 0) {
-
-               RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-               // 玩家中继 v2（2026-10-05）：被中继会话必须走本端"joiner"传输的 mux 子通道。
-               // v1 曾在此处复用任意已连接传输转发裸流——包括连到别的房间 host 的传输，
-               // 两条 MC 会话字节交错+InputStream 双读者互抢，从未真正可用（本地实验实证）。
-               // 旧版 host（未声明 relayMuxV1）或本端传输未 mux 化：一律婉拒，绝不走 v1 坏接线。
-               ReliableUdpTransport hostTransport = this.activeUdpTransports.get("joiner");
-
-               boolean muxUsable = hostTransport != null && hostTransport.isConnected() && hostTransport.isMuxEnabled();
-
-               if (!muxUsable) {
-
-                  if (!ProtocolNegotiator.hostSupportsRelayMux(state0.roomInfo)) {
-
-                     VoxLinkMod.LOGGER.info("[Relay] host lacks relayMuxV1, decline relay_setup (v1 relay data plane was broken, never wire it)");
-
-                  } else {
-
-                     VoxLinkMod.LOGGER.warn("[Relay] own transport to host not mux-enabled, decline relay_setup");
-
-                  }
-
-                  this.signalingClient.sendSignal(state0.roomInfo.getCode(), state0.roomInfo.getToken(), setupAsHost, "relay_declined", new JsonObject(), setupAsHost ? setupReplyTo : from);
-
-                  return;
-
-               }
-
-
-
-               if (hostTransport != null) {
-
-                  List<UdpHolePuncher> conePunchers = new ArrayList<>();
-
-                  AtomicBoolean coneWon = new AtomicBoolean(false);
-
-                  String fTargetIp = targetIp;
-
-                  int fTargetPort = targetPort;
-
-                  String fTargetClientId = targetClientId;
-
-                  ReliableUdpTransport fHostTransport = hostTransport;
-
-
-
-                  for (int i = 0; i < this.punchProfile().relaySocketCount; i++) {
-
-                     UdpHolePuncher cp = new UdpHolePuncher();
-
-                     this.applyPunchTemplate(cp);
-
-
-
-                     try {
-
-                        cp.createSocket();
-
-                     } catch (Exception e) {
-
-                        continue;
-
-                     }
-
-
-
-                     conePunchers.add(cp);
-
-                     this.activeHolePunchers.put("relay_to_sym_" + i, cp);
-
-                     int idx = i;
-
-                     cp.punchWithPortPrediction(fTargetIp, fTargetPort, this.punchProfile().coneBackupPortRange)
-
-                        .orTimeout(15L, TimeUnit.SECONDS)
-
-                        .thenAccept(
-
-                           result -> {
-
-                              if (!result.isSuccess()) {
-
-                                 PunchFailureClassifier.FailureReason reason = PunchFailureClassifier.classify(result);
-
-                                 this.lastPunchResult = result.withReason(reason);
-
-                                 this.activePunchParams = 
-
-                                    PunchTuner.nextParams(this.punchProfile(), this.localNatClass, this.remoteNatClass, 1, 8, reason, this.lastPunchResult)
-
-                                 ;
-
-                                 this.recordPunchFailure(reason, result.socketsReceivedPunch, result.socketsReceivedAck);
-
-                              } else {
-
-                                 DatagramSocket socket = result.getSuccessSocket();
-
-                                 if (!coneWon.compareAndSet(false, true)) {
-
-                                    try {
-
-                                       cp.close();
-
-                                    } catch (Exception var15x) {
-
-                                    }
-
-                                 } else {
-
-                                    VoxLinkMod.LOGGER.info("[Relay] Cone->Sym socket#{} punch success", idx);
-
-                                    cp.markSocketTransferred();
-
-
-
-                                    for (UdpHolePuncher op : conePunchers) {
-
-                                       if (op != cp) {
-
-                                          try {
-
-                                             op.cancel();
-
-                                             op.close();
-
-                                          } catch (Exception var16x) {
-
-                                          }
-
-                                       }
-
-                                    }
-
-
-
-                                    ReliableUdpTransport peerTransport = new ReliableUdpTransport(socket, new InetSocketAddress(fTargetIp, fTargetPort));
-
-                                    peerTransport.start();
-
-                                    this.activeUdpTransports.put(fTargetClientId != null ? fTargetClientId : "sym_relayed", peerTransport);
-
-                                    // v2：被中继会话挂到本端 joiner 传输的 mux 子通道（chan 1..7），
-                                    // 与自己（chan 0）的 MC 会话字节级隔离；任一腿 EOF/死亡由 RelayBridge 双向收尾
-                                    final int muxChan = this.allocateRelayMuxChan();
-                                    // key 带 clientId: chan 1..7 循环复用, 纯 chan key 会撞残留会话
-                                    final String relayKey = "muxrelay-" + muxChan + "-" + (fTargetClientId != null ? fTargetClientId : "sym");
-                                    RelayBridge.getInstance(this.scheduler).startRelay(
-                                       relayKey,
-                                       "host-chan" + muxChan,
-                                       fTargetClientId != null ? fTargetClientId : "sym",
-                                       new RelayBridge.RelayLeg() {
-                                          @Override
-                                          public java.io.InputStream input() {
-                                             return fHostTransport.getSubstreamInput(muxChan);
-                                          }
-
-                                          @Override
-                                          public java.io.OutputStream output() {
-                                             return fHostTransport.getSubstreamOutput(muxChan);
-                                          }
-
-                                          @Override
-                                          public void close() {
-                                             try {
-                                                fHostTransport.closeSubstream(muxChan);
-                                             } catch (Exception e) {
-                                             }
-                                          }
-                                       },
-                                       RelayBridge.legOf(peerTransport)
-                                    );
-
-                                    JsonObject reply = new JsonObject();
-
-                                    reply.addProperty("forClientId", fTargetClientId != null ? fTargetClientId : "sym");
-
-                                    reply.addProperty("chan", muxChan);
-
-                                    this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), setupAsHost, "relay_accept", reply, setupReplyTo);
-
-                                 }
-
-                              }
-
-                           }
-
-                        )
-
-                        .exceptionally(e -> {
-
-                           if (!coneWon.get()) {
-
-                              try {
-
-                                 cp.close();
-
-                              } catch (Exception var6x) {
-
-                              }
-
-
-
-                              this.activeHolePunchers.remove("relay_to_sym_" + idx);
-
-                           }
-
-
-
-                           return null;
-
-                        });
-
-                  }
-
-
-
-                  this.scheduler.schedule(() -> {
-
-                     if (!coneWon.get()) {
-
-                        VoxLinkMod.LOGGER.warn("[Relay] Cone->Sym relay punch timeout (8s)");
-
-
-
-                        for (UdpHolePuncher op : conePunchers) {
-
-                           try {
-
-                              op.cancel();
-
-                              op.close();
-
-                           } catch (Exception var7x) {
-
-                           }
-
-                        }
-
-
-
-                        this.activeHolePunchers.entrySet().removeIf(e -> e.getKey().startsWith("relay_to_sym_"));
-
-                        this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), setupAsHost, "relay_declined", new JsonObject(), setupReplyTo);
-
-                     }
-
-                  }, 8L, TimeUnit.SECONDS);
-
-               }
-
-            }
-
-         }
-
-      }
-
+public void handleRelaySetup(String from, JsonObject data) {
+      RelayOrchestrator.handleRelaySetup(this, from, data);
    }
 
 
 
-   public void onRelayDisconnected(String peerA, String peerB) {
-
-      VoxLinkMod.LOGGER.warn("[Relay] Relay disconnect notify: {}<->{}", peerA, peerB);
-
-      RoomManager.RoomState state = this.roomManager.currentRoom.get();
-
-      if (state != null && state != RoomManager.PENDING && !this.connectionWon.get()) {
-
-         if (this.currentRelayPeer.get() != null) {
-
-            this.failedRelayPeers.put(this.currentRelayPeer.get(), System.currentTimeMillis());
-
-         }
-
-
-
-         this.clearRelayTracking();
-
-         this.scheduler.schedule(() -> {
-
-            if (this.roomManager.currentRoom.get() == state && !this.connectionWon.get()) {
-
-               VoxLinkMod.LOGGER.info("[Relay] Auto switch to backup relay...");
-
-               this.tryRelay(state);
-
-            }
-
-         }, 500L, TimeUnit.MILLISECONDS);
-
-      }
-
+public void onRelayDisconnected(String peerA, String peerB) {
+      RelayOrchestrator.onRelayDisconnected(this, peerA, peerB);
    }
 
 
