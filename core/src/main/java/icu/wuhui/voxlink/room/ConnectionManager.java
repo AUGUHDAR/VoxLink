@@ -145,11 +145,11 @@ import java.util.function.BiConsumer;
 
 public class ConnectionManager {
 
-   private final RoomManager roomManager;
+   final RoomManager roomManager ;
 
    final SignalingClient signalingClient ;
 
-   private final ScheduledExecutorService scheduler;
+   final ScheduledExecutorService scheduler ;
    private static final int JOIN_TRANSIENT_MAX_ATTEMPTS = 3;
    private static final long[] JOIN_RETRY_BACKOFF_MS = new long[]{1500L, 3000L};
    private final java.util.concurrent.atomic.AtomicInteger joinAttemptGeneration = new java.util.concurrent.atomic.AtomicInteger();
@@ -158,11 +158,11 @@ public class ConnectionManager {
 
    private final ConcurrentHashMap<String, UdpHolePuncher> activeHolePunchers = new ConcurrentHashMap<>();
 
-   private final List<UdpForwardBridge> udpForwardBridges = new CopyOnWriteArrayList<>();
+   final List<UdpForwardBridge> udpForwardBridges = new CopyOnWriteArrayList<>();
 
-   private final ConcurrentHashMap<String, ReliableUdpTransport> activeUdpTransports = new ConcurrentHashMap<>();
+   final ConcurrentHashMap<String, ReliableUdpTransport> activeUdpTransports = new ConcurrentHashMap<>();
 
-   private final ConcurrentHashMap<String, ReliableUdpTransport> oldUdpTransports = new ConcurrentHashMap<>();
+   final ConcurrentHashMap<String, ReliableUdpTransport> oldUdpTransports = new ConcurrentHashMap<>();
 
 
 
@@ -203,11 +203,11 @@ public class ConnectionManager {
 
    // ================= TURN 中继（协议契约：SPECS/turn-protocol-v1.md） =================
    /** 本端 TURN 会话；null=未启用。发起方(guest)=ROLE_GUEST，自动配合方(host)=ROLE_HOST。 */
-   private volatile TurnRelayClient.TurnSession turnSession = null;
+   volatile TurnRelayClient.TurnSession turnSession = null;
    /** 标准 TURN 会话（RFC 5766，与 turnSession 互斥——同一会话只走一种协议栈）。 */
-   private volatile StdTurnClient.StdTurnSession stdTurnSession = null;
+   volatile StdTurnClient.StdTurnSession stdTurnSession = null;
    /** TURN 通路对端标识：guest 侧恒为 "host"，host 侧为 joiner 的 clientId。 */
-   private volatile String turnPeerId = null;
+   volatile String turnPeerId = null;
    /** TURN 数据面 transport（guest 侧建好后等 turn_ready 再 start）。 */
    private volatile ReliableUdpTransport turnTransport = null;
    /** TURN 全流程进行中（防重复触发 + 按钮置灰）。 */
@@ -235,11 +235,11 @@ public class ConnectionManager {
    /** TURN 会话代次: 拆会话路径递增; 异步写回前校验, 防 teardown 先到复活孤儿会话 */
    private final AtomicInteger turnSessionEpoch = new AtomicInteger(0);
 
-   private final AtomicBoolean connectionCycleActive = new AtomicBoolean(false);
+   final AtomicBoolean connectionCycleActive = new AtomicBoolean(false);
 
    private final AtomicBoolean reversePunchAttempted = new AtomicBoolean(false);
 
-   private final AtomicBoolean connectionWon = new AtomicBoolean(false);
+   final AtomicBoolean connectionWon = new AtomicBoolean(false);
    // turn_ready 应用门: 信令双线程(WS push/HTTP poll)并发分发时防双建桥
    private final AtomicBoolean turnReadyApplied = new AtomicBoolean(false);
    // 热备保活句柄: teardown 必须取消, 否则每次热备泄漏一个15s任务
@@ -303,21 +303,21 @@ public class ConnectionManager {
    final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
 
    private volatile List<Integer> lastHostMappedPorts;
-   private final java.util.concurrent.ConcurrentHashMap<String, ConnectionManager.HostPunchContext> hostPunchContexts = new java.util.concurrent.ConcurrentHashMap<>();
+   final java.util.concurrent.ConcurrentHashMap<String, ConnectionManager.HostPunchContext> hostPunchContexts = new java.util.concurrent.ConcurrentHashMap<>();
 
    private volatile boolean relayConnectedSignaled = false;
 
 
-   private volatile CompletableFuture<Void> dualVoxlinkBridgeFuture;
+   volatile CompletableFuture<Void> dualVoxlinkBridgeFuture ;
 
 
-   private volatile boolean dualRaceActive = false;
+   volatile boolean dualRaceActive = false;
 
-   private volatile boolean terracottaWon = false;
+   volatile boolean terracottaWon = false;
 
    private volatile boolean voxlinkWon = false;
 
-   private volatile boolean voxlinkSideDisabled = false;
+   volatile boolean voxlinkSideDisabled = false;
 
    private volatile CompletableFuture<Void> dualResultRef;
 
@@ -363,7 +363,7 @@ public class ConnectionManager {
    final AtomicInteger sessionPredictionOffCount = new AtomicInteger(0);
 
    // 幽灵连接防护：joiner的"connected"就绪信令先于host桥建立到达时暂存，startHostUdpPunchBridge时消费
-   private final Set<String> peerReadyConfirmations = ConcurrentHashMap.newKeySet();
+   final Set<String> peerReadyConfirmations = ConcurrentHashMap.newKeySet();
 
    // 打洞占用期间排队的join_request重放任务(按peer记录)，对端断开时作废
    private final ConcurrentHashMap<String, List<ScheduledFuture<?>>> queuedJoinReplays = new ConcurrentHashMap<>();
@@ -378,7 +378,7 @@ public class ConnectionManager {
    private volatile String lastPunchInfoPayload = "";
    private volatile long lastPunchInfoSendMs = 0L;
 
-   private volatile ConnectionManager.UdpSocketArray cachedUdpArray;
+   volatile UdpSocketArray cachedUdpArray ;
 
 
    private static volatile ConnectionManager instance;
@@ -442,274 +442,8 @@ public class ConnectionManager {
 
 
 
-   private ConnectionManager.UdpSocketArray getOrCreateUdpArray(int requiredSize, boolean isEasySym, List<String> stunUrls) {
-
-      long now = System.currentTimeMillis();
-
-      if (this.cachedUdpArray != null) {
-
-         if (this.cachedUdpArray.isReusable(requiredSize, isEasySym, now)) {
-
-            VoxLinkMod.LOGGER
-
-               .info(
-
-                  "[BirthdayPunch] Reuse cached socket array: {} sockets, age={}ms", this.cachedUdpArray.punchers.size(), now - this.cachedUdpArray.createTime
-
-               );
-
-            return this.cachedUdpArray;
-
-         }
-
-
-
-         this.cachedUdpArray.close();
-
-         this.cachedUdpArray = null;
-
-      }
-
-
-
-      List<UdpHolePuncher> punchers = new ArrayList<>();
-
-      List<StunProbe.PublicMappedAddress> addrs = new ArrayList<>();
-
-      List<CompletableFuture<Object[]>> futures = new ArrayList<>();
-
-      int socketStunCount = Math.max(1, Math.min(this.punchProfile().socketStunCount, stunUrls.size()));
-
-      List<String> raceUrls = stunUrls.size() > socketStunCount ? new ArrayList<>(stunUrls.subList(0, socketStunCount)) : stunUrls;
-
-      int createIntervalMs = Math.max(0, this.punchProfile().socketCreateIntervalMs);
-
-
-
-      for (int i = 0; i < requiredSize; i++) {
-
-         int idx = i;
-
-         UdpHolePuncher puncher = new UdpHolePuncher();
-
-         this.applyPunchTemplate(puncher);
-
-
-
-         try {
-
-            puncher.createSocket();
-
-         } catch (Exception e) {
-
-            VoxLinkMod.LOGGER.warn("[BirthdayPunch] Create socket #{} failed: {}", idx, e.getMessage());
-
-
-
-            try {
-
-               puncher.close();
-
-            } catch (Exception var27) {
-
-            }
-
-            continue;
-
-         }
-
-
-
-         futures.add(CompletableFuture.supplyAsync(() -> {
-
-            try {
-
-               StunProbe.PublicMappedAddress[] race = StunProbe.discoverMappedAddressRace(puncher.getSocket(), raceUrls, 1);
-
-               StunProbe.PublicMappedAddress addrx = race != null && race.length > 0 ? race[0] : null;
-
-               if (addrx != null) {
-
-                  return new Object[]{puncher, addrx};
-
-               }
-
-
-
-               try {
-
-                  puncher.close();
-
-               } catch (Exception var6x) {
-
-               }
-
-
-
-               return null;
-
-            } catch (Exception e) {
-
-               try {
-
-                  puncher.close();
-
-               } catch (Exception var5) {
-
-               }
-
-
-
-               return null;
-
-            }
-
-         }));
-
-         if (createIntervalMs > 0) {
-
-            try {
-
-               Thread.sleep(createIntervalMs);
-
-            } catch (InterruptedException ignored) {
-
-               Thread.currentThread().interrupt();
-
-               break;
-
-            }
-
-         }
-
-      }
-
-
-
-      int minRequired = Math.min(this.punchProfile().birthdaySocketCount, requiredSize);
-
-      AtomicInteger successCount = new AtomicInteger(0);
-
-      AtomicInteger doneCount = new AtomicInteger(0);
-
-      CompletableFuture<Void> gate = new CompletableFuture<>();
-
-
-
-      for (CompletableFuture<Object[]> f : futures) {
-
-         f.whenComplete((result, ex) -> {
-
-            doneCount.incrementAndGet();
-
-            if (result != null) {
-
-               successCount.incrementAndGet();
-
-            }
-
-
-
-            if (successCount.get() >= minRequired || doneCount.get() == futures.size()) {
-
-               gate.complete(null);
-
-            }
-
-         });
-
-      }
-
-
-
-      long gateTimeout = Math.max(5000L, (long)requiredSize * createIntervalMs + 3000L);
-
-
-
-      try {
-
-         gate.get(gateTimeout, TimeUnit.MILLISECONDS);
-
-      } catch (TimeoutException var24) {
-
-      } catch (InterruptedException e) {
-
-         Thread.currentThread().interrupt();
-
-      } catch (ExecutionException var26) {
-
-      }
-
-
-
-      for (int i = 0; i < futures.size(); i++) {
-
-         try {
-
-            Object[] result = futures.get(i).getNow(null);
-
-            if (result != null) {
-
-               UdpHolePuncher puncher = (UdpHolePuncher)result[0];
-
-               StunProbe.PublicMappedAddress addr = (StunProbe.PublicMappedAddress)result[1];
-
-               if (puncher.getSocket() != null && !puncher.getSocket().isClosed() && addr != null) {
-
-                  punchers.add(puncher);
-
-                  addrs.add(addr);
-
-               } else if (puncher.getSocket() != null && !puncher.getSocket().isClosed()) {
-
-                  try {
-
-                     puncher.close();
-
-                  } catch (Exception var23) {
-
-                  }
-
-               }
-
-            }
-
-         } catch (Exception var28) {
-
-         }
-
-      }
-
-
-
-      for (CompletableFuture<Object[]> f : futures) {
-
-         if (!f.isDone()) {
-
-            f.cancel(true);
-
-         }
-
-      }
-
-
-
-      if (punchers.isEmpty()) {
-
-         return null;
-
-      }
-
-
-
-      ConnectionManager.UdpSocketArray array = new ConnectionManager.UdpSocketArray(punchers, addrs, isEasySym);
-
-      this.cachedUdpArray = array;
-
-      VoxLinkMod.LOGGER.info("[BirthdayPunch] Create new socket array: {} sockets, easySym={}", punchers.size(), isEasySym);
-
-      return array;
-
+UdpSocketArray getOrCreateUdpArray(int requiredSize, boolean isEasySym, List<String> stunUrls) {
+      return TransportBridgeRegistry.getOrCreateUdpArray(this, requiredSize, isEasySym, stunUrls);
    }
 
 
@@ -768,7 +502,7 @@ public PunchProfile getActivePunchProfile() {
 
 
 
-private void applyPunchTemplate(UdpHolePuncher puncher) {
+   void applyPunchTemplate(UdpHolePuncher puncher) {
       PunchProfileCtrl.applyPunchTemplate(this, puncher);
    }
 
@@ -1306,26 +1040,8 @@ public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFut
 
 
 
-   public void clearActiveUdpTransports() {
-
-      for (ReliableUdpTransport t : this.activeUdpTransports.values()) {
-
-         try {
-
-            t.close();
-
-         } catch (Exception e) {
-
-            VoxLinkMod.LOGGER.debug("cleanup udp transport close error: {}", e.getMessage());
-
-         }
-
-      }
-
-
-
-      this.activeUdpTransports.clear();
-
+public void clearActiveUdpTransports() {
+      TransportBridgeRegistry.clearActiveUdpTransports(this);
    }
 
 
@@ -1387,18 +1103,14 @@ public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFut
 
 
 
-   public ReliableUdpTransport removeUdpTransport(String key) {
-
-      return this.activeUdpTransports.remove(key);
-
+public ReliableUdpTransport removeUdpTransport(String key) {
+      return TransportBridgeRegistry.removeUdpTransport(this, key);
    }
 
 
 
-   public boolean hasUdpTransport(String key) {
-
-      return key != null && this.activeUdpTransports.containsKey(key);
-
+public boolean hasUdpTransport(String key) {
+      return TransportBridgeRegistry.hasUdpTransport(this, key);
    }
 
 
@@ -8909,7 +8621,7 @@ public List<String> selectReachableStunGroup(int cycle) {
 
          .info("[BirthdayPunch] Parallel STUN {} sockets (target={}:{}, easySym={})", new Object[]{socketCount, fHostMappedIp, fHostMappedPort, isEasySym});
 
-      CompletableFuture.<ConnectionManager.UdpSocketArray>supplyAsync(() -> this.getOrCreateUdpArray(socketCount, isEasySym, this.stunUrlsProbedFirst()))
+      CompletableFuture.<UdpSocketArray>supplyAsync(() -> this.getOrCreateUdpArray(socketCount, isEasySym, this.stunUrlsProbedFirst()))
 
          .thenAccept(
 
@@ -12076,7 +11788,7 @@ public List<String> selectReachableStunGroup(int cycle) {
    }
 
    /** TURN 失败/超时清理：unbind + release + 状态复位；TURN 断开时热备转正（程序化重连自愈）。 */
-   private void teardownTurn(RoomManager.RoomState state, String failKey) {
+   void teardownTurn(RoomManager.RoomState state, String failKey) {
       this.turnSessionEpoch.incrementAndGet();
       this.turnReadyApplied.set(false);
       ScheduledFuture<?> hsk = this.hotstandbyKeepaliveTask;
@@ -12424,7 +12136,7 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
     * 连接期上行字节被 P2PBridge 记账（journal），换道后重放——MC 服务器侧旧会话
     * 本就未完成登录，重放一条完整握手无副作用。
     */
-   private void armRelayVerifyWatchdog(RoomManager.RoomState state, boolean turnPath) {
+   void armRelayVerifyWatchdog(RoomManager.RoomState state, boolean turnPath) {
       this.cancelRelayVerifyWatchdog();
       P2PBridge.resetJoinerDownlink();
       final long armMs = System.currentTimeMillis();
@@ -12507,7 +12219,7 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
     * 旧传输关闭后 host 旧桥自拆，新桥已由 relay_accept/turn_alloc 流程预先武装；
     * 早到的字节会在子通道接收缓冲里排队，host 新桥就绪即排干。
     */
-   private boolean tryCarrierSwap(RoomManager.RoomState state, ReliableUdpTransport newTransport) {
+   boolean tryCarrierSwap(RoomManager.RoomState state, ReliableUdpTransport newTransport) {
       String from = this.carrierSwapFrom;
       if (from == null || !P2PBridge.isRunning() || P2PBridge.getJoinerCarrier() == null) {
          return false;
@@ -13175,7 +12887,7 @@ private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
 
 
 
-      private void leaveRoomOnFailure(RoomManager.RoomState state) {
+      void leaveRoomOnFailure(RoomManager.RoomState state) {
    
       if (this.roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
    
@@ -13917,29 +13629,13 @@ private void escalateProfileForRound(int round) {
 
 
 
-   public void notifyDualVoxlinkBridge(boolean success) {
-
-      CompletableFuture<Void> f = this.dualVoxlinkBridgeFuture;
-
-      if (f != null) {
-
-         if (success) {
-
-            f.complete(null);
-
-         } else {
-
-            f.completeExceptionally(new RuntimeException("VoxLink桥建立失败"));
-
-         }
-
-      }
-
+public void notifyDualVoxlinkBridge(boolean success) {
+      TransportBridgeRegistry.notifyDualVoxlinkBridge(this, success);
    }
 
 
 
-   private boolean claimVoxlinkDualWin() {
+   boolean claimVoxlinkDualWin() {
 
       if (!this.dualRaceActive) {
 
@@ -14285,53 +13981,13 @@ private void escalateProfileForRound(int round) {
 
 
 
-   private void connectTerracottaToMC(String connectUrl, String roomCode) {
-
-      if (connectUrl != null && !connectUrl.isEmpty()) {
-
-         int localPort = parsePortFromUrl(connectUrl);
-
-         if (localPort <= 0) {
-
-            throw new RuntimeException("陶瓦connectUrl解析端口失败: " + connectUrl);
-
-         }
-
-
-
-         RoomInfo roomInfo = this.roomManager.getCurrentRoom();
-
-         if (roomInfo == null) {
-
-            roomInfo = this.roomManager.setupTerracottaGuestRoom(roomCode);
-
-         }
-
-
-
-         ConnectionState.transitionTo(ConnectionState.TRANSPORT_SETUP, "陶瓦guest-ok port=" + localPort);
-
-         roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_setup"));
-
-         // 陶瓦通道必须同样激活 handoff 宽限：P2P 的四条桥路径都调了，唯独这里漏了，
-         // 于是 GuestOK 后 26ms 到达的幽灵 leaveRoom 能把刚建好的桥拆掉（表现为 Connection refused）。
-         this.markConnectionEstablished();
-
-         ConnectionHelper.connectToServer(localPort, roomInfo);
-
-         VoxLinkMod.LOGGER.info("[DualP2P] Terracotta connect MC port={}", localPort);
-
-      } else {
-
-         throw new RuntimeException("陶瓦connectUrl为空 无法连接MC");
-
-      }
-
+private void connectTerracottaToMC(String connectUrl, String roomCode) {
+      TransportBridgeRegistry.connectTerracottaToMC(this, connectUrl, roomCode);
    }
 
 
 
-   private static int parsePortFromUrl(String url) {
+   static int parsePortFromUrl(String url) {
 
       if (url == null) {
 
@@ -14417,220 +14073,26 @@ private void escalateProfileForRound(int round) {
 
 
 
-   public void startUdpPunchBridge(RoomManager.RoomState state, ReliableUdpTransport transport) {
-
-      // 自动中继换道分支：旧道验证死后新道传输到达——热切换承载而非新建桥，
-      // 本地桥/MC TCP 不动，重放上行日志，MC 服务器侧看到一条完整全新握手
-      if (this.tryCarrierSwap(state, transport)) {
-         this.stopAllPunchingAfterHostBridge();
-         this.connectionCycleActive.set(false);
-         return;
-      }
-
-      if (!this.terracottaWon && !this.voxlinkSideDisabled) {
-
-         int localPort = P2PBridge.startUdpJoinerBridge(transport);
-
-         if (localPort > 0) {
-
-            if (this.dualRaceActive) {
-
-               this.claimVoxlinkDualWin();
-
-            }
-
-
-
-            this.stopAllPunchingAfterHostBridge();
-
-            this.connectionCycleActive.set(false);
-
-            ConnectionState.transitionTo(ConnectionState.CONNECTED, "Joiner桥接建立 port=" + localPort);
-
-            this.markConnectionEstablished();
-
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_setup"));
-
-            ConnectionHelper.connectToServer(localPort, state.roomInfo);
-
-            // 中继模式：起连接期上行日志（换道重放用）+ 25s 真连接验证窗
-            if (state.roomInfo.isUsingRelay() || this.isTurnActive()) {
-               P2PBridge.startJoinerJournal();
-               this.armRelayVerifyWatchdog(state, this.isTurnActive());
-            }
-
-            this.notifyDualVoxlinkBridge(true);
-
-         } else {
-
-            this.connectionCycleActive.set(false);
-
-            ConnectionHelper.resetConnecting();
-
-            ConnectionState.transitionTo(ConnectionState.FAILED, "桥接启动失败");
-
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.bridge_start_failed"), true);
-
-            this.sendDisconnectOnFailure(state);
-
-            this.notifyDualVoxlinkBridge(false);
-
-            if (!this.dualRaceActive) {
-
-               this.leaveRoomOnFailure(state);
-
-            }
-
-         }
-
-      } else {
-
-         try {
-
-            transport.close();
-
-         } catch (Exception var6) {
-
-         }
-
-
-
-         this.notifyDualVoxlinkBridge(false);
-
-      }
-
+public void startUdpPunchBridge(RoomManager.RoomState state, ReliableUdpTransport transport) {
+      TransportBridgeRegistry.startUdpPunchBridge(this, state, transport);
    }
 
 
 
-   public void startHostUdpPunchBridge(RoomManager.RoomState state, String clientId, ReliableUdpTransport transport) {
-
-      int mcPort = state.roomInfo.getHostPort();
-
-      // 幽灵连接防护：punch成功只证明"对端→本端"单向可达(host收到joiner的PUNCH不代表host发出的包能到joiner，
-      // 实锤案例recvAck=0挂假连接61秒)。此处不再立即宣布CONNECTED：
-      // - 若此前已收到该client的"connected"就绪信令(双向证据)，立即补转CONNECTED；
-      // - 否则保持TRANSPORT_SETUP与等待文案，等RoomManager.handleConnected收到就绪信令后再确认。
-      // 兜底：若30s内桥上无首包且未确认，P2PBridge首包watchdog会自动requestIceRestart重打。
-
-      boolean peerReadyBeforeBridge = clientId != null && this.peerReadyConfirmations.remove(clientId);
-
-      if (!peerReadyBeforeBridge && ConnectionState.getCurrent() != ConnectionState.CONNECTED) {
-
-         state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.await_peer_ready"));
-
-      }
-
-      this.stopAllPunchingAfterHostBridge();
-
-      P2PBridge.startUdpHostBridgeForClient(clientId, transport, mcPort, () -> {
-
-         ReliableUdpTransport t = this.activeUdpTransports.remove(clientId);
-
-         if (t != null) {
-
-            try {
-
-               t.close();
-
-            } catch (Exception var5) {
-
-            }
-
-         }
-
-
-
-         if (this.roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
-
-            VoxLinkMod.LOGGER.warn("[HostBridge] client={} bridge disconnected, reset connectionWon for host re-punch", clientId);
-
-            LogUploadManager.onDisconnected();
-
-            // 断的是 TURN 桥：立即释放 TURN 会话。否则 turnSession 残留会静默吞掉
-            // 该房客后续重试的 turn_alloc，中继在本房间内永久失效
-            if ((this.turnSession != null || this.stdTurnSession != null) && clientId.equals(this.turnPeerId)) {
-
-               VoxLinkMod.LOGGER.info("[Turn] host bridge down for {}, releasing TURN session", clientId);
-
-               this.teardownTurn(state, null);
-
-            }
-
-            this.connectionWon.set(false);
-            this.connectionCycleActive.set(false);
-            this.hostPunchContexts.remove(clientId);
-            ConnectionState.transitionTo(ConnectionState.IDLE, "Host桥断开 client=" + clientId);
-
-            state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.punching"));
-
-         }
-
-      });
-
-      // 桥已起、且joiner就绪信令先到：现在补转CONNECTED（双向证据齐备）
-
-      if (peerReadyBeforeBridge) {
-
-         this.finishHostBridgeConnect(state, clientId);
-
-      }
-
+public void startHostUdpPunchBridge(RoomManager.RoomState state, String clientId, ReliableUdpTransport transport) {
+      TransportBridgeRegistry.startHostUdpPunchBridge(this, state, clientId, transport);
    }
 
 
 
    // ===== 幽灵连接防护：host侧进入CONNECTED需要对端就绪确认(joiner桥建立后发送的"connected"信令) =====
 
-   public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
-
-      if (state == null || state == RoomManager.PENDING || !state.roomInfo.isHost() || from == null) {
-
-         return;
-
-      }
-
-      if (this.activeUdpTransports.containsKey(from) || P2PBridge.hasActiveBridgePairs()) {
-
-         this.finishHostBridgeConnect(state, from);
-
-      } else {
-
-         // 就绪信令先于host桥建立到达：暂存，待startHostUdpPunchBridge时消费
-
-         this.peerReadyConfirmations.add(from);
-
-         VoxLinkMod.LOGGER.info("[RoomManager] Peer {} ready signal arrived before host bridge, defer confirm", from);
-
-      }
-
+public void onPeerBridgeReady(RoomManager.RoomState state, String from) {
+      TransportBridgeRegistry.onPeerBridgeReady(this, state, from);
    }
 
-   private void finishHostBridgeConnect(RoomManager.RoomState state, String clientId) {
-
-      if (state == null || state == RoomManager.PENDING || clientId == null) {
-
-         return;
-
-      }
-
-      if (this.roomManager.currentRoom.get() != state
-         || !(this.activeUdpTransports.containsKey(clientId) || P2PBridge.hasActiveBridgePairs())) {
-
-         VoxLinkMod.LOGGER.warn("[ConnState] Skip host CONNECTED confirm client={} (room/transport changed)", clientId);
-
-         return;
-
-      }
-
-      if (ConnectionState.getCurrent() != ConnectionState.CONNECTED) {
-
-         ConnectionState.transitionTo(ConnectionState.CONNECTED, "Host桥接就绪(对端就绪确认) client=" + clientId);
-
-         state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.connected"));
-
-      }
-
+   void finishHostBridgeConnect(RoomManager.RoomState state, String clientId) {
+      TransportBridgeRegistry.finishHostBridgeConnect(this, state, clientId);
    }
 
 
@@ -15033,7 +14495,7 @@ private String filterAddressFamilyCandidate(String ip, int port, String tag) {
 
 
    /** host 视角查某个 joiner 的声明能力（找不到 peer 或无能力表 = false）。 */
-   private boolean peerSupportsCapability(RoomManager.RoomState state, String clientId, String capability) {
+   boolean peerSupportsCapability(RoomManager.RoomState state, String clientId, String capability) {
       if (state == null || clientId == null) {
          return false;
       }
@@ -15041,64 +14503,19 @@ private String filterAddressFamilyCandidate(String ip, int port, String tag) {
       return peer != null && peer.capabilities != null && peer.capabilities.contains(capability);
    }
 
-   public void putTransportWithIcePool(String key, ReliableUdpTransport transport) {
-      ReliableUdpTransport old = this.activeUdpTransports.put(key, transport);
-
-      if (old != null) {
-
-         String oldKey = key + "_old";
-
-         this.oldUdpTransports.put(oldKey, old);
-
-         this.scheduler.schedule(() -> {
-
-            ReliableUdpTransport t = this.oldUdpTransports.remove(oldKey);
-
-            if (t != null) {
-
-               try {
-
-                  t.close();
-
-               } catch (Exception var4x) {
-
-               }
-
-            }
-
-         }, 12L, TimeUnit.SECONDS);
-
-      }
-
+public void putTransportWithIcePool(String key, ReliableUdpTransport transport) {
+      TransportBridgeRegistry.putTransportWithIcePool(this, key, transport);
    }
 
 
 
-   public void sendConfirmPackets(DatagramSocket socket, InetSocketAddress addr) {
-
-      try {
-
-         byte[] data = new byte[]{86, 76, 2};
-
-         DatagramPacket pkt = new DatagramPacket(data, data.length, addr.getAddress(), addr.getPort());
-
-         socket.send(pkt);
-
-         socket.send(pkt);
-
-         socket.send(pkt);
-
-      } catch (Exception e) {
-
-         VoxLinkMod.LOGGER.warn("[Transport] Ack packet send failed: {}", e.getMessage());
-
-      }
-
+public void sendConfirmPackets(DatagramSocket socket, InetSocketAddress addr) {
+      TransportBridgeRegistry.sendConfirmPackets(this, socket, addr);
    }
 
 
 
-   public void establishUdpTransport(
+public void establishUdpTransport(
 
       RoomManager.RoomState state,
 
@@ -15114,140 +14531,20 @@ private String filterAddressFamilyCandidate(String ip, int port, String tag) {
 
       String clientId
 
-   ) throws Exception {
-
-      puncher.waitForRecvThreadExit();
-
-      InetSocketAddress remoteAddr = puncher.getActualRemoteAddress();
-
-      if (remoteAddr == null) {
-
-         remoteAddr = fallbackAddr;
-
-      }
-
-
-
-      this.sendConfirmPackets(socket, remoteAddr);
-
-      ReliableUdpTransport transport = new ReliableUdpTransport(socket, remoteAddr);
-
-      transport.setOnIceRestartRequested(this::triggerIceRestart);
-
-      // punchAuthV1：直连数据面与打洞控制面使用同一派生密钥（双方声明能力时启用）
-
-      byte[] punchAuthKey = this.derivePunchAuthKey(state, isHost ? clientId : null, !isHost);
-
-      if (punchAuthKey != null) {
-
-         transport.setAuthKey(punchAuthKey);
-
-         VoxLinkMod.LOGGER.info("[PunchAuth] Transport auth enabled ({})", isHost ? "host side" : "joiner side");
-
-      }
-
-      // relayMuxV1（玩家中继 v2 数据面）：双方都声明该能力时传输进入 mux 模式，
-      // 之后该传输可承载中继子通道（chan 1..7）与本端自有会话（chan 0）字节级隔离。
-      // 必须在 start() 前启用（mux 改变线上载荷格式，不允许中途切换）。
-      if (ProtocolNegotiator.selfSupports(ProtocolNegotiator.CAP_RELAY_MUX_V1)) {
-         boolean peerMux = isHost
-            ? this.peerSupportsCapability(state, clientId, ProtocolNegotiator.CAP_RELAY_MUX_V1)
-            : ProtocolNegotiator.hostSupportsRelayMux(state.roomInfo);
-         if (peerMux) {
-            transport.enableMux();
-            VoxLinkMod.LOGGER.info("[RelayMux] transport '{}' mux enabled ({} side)", transportKey, isHost ? "host" : "joiner");
-         }
-      }
-
-
-
-      this.putTransportWithIcePool(transportKey, transport);
-
-      // 连接成功事件: 稳定(2分钟)后不上传; 窗口内掉线仍会上传(失败诊断)
-
-      icu.wuhui.voxlink.ui.UiLogBus.push(1, "voxlink.logui.success");
-      LogUploadManager.onConnected();
-
-      if (!isHost) {
-
-         this.connectionCycleActive.set(false);
-
-         ConnectionHelper.resetConnecting();
-
-      }
-
-
-
-      transport.start();
-
-      if (isHost) {
-
-         ConnectionState.transitionTo(ConnectionState.TRANSPORT_SETUP, "Host ReliableUdp启动 client=" + clientId);
-
-         this.startHostUdpPunchBridge(state, clientId, transport);
-
-      } else {
-
-         ConnectionState.transitionTo(ConnectionState.TRANSPORT_SETUP, "Joiner ReliableUdp启动");
-
-         this.signalingClient.sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "connected", new JsonObject(), "host");
-
-         this.startUdpPunchBridge(state, transport);
-
-      }
-
-
-
-      this.startVoiceForwardBridge(transport, isHost);
-
+   ) {
+      TransportBridgeRegistry.establishUdpTransport(this, state, socket, puncher, fallbackAddr, transportKey, isHost, clientId);
    }
 
 
 
-   private void startVoiceForwardBridge(ReliableUdpTransport transport, boolean isHost) {
-
-      try {
-
-         // host 侧本机语音/服务器已占端口，用出站中继；joiner 侧绑端口收本地客户端
-
-         UdpForwardBridge bridge = new UdpForwardBridge(transport, isHost, 24454, 25565);
-
-         if (bridge.isActive()) {
-
-            this.udpForwardBridges.add(bridge);
-
-         } else {
-
-            bridge.close();
-
-         }
-
-      } catch (Exception e) {
-
-         VoxLinkMod.LOGGER.warn("[UdpForward] voice relay failed to start: {}", e.getMessage());
-
-      }
-
+void startVoiceForwardBridge(ReliableUdpTransport transport, boolean isHost) {
+      TransportBridgeRegistry.startVoiceForwardBridge(this, transport, isHost);
    }
 
 
 
-   private void closeVoiceForwardBridges() {
-
-      for (UdpForwardBridge b : this.udpForwardBridges) {
-
-         try {
-
-            b.close();
-
-         } catch (Exception e) {
-
-         }
-
-      }
-
-      this.udpForwardBridges.clear();
-
+void closeVoiceForwardBridges() {
+      TransportBridgeRegistry.closeVoiceForwardBridges(this);
    }
 
 
@@ -15310,107 +14607,7 @@ private String filterAddressFamilyCandidate(String ip, int port, String tag) {
 
 
 
-   private static class UdpSocketArray {
 
-      final List<UdpHolePuncher> punchers;
-
-      final List<StunProbe.PublicMappedAddress> mappedAddrs;
-
-      final long createTime;
-
-      final boolean isEasySym;
-
-
-
-      UdpSocketArray(List<UdpHolePuncher> punchers, List<StunProbe.PublicMappedAddress> mappedAddrs, boolean isEasySym) {
-
-         this.punchers = new ArrayList<>(punchers);
-
-         this.mappedAddrs = new ArrayList<>(mappedAddrs);
-
-         this.createTime = System.currentTimeMillis();
-
-         this.isEasySym = isEasySym;
-
-      }
-
-
-
-      boolean isReusable(int requiredSize, boolean requiredEasySym, long now) {
-
-         if (now - this.createTime >= 30000L) {
-
-            return false;
-
-         }
-
-
-
-         if (this.isEasySym != requiredEasySym) {
-
-            return false;
-
-         }
-
-
-
-         if (this.punchers.size() < requiredSize) {
-
-            return false;
-
-         }
-
-
-
-         for (UdpHolePuncher p : this.punchers) {
-
-            if (p.getSocket() == null || p.getSocket().isClosed()) {
-
-               return false;
-
-            }
-
-
-
-            if (p.isPunching()) {
-
-               return false;
-
-            }
-
-         }
-
-
-
-         return true;
-
-      }
-
-
-
-      void close() {
-
-         for (UdpHolePuncher p : this.punchers) {
-
-            try {
-
-               p.close();
-
-            } catch (Exception var4) {
-
-            }
-
-         }
-
-
-
-         this.punchers.clear();
-
-         this.mappedAddrs.clear();
-
-      }
-
-   }
 
    public void handleTcpPunchInfo(String from, JsonObject data) {
 
