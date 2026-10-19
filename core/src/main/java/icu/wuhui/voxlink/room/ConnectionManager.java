@@ -298,9 +298,9 @@ public class ConnectionManager {
 
    private volatile int connectionTimeoutSec;
 
-   private volatile StunProbe.ProbeResult stunProbeResult;
+   volatile StunProbe.ProbeResult stunProbeResult;
 
-   private final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
+   final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
 
    private volatile List<Integer> lastHostMappedPorts;
    private final java.util.concurrent.ConcurrentHashMap<String, ConnectionManager.HostPunchContext> hostPunchContexts = new java.util.concurrent.ConcurrentHashMap<>();
@@ -331,9 +331,9 @@ public class ConnectionManager {
 
    private volatile PunchResult lastPunchResult;
 
-   private volatile NatClass localNatClass = NatClass.UNKNOWN;
+   volatile NatClass localNatClass = NatClass.UNKNOWN;
 
-   private volatile NatClass remoteNatClass = NatClass.UNKNOWN;
+   volatile NatClass remoteNatClass = NatClass.UNKNOWN;
 
    private volatile ScenarioTier.Tier scenarioTier = ScenarioTier.Tier.NORMAL;
 
@@ -922,16 +922,8 @@ public class ConnectionManager {
     * 每轮先白烧 4×800ms（实测 FJXMKG 每轮拖慢约 10s）；用探测赢家前置可即答。
     */
 
-   private List<String> stunUrlsProbedFirst() {
-      List<String> urls = new ArrayList<>(StunDetector.getAllStunUrls());
-      StunProbe.ProbeResult probe = this.stunProbeResult;
-      if (probe != null && probe.reachableStunUrls != null) {
-         for (String u : probe.reachableStunUrls) {
-            urls.remove(u);
-            urls.add(0, u);
-         }
-      }
-      return urls;
+private List<String> stunUrlsProbedFirst() {
+      return StunNatClassifier.stunUrlsProbedFirst(this);
    }
 
 
@@ -999,10 +991,8 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
 
-   public StunProbe.ProbeResult getStunProbeResult() {
-
-      return this.stunProbeResult;
-
+public StunProbe.ProbeResult getStunProbeResult() {
+      return StunNatClassifier.getStunProbeResult(this);
    }
 
 
@@ -1083,18 +1073,14 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
 
-   public void setStunProbeResult(StunProbe.ProbeResult result) {
-
-      this.stunProbeResult = result;
-
+public void setStunProbeResult(StunProbe.ProbeResult result) {
+      StunNatClassifier.setStunProbeResult(this, result);
    }
 
 
 
-   public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFutureRef() {
-
-      return this.stunProbeFutureRef;
-
+public AtomicReference<CompletableFuture<StunProbe.ProbeResult>> getStunProbeFutureRef() {
+      return StunNatClassifier.getStunProbeFutureRef(this);
    }
 
 
@@ -6239,18 +6225,9 @@ private volatile long lastProfileSwitchMs = 0L;
    private void clearHostPunchContexts() {
       this.hostPunchContexts.clear();
    }
-
-   private static int natRank(NatClass c) {
-      switch (c) {
-         case CONE:
-            return 1;
-         case EASY_SYM:
-            return 2;
-         case HARD_SYM:
-            return 3;
-         default:
-            return 0;
-      }
+ 
+   static int natRank(NatClass c) {
+      return StunNatClassifier.natRank(c);
    }
 
    private boolean applyLocalNatClass(NatClass next, String reason) {
@@ -6277,15 +6254,9 @@ private volatile long lastProfileSwitchMs = 0L;
          return true;
       }
    }
-
+ 
    private NatClass classifyLocalNat() {
-
-      return this.stunProbeResult != null && this.stunProbeResult.natType != null
-
-         ? NatClass.fromStunProbeResult(this.stunProbeResult.natType)
-
-         : NatClass.UNKNOWN;
-
+      return StunNatClassifier.classifyLocalNat(this);
    }
 
 
@@ -6294,67 +6265,20 @@ private volatile long lastProfileSwitchMs = 0L;
    // 为什么不直接把自报串接进 classifyRemoteNat：那是别人客户端给的数，一旦谎报 full_cone，
    // recommendProfile 就会从 AGGRESSIVE 掉到 FAST_LANE（6s 超时 / 15 轮 / range 20）—— 实打实的连通率退步。
    // 先让 1.1.9 自己量出"报对 / 报错"的比例，再决定要不要按"观测优先、自报只兜底"接进去。
-   private final Set<String> remoteNatMismatchLogged = new HashSet<>();
-
+   final Set<String> remoteNatMismatchLogged = new HashSet<>();
+ 
    private NatClass classifyRemoteNatLogged(RoomManager.RoomState state) {
-      NatClass observed = this.classifyRemoteNat(state);
-      if (state != null && state.roomInfo != null) {
-         NatClass reported = reportedNatClass(state.roomInfo.getNatType());
-         if (reported != observed && this.remoteNatMismatchLogged.add(reported + "->" + observed)) {
-            // 同一 (自报->观测) 组合本局只报一次：classifyRemoteNat 在探测/轮询/反向打洞多处被调
-            VoxLinkMod.LOGGER.info(
-               "[NatClass] remote report differs: reported={} (raw={}) observed={} — 模板选择仍按观测",
-               new Object[]{reported, state.roomInfo.getNatType(), observed}
-            );
-         }
-      }
-
-      return observed;
+      return StunNatClassifier.classifyRemoteNatLogged(this, state);
    }
 
    // 只认无歧义的探测值。open/moderate/strict 这类早期 API 串一律算 UNKNOWN：
-   // moderate 既可能是受限锥也可能是对称，猜错方向的代价由打洞策略承担，不在这里替它下结论。
-   private static NatClass reportedNatClass(String raw) {
-      if (raw != null && !raw.isEmpty()) {
-         String k = raw.toLowerCase(java.util.Locale.ROOT);
-         if (k.endsWith("_cone")) {
-            return NatClass.CONE;
-         } else if (k.startsWith("symmetric_easy")) {
-            return NatClass.EASY_SYM;
-         } else if (k.equals("symmetric")) {
-            return NatClass.HARD_SYM;
-         } else {
-            return NatClass.UNKNOWN;
-         }
-      } else {
-         return NatClass.UNKNOWN;
-      }
+   // moderate 既可能是受限锥也可能是对称，猜错方向的代价由打洞策略承担，不在这里替它下结论。 
+   static NatClass reportedNatClass(String raw) {
+      return StunNatClassifier.reportedNatClass(raw);
    }
-
-   private NatClass classifyRemoteNat(RoomManager.RoomState state) {
-
-      if (state != null && state.roomInfo != null) {
-
-         boolean hostSym = state.roomInfo.isHostSymmetric();
-
-         boolean hostEasySym = state.roomInfo.isHostEasySym();
-
-         if (hostSym) {
-
-            return hostEasySym ? NatClass.EASY_SYM : NatClass.HARD_SYM;
-
-         } else {
-
-            return NatClass.UNKNOWN;
-
-         }
-
-      } else {
-
-         return NatClass.UNKNOWN;
-
-      }
-
+ 
+   NatClass classifyRemoteNat(RoomManager.RoomState state) {
+      return StunNatClassifier.classifyRemoteNat(this, state);
    }
 
 
@@ -9157,22 +9081,8 @@ private volatile long lastProfileSwitchMs = 0L;
 
 
 
-   public List<String> selectReachableStunGroup(int cycle) {
-
-      if (this.stunProbeResult != null && !this.stunProbeResult.reachableStunUrls.isEmpty()) {
-
-         List<String> reachable = this.stunProbeResult.reachableStunUrls;
-
-         int index = cycle % reachable.size();
-
-         return List.of(reachable.get(index));
-
-      } else {
-
-         return StunDetector.getStunGroup(cycle % StunDetector.getStunGroupCount());
-
-      }
-
+public List<String> selectReachableStunGroup(int cycle) {
+      return StunNatClassifier.selectReachableStunGroup(this, cycle);
    }
 
 
@@ -12668,19 +12578,12 @@ private volatile long lastProfileSwitchMs = 0L;
       }
    }
 
-   private boolean isDeadNatCombo(RoomManager.RoomState state) {
-      boolean localSym = this.stunProbeResult != null && this.stunProbeResult.natType.isSymmetric();
-      boolean remoteSym = state != null && state.roomInfo != null && state.roomInfo.isHostSymmetric();
-      return localSym && remoteSym;
+private boolean isDeadNatCombo(RoomManager.RoomState state) {
+      return StunNatClassifier.isDeadNatCombo(this, state);
    }
 
-   private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
-      if (state == null || state.roomInfo == null) {
-         return false;
-      }
-      String mine = state.roomInfo.getMyMappedIp();
-      String host = state.roomInfo.getHostMappedIp();
-      return mine != null && host != null && mine.equals(host);
+private boolean isSamePublicIpAsHost(RoomManager.RoomState state) {
+      return StunNatClassifier.isSamePublicIpAsHost(this, state);
    }
 
    private void fireAutoRelay(RoomManager.RoomState state) {
@@ -15398,42 +15301,8 @@ private volatile long lastProfileSwitchMs = 0L;
 
    // ===== 地址族过滤：本端无全局IPv6时丢弃IPv6打洞候选(S822QF/QWA6D3)，结果有60s缓存不会反复探测 =====
 
-   private String filterAddressFamilyCandidate(String ip, int port, String tag) {
-
-      if (ip == null || ip.isEmpty()) {
-
-         return ip;
-
-      }
-
-      if (ip.indexOf(':') >= 0) {
-
-         if (!StunDetector.verifyIPv6Connectivity()) {
-
-            VoxLinkMod.LOGGER
-               .warn(
-                  "[AddrFilter] 忽略不可达 IPv6 候选 {}:{} ({})：本端无全局IPv6 / dropped unreachable IPv6 candidate (no local global IPv6)",
-                  new Object[]{ip, port, tag}
-               );
-
-            return null;
-
-         }
-
-         return ip;
-
-      }
-
-      if (ip.startsWith("127.") || ip.startsWith("0.") || "localhost".equals(ip)) {
-
-         VoxLinkMod.LOGGER.warn("[AddrFilter] 忽略不可达候选 {}:{} ({})：环回地址 / dropped loopback candidate", ip, port, tag);
-
-         return null;
-
-      }
-
-      return ip;
-
+private String filterAddressFamilyCandidate(String ip, int port, String tag) {
+      return StunNatClassifier.filterAddressFamilyCandidate(this, ip, port, tag);
    }
 
 
