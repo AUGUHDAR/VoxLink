@@ -12,9 +12,6 @@ import java.util.concurrent.atomic.AtomicReference;
 /** STUN/NAT 分类: 探测结果持有 + 本地/远端 NAT 判定。(Phase4 从 ConnectionManager 拆出) */
 public final class StunNatClassifier {
    private static final Logger LOG = LoggerFactory.getLogger("voxlink-stunnat");
-   private volatile StunProbe.ProbeResult stunProbeResult;
-   private final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
-   boolean remoteNatMismatchLogged;
 
    static List<String> stunUrlsProbedFirst(ConnectionManager cm) {
       List<String> urls = new ArrayList<>(StunDetector.getAllStunUrls());
