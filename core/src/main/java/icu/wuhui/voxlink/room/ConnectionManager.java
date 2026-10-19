@@ -164,47 +164,26 @@ public class ConnectionManager {
 
    private final ConcurrentHashMap<String, ReliableUdpTransport> oldUdpTransports = new ConcurrentHashMap<>();
 
-   private static final int ICE_POOL_RETAIN_SECONDS = 12;
 
-   private static final int TCP_CONNECT_TIMEOUT_MS = 5000;
 
-   private static final int SHORT_SLEEP_MS = 100;
 
-   private static final int EXTRA_TIMEOUT_SEC = 5;
 
-   private static final int AWAIT_TIMEOUT_SEC = 20;
 
-   private static final int RELAY_GRACE_MS = 3000;
 
-   private static final int MAX_DELAY_MS = 6000;
 
-   private static final int PROBE_SOCKET_TIMEOUT_MS = 1000;
 
-   private static final int MAX_FALLBACK_LOOPS = 200;
 
-   private static final int FALLBACK_SLEEP_MS = 300;
 
-   private static final int MAX_RELAY_CANDIDATES = 3;
 
-   private static final int SHORT_TIMEOUT_SEC = 8;
 
-   private static final int RELAY_SETUP_TIMEOUT_SEC = 15;
 
-   private static final int POLL_INTERVAL_MS = 500;
 
-   private static final int AWAIT_TERM_SEC = 2;
 
-   private static final int REVERSE_PUNCH_TIMEOUT_SEC = 20;
 
-   private static final int STUN_PROBE_TIMEOUT_SEC = 10;
 
-   private static final int RTT_SYNC_MAX_DELAY_MS = 8000;
 
-   private static final int HOST_MAPPED_RESYNC_MS = 3000;
 
-   private static final byte PUNCH_ACK_TYPE = 2;
 
-   private static final long RELAY_FAILURE_WINDOW_MS = 60000L;
 
    private final Map<String, Long> failedRelayPeers = new ConcurrentHashMap<>();
 
@@ -277,7 +256,6 @@ public class ConnectionManager {
 
    private final List<ConnectionFallback> activeFallbacks = new CopyOnWriteArrayList<>();
 
-   private static final int CONTINUOUS_RETRY_MAX_ROUNDS = Integer.MAX_VALUE;
 
    private final AtomicBoolean continuousRetryCancelled = new AtomicBoolean(false);
 
@@ -287,9 +265,7 @@ public class ConnectionManager {
 
    private final AtomicInteger consecutiveFailureCount = new AtomicInteger(0);
 
-   private static final int ICE_RESTART_MAX_ATTEMPTS = 3;
 
-   private static final long ICE_RESTART_COOLDOWN_MS = 5000L;
 
    private final AtomicInteger iceRestartAttempts = new AtomicInteger(0);
 
@@ -327,16 +303,13 @@ public class ConnectionManager {
    private final AtomicReference<CompletableFuture<StunProbe.ProbeResult>> stunProbeFutureRef = new AtomicReference<>();
 
    private volatile List<Integer> lastHostMappedPorts;
-   private static final int TARGET_CHANGE_IGNORE_MS = 3000;
    private final java.util.concurrent.ConcurrentHashMap<String, ConnectionManager.HostPunchContext> hostPunchContexts = new java.util.concurrent.ConcurrentHashMap<>();
 
    private volatile boolean relayConnectedSignaled = false;
 
-   private static final int RELAY_REGISTRATION_RENEWAL_SEC = 60;
 
    private volatile CompletableFuture<Void> dualVoxlinkBridgeFuture;
 
-   private static final int DUAL_VOXLINK_BRIDGE_TIMEOUT_SEC = 120;
 
    private volatile boolean dualRaceActive = false;
 
@@ -370,7 +343,6 @@ public class ConnectionManager {
 
    private volatile CompletableFuture<Void> relayPrefetchFuture;
 
-   private static final int PUNCH_INFO_WAIT_TIMEOUT_S = 15;
 
    private static final long[] BACKOFF_DELAYS_MS = new long[]{1000L, 2000L, 4000L};
 
@@ -408,11 +380,9 @@ public class ConnectionManager {
 
    private volatile ConnectionManager.UdpSocketArray cachedUdpArray;
 
-   private static final long UDP_ARRAY_REUSE_WINDOW_MS = 30000L;
 
    private static volatile ConnectionManager instance;
 
-   private static final long PEER_SIGNAL_FRESH_MS = 60000L;
 
 
 
@@ -1000,16 +970,6 @@ private volatile long lastProfileSwitchMs = 0L;
          VoxLinkMod.LOGGER.info("[PunchProfile] Instance switch: {} -> {} reason: {}", old, target.name, reason);
 
       }
-
-   }
-
-
-
-   private int punchTimeoutMs() {
-
-      PunchParams p = this.activePunchParams;
-
-      return p != null && p.timeoutMs > 0 ? p.timeoutMs : this.punchProfile().punchTimeoutMs;
 
    }
 
@@ -10887,126 +10847,6 @@ private volatile long lastProfileSwitchMs = 0L;
          }
 
       }
-
-   }
-
-
-
-   private void fetchGlobalRelayCandidates(RoomManager.RoomState state, String requestingClientId, RoomInfo.PeerInfo requestingPeer) {
-
-      this.signalingClient
-
-         .getRelayCandidates(state.roomInfo.getCode())
-
-         .thenAccept(
-
-            resp -> {
-
-               if (this.roomManager.currentRoom.get() != state || this.connectionWon.get()) {
-
-                  return;
-
-               }
-
-
-
-               if (resp == null || !resp.success || resp.data == null || !resp.data.has("candidates")) {
-
-                  this.signalingClient
-
-                     .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
-
-                  return;
-
-               }
-
-
-
-               JsonArray cands = resp.data.getAsJsonArray("candidates");
-
-               List<RoomInfo.PeerInfo> global = new ArrayList<>();
-
-
-
-               for (int i = 0; i < cands.size(); i++) {
-
-                  JsonObject c = cands.get(i).getAsJsonObject();
-
-                  String cid = c.has("clientId") ? c.get("clientId").getAsString() : null;
-
-                  String ip = c.has("mappedIp") ? c.get("mappedIp").getAsString() : null;
-
-                  int port = c.has("mappedPort") ? c.get("mappedPort").getAsInt() : 0;
-
-                  String nt = c.has("natType") ? c.get("natType").getAsString() : "unknown";
-
-                  if (cid == null || cid.equals(requestingClientId) || cid.equals(relayPeerId(state))) {
-
-                     continue;
-
-                  }
-
-
-
-                  if (ip == null || port <= 0 || nt.contains("sym") || nt.contains("strict") || nt.equals("unknown")) {
-
-                     continue;
-
-                  }
-
-
-
-                  if (this.isRelayPeerFailed(cid)) {
-
-                     continue;
-
-                  }
-
-
-
-                  RoomInfo.PeerInfo pi = new RoomInfo.PeerInfo(cid);
-
-                  pi.mappedIp = ip;
-
-                  pi.mappedPort = port;
-
-                  pi.natType = nt;
-
-                  pi.capabilities = java.util.Collections.singleton(ProtocolNegotiator.CAP_RELAY);
-
-                  global.add(pi);
-
-               }
-
-
-
-               if (global.isEmpty()) {
-
-                  this.signalingClient
-
-                     .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
-
-               } else {
-
-                  this.dispatchRelaySetup(state, global, requestingClientId, requestingPeer);
-
-               }
-
-            }
-
-         )
-
-         .exceptionally(e -> {
-
-            VoxLinkMod.LOGGER.debug("[Relay] Fetch global candidates failed: {}", e.getMessage());
-
-            this.signalingClient
-
-               .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), true, "relay_declined", new JsonObject(), requestingClientId);
-
-            return null;
-
-         });
 
    }
 
