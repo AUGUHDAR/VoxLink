@@ -8,7 +8,7 @@ Play with your friends, or find new ones in the lobby :D
 | | |
 |---|---|
 | Official Website | https://link.voxdev.top/ |
-| Standalone App | https://github.com/AUGUHDAR/VoxLink-app/releases |
+| Standalone App | https://github.com/AUGUHDAR/VoxLink-app |
 | Standalone App (Gitee mirror) | https://gitee.com/AUGUHDAR/VoxLink-app |
 | GitHub | https://github.com/AUGUHDAR/VoxLink |
 | Gitee | https://gitee.com/AUGUHDAR/VoxLink |
@@ -96,7 +96,7 @@ Website: `https://link.voxdev.top/`
 | | |
 |---|---|
 | 官网 | https://link.voxdev.top/ |
-| 独立应用端 | https://github.com/AUGUHDAR/VoxLink-app/releases |
+| 独立应用端 | https://github.com/AUGUHDAR/VoxLink-app |
 | 独立应用端（Gitee 镜像） | https://gitee.com/AUGUHDAR/VoxLink-app |
 | GitHub | https://github.com/AUGUHDAR/VoxLink |
 | Gitee | https://gitee.com/AUGUHDAR/VoxLink |
