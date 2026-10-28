@@ -284,10 +284,10 @@ public final class ModSyncGuestService {
       boolean sawTransient = false;
       // 弱网实测：信令 8 秒超时很常见。超时/网络类失败必须与"未就绪"一样重试，
       // 否则一次抖动就放弃检查，占位文案僵住后莫名放行。
-      int maxAttempts = READY_RETRIES * 2;
-      // 总时限兜底：无论瞬态失败还是清单迟迟未就绪，最多等 12 秒，
+      int maxAttempts = 30;
+      // 总时限兜底：无论瞬态失败还是清单迟迟未就绪，大包清单构建实测需22~31秒，最多等 45 秒，
       // 绝不让玩家对着"正在获取"页面无限等待（每次尝试 5s 超时）
-      long deadline = System.currentTimeMillis() + 12000L;
+      long deadline = System.currentTimeMillis() + 45000L;
       for (int attempt = 0; attempt < maxAttempts && System.currentTimeMillis() < deadline; attempt++) {
          // 玩家已点"直接进入"或关弹窗：立刻退出循环，丢弃本次结果
          if (BYPASSED_THIS_LAUNCH.contains(roomCode)) {

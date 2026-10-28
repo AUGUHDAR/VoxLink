@@ -11,6 +11,9 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class ManageRoomScreen extends VoxLinkScreenBase {
    private final Screen parent;
    private final RoomInfo roomInfo;
@@ -19,6 +22,9 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
    private EditBox maxPlayersField;
    private Button visibleButton;
    private Button authButton;
+   private String lastSavedSnapshot = "";
+   private int codeRowY = 34;
+   private final List<int[]> codeClickAreas = new ArrayList<>();
    private Button saveButton;
    private String statusMessage = "";
    private int statusColor = -1;
@@ -78,7 +84,9 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
       super.init();
       int centerX = this.width / 2;
       int formHeight = 230;
-      int y = Math.max(24, (this.height - formHeight) / 2);
+      // 房码面板占顶部一行, 表单整体下移
+      this.codeRowY = 34;
+      int y = Math.max(this.codeRowY + 24, (this.height - formHeight) / 2 + 12);
       this.nameField = new EditBox(this.font, centerX - 100, y, 200, 20, Component.translatable("voxlink.room_name"));
       this.nameField.setMaxLength(20);
       this.nameField.setValue(this.roomInfo.getName() != null ? this.roomInfo.getName() : "");
@@ -206,6 +214,13 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
             maxPlayers = 100;
          }
 
+         // 无变化不请求: 对比修改前后, 全同则直接返回
+         String snapshot = name + "\u0000" + passwordToSend + "\u0000" + maxPlayers + "\u0000" + this.visible + "\u0000" + this.authType.name() + "\u0000" + CATEGORIES[this.categoryIdx];
+         if (snapshot.equals(this.lastSavedSnapshot)) {
+            Minecraft.getInstance().setScreen(this.parent);
+            return;
+         }
+
          this.saving = true;
          this.statusMessage = Component.translatable("voxlink.manage_room.saving").getString();
          this.statusColor = -171;
@@ -233,6 +248,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                      } else {
                         this.saving = false;
                         this.saveButton.active = true;
+                        this.lastSavedSnapshot = this.buildSaveSnapshot();
                         if (updated != null && !updated.isNameApproved()) {
                            this.statusMessage = ChatFormatting.YELLOW.toString()
                               + Component.translatable("voxlink.manage_room.name_pending_review").getString();
@@ -278,7 +294,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv4_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
+                                          ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
                                        )
                                  );
                               }
@@ -292,7 +308,7 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
                                  addrLine.append(
                                     Component.translatable("voxlink.chat.ipv6_label")
                                        .withStyle(
-                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB)
+                                          ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925)
                                        )
                                  );
                               }
@@ -338,9 +354,18 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
    }
 
    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+      // 房码行(点击复制)
+      String codeText = Component.translatable("voxlink.chat.room_code_label").getString()
+         + ChatFormatting.GREEN.toString() + ChatFormatting.BOLD.toString()
+         + "[" + Component.translatable("voxlink.chat.click_to_copy").getString() + "]";
+      this.drawCenteredClipped(graphics, codeText, this.width / 2, this.codeRowY, VoxLinkColors.WARNING, this.width - 20);
+      int cw = this.font.width(codeText);
+      this.codeClickAreas.clear();
+      this.codeClickAreas.add(new int[]{this.width / 2 - cw / 2, this.codeRowY - 3, cw, 15});
+
       super.extractRenderState(graphics, mouseX, mouseY, partialTick);
       int centerX = this.width / 2;
-      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, VoxLinkColors.TITLE);
+      this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
       if (!this.statusMessage.isEmpty()) {
          String clipped = this.statusMessage;
          int maxWidth = this.width - 20;
@@ -369,5 +394,25 @@ public class ManageRoomScreen extends VoxLinkScreenBase {
       AuthType(String translationKey) {
          this.translationKey = translationKey;
       }
+   }
+
+   @Override
+   public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean processed) {
+      if (!processed) {
+         for (int[] a : this.codeClickAreas) {
+            if (event.x() >= a[0] && event.x() < a[0] + a[2] && event.y() >= a[1] && event.y() < a[1] + a[3]) {
+               Minecraft.getInstance().keyboardHandler.setClipboard(this.roomInfo.getCode());
+               return true;
+            }
+         }
+      }
+
+      return super.mouseClicked(event, processed);
+   }
+
+   private String buildSaveSnapshot() {
+      String pw = this.passwordChanged ? String.valueOf(this.passwordField.getValue()) : "";
+      return this.nameField.getValue() + "\u0000" + pw + "\u0000" + this.maxPlayersField.getValue()
+         + "\u0000" + this.visible + "\u0000" + this.authType.name() + "\u0000" + CATEGORIES[this.categoryIdx];
    }
 }

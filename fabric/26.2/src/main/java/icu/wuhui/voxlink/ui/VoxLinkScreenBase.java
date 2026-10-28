@@ -20,6 +20,17 @@ public abstract class VoxLinkScreenBase extends Screen {
       super(title);
    }
 
+   /** 全屏统一融入: 世界内用暂停菜单同款模糊+暗化, 无世界走原版默认。 */
+   @Override
+   public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+      if (Minecraft.getInstance().level != null) {
+         this.extractBlurredBackground(graphics);
+         graphics.fillGradient(0, 0, this.width, this.height, 0x900A0E14, 0xC00A0E14);
+      } else {
+         super.extractBackground(graphics, mouseX, mouseY, partialTick);
+      }
+   }
+
    protected void init() {
       super.init();
       this.clearOurWidgets();
@@ -96,8 +107,13 @@ public abstract class VoxLinkScreenBase extends Screen {
       this.drawCenteredClipped(graphics, text, centerX, y, color, this.width - 20);
    }
 
+   /** 组标题仅表单态显示; 表单类子屏覆盖为 false。 */
+   public boolean showFormGroups() {
+      return true;
+   }
+
    protected void drawTitle(GuiGraphicsExtractor graphics, int y) {
-      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, -1, this.width - 20);
+      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, VoxLinkColors.TITLE, this.width - 20);
    }
 
    protected void drawCenteredComponent(GuiGraphicsExtractor graphics, Component component, int centerX, int y, int color) {

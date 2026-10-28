@@ -48,7 +48,7 @@
 
 | key | 名称 | URL |
 |-----|------|-----|
-| site | 官网 | https://p2p.wuhui.icu/ |
+| site | 官网 | https://link.voxdev.top/ |
 | mcmod | MC百科 | https://www.mcmod.cn/class/28295.html |
 | github | GitHub | https://github.com/AUGUHDAR/VoxLink |
 | gitee | Gitee | https://gitee.com/AUGUHDAR/VoxLink |
@@ -372,7 +372,7 @@ channelBind 全在后台执行器（离信令分发线程）→ 建 RUDP transpo
 ### 5.1 URL 与响应包约定
 
 - 所有端点形如 `POST/GET {serverUrl}/?route=<route>`（serverUrl 空时默认
-  `https://p2p.wuhui.icu`，无 scheme 自动补 `https://`）。
+  `https://link.voxdev.top`，无 scheme 自动补 `https://`）。
 - **detail 的 id/secret 必须追加在 `?route=` 之后的 `&id=&secret=`**（拼进 route 会撞掉 route）。
 - 通用响应包：`{"success":bool, "error":"CODE", "details":{"retryAfter":sec}}`；
   限频重试秒数取 `details.retryAfter`。

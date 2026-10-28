@@ -71,6 +71,14 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       return Minecraft.getInstance().getSingleplayerServer() != null;
    }
 
+   // ===== 原版融入: 暂停菜单同款模糊底 + 信息面板 + 整行可点击 =====
+   /** 面板半透明暗底(模糊之上仍保有分组感)。 */
+   private static final int PANEL_FILL = 0x66000000;
+   /** 面板 1px 描边(原版冷灰)。 */
+   private static final int PANEL_BORDER = 0xFF3E4C55;
+   /** 可点击行悬停底条(原版列表条目同款白底高亮)。 */
+   private static final int ROW_HOVER_FILL = 0x30FFFFFF;
+
    private void computeLayout() {
       RoomInfo currentRoom = VoxLinkMod.getRoomManager().getCurrentRoom();
       boolean platformSupported = TerracottaBinary.isPlatformSupported();
@@ -78,8 +86,6 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       boolean downloading = showDownloadRow && TerracottaManager.isDownloading();
       boolean platformNote = !platformSupported;
 
-      int topRows = currentRoom == null && !isInSingleplayerWorld() ? 2 : 1;
-      int sectionH = topRows * L_ROW + (topRows - 1) * L_GAP;
       // 头部安全线：无房间只让标题(20..29)；有房间要避开房号(36..45)/陶瓦码(50..59)，
       // 非房主还有连接状态两行(64..79)
       int headerFloor = currentRoom == null ? 40 : (currentRoom.isHost() ? 64 : 84);
@@ -89,59 +95,38 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       this.lySloganText = Integer.MIN_VALUE;
       this.lyPlatformNote = Integer.MIN_VALUE;
 
-      // 降级顺序：0) 带装饰带  1) 去装饰带  2) 去装饰带且未装陶瓦时再砍配置行
-      int maxAttempt = showDownloadRow ? 2 : 1;
-      for (int attempt = 0; attempt <= maxAttempt; attempt++) {
-         int back = this.height - L_BOTTOM_MARGIN;
-         int relay = back - L_STEP;
-         int uploadLog = relay - L_STEP;
-         boolean decor = currentRoom == null && attempt == 0;
-         boolean dropConfig = attempt >= 2 && showDownloadRow;
-         int config = dropConfig ? Integer.MIN_VALUE
-               : (decor ? uploadLog - L_STEP - L_DECOR_H : uploadLog - L_STEP);
-         int stackBase = dropConfig ? uploadLog : config;
-         int downloadRow = showDownloadRow ? stackBase - L_STEP : Integer.MIN_VALUE;
+      // 自底向上三段固定：设置|返回 -> 相关链接|反馈 -> 主操作栈(1~2 行) -> 陶瓦下载区
+      // 主操作行贴列排布，装饰带(hint/slogan)有富余空间才出现，不再插进按钮栈中间
+      this.lyBack = this.height - L_BOTTOM_MARGIN;
+      this.lyWebsite = this.lyBack - L_STEP;
+      int mainRows = currentRoom == null ? (isInSingleplayerWorld() ? 1 : 2) : 1;
+      int mainLastRow = this.lyWebsite - L_STEP;
+      int mainFirstRow = mainLastRow - (mainRows - 1) * L_STEP;
+      this.lyDownloadRow = showDownloadRow ? mainFirstRow - L_STEP : Integer.MIN_VALUE;
 
-         int stackTop = showDownloadRow ? downloadRow : stackBase;
-         // 官网/反馈行是常驻入口：恒占底部栈之上的一行，任何分辨率都不裁掉
-         int websiteRow = stackTop - L_STEP;
-         int reserve = (downloading ? L_PROGRESS_RESERVE : 0) + (platformNote ? L_PLATFORM_NOTE_RESERVE : 0);
-         int limit = Math.min(stackTop - reserve, websiteRow - L_GAP);
-         int ideal = Math.min(this.height / 2 - 30, limit - sectionH);
-         if (ideal >= headerFloor || attempt == maxAttempt) {
-            this.decorVisible = decor;
-            this.lyBack = back;
-            this.lyRelay = relay;
-            this.lyUploadLog = uploadLog;
-            this.lyConfig = config;
-            this.lyDownloadRow = downloadRow;
-            // 头部文字与第一行按钮至少留 4px 间距，避免极端矮屏时头部文字与按钮粘连
-            this.lyTopStart = Math.max(headerFloor + 4, ideal);
-            // 官网/反馈行常驻，且绝不与陶瓦下载行重叠：
-            // 首选紧贴底部栈上方；顶部组被兜底抬高时顺延到其下方；顺延会压到下载行则退回顶部组下方最小间距
-            int wy = Math.max(websiteRow, this.lyTopStart + sectionH - L_ROW + L_STEP);
-            if (showDownloadRow && wy + L_ROW > downloadRow) {
-               wy = Math.max(websiteRow, this.lyTopStart + sectionH - L_ROW + L_GAP);
-            }
-
-            this.lyWebsite = wy;
-            if (decor) {
-               this.lySloganText = uploadLog - 14;
-               this.lyHintText = uploadLog - 26;
-            }
-
-            if (downloading) {
-               this.lyProgressText = downloadRow - 13;
-            }
-
-            if (platformNote) {
-               this.lyPlatformNote = stackBase - 14;
-            }
-
-            break;
-         }
+      int reserve = (downloading ? L_PROGRESS_RESERVE : 0) + (platformNote ? L_PLATFORM_NOTE_RESERVE : 0);
+      int zoneTop = showDownloadRow ? this.lyDownloadRow : mainFirstRow;
+      int decorCeiling = zoneTop - reserve - L_GAP;
+      this.decorVisible = decorCeiling - L_DECOR_H >= headerFloor + 4;
+      if (currentRoom != null) {
+         // 有房: 装饰带固定贴房码面板之下
+         int panelBottom = currentRoom.isHost() ? 64 : 84;
+         this.lyHintText = panelBottom + 12;
+         this.lySloganText = this.lyHintText + 12;
+      } else if (this.decorVisible) {
+         this.lySloganText = decorCeiling - 4;
+         this.lyHintText = this.lySloganText - 12;
       }
 
+      if (downloading) {
+         this.lyProgressText = this.lyDownloadRow - 13;
+      }
+
+      if (platformNote) {
+         this.lyPlatformNote = mainFirstRow - 14;
+      }
+
+      this.lyTopStart = Math.max(headerFloor + 4, mainFirstRow);
       this.layoutValid = true;
    }
 
@@ -198,14 +183,16 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       boolean platformSupported = TerracottaBinary.isPlatformSupported();
       boolean showDownload = platformSupported && !TerracottaManager.isBinaryReady();
       boolean isDownloading = TerracottaManager.isDownloading();
-      int topStartY = this.lyTopStart;
+      // 主操作栈贴 website 行向上排（与 computeLayout 的 mainRows 推导一致）
+      int mainLastRow = this.lyWebsite - L_STEP;
+      int mainFirstRow = mainLastRow - (currentRoom == null ? (isInSingleplayerWorld() ? 1 : 2) - 1 : 0) * L_STEP;
       if (currentRoom != null) {
          if (currentRoom.isHost()) {
             this.addRenderableWidget(
                Button.builder(
                      Component.translatable("voxlink.manage_room"), button -> Minecraft.getInstance().setScreen(new ManageRoomScreen(this, currentRoom))
                   )
-                  .bounds(centerX - 100, topStartY, 200, 20)
+                  .bounds(centerX - 100, mainLastRow, 200, 20)
                   .build()
             );
          }
@@ -215,31 +202,39 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                   Component.translatable(CreateFlowState.isActive() ? "voxlink.create_flow.back_label" : "voxlink.create_room"),
                   button -> Minecraft.getInstance().setScreen(CreateFlowState.isActive() ? new CreatingRoomScreen(new CreateRoomScreen(this)) : new CreateRoomScreen(this))
                )
-               .bounds(centerX - 100, topStartY, 200, 20)
+               .bounds(centerX - 100, mainLastRow, 200, 20)
                .build()
          );
       } else {
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.join_by_code"), button -> Minecraft.getInstance().setScreen(new JoinRoomScreen(this)))
-               .bounds(centerX - 100, topStartY, 200, 20)
+               .bounds(centerX - 100, mainFirstRow, 200, 20)
                .build()
          );
          this.addRenderableWidget(
             Button.builder(Component.translatable("voxlink.browse_rooms"), button -> Minecraft.getInstance().setScreen(new RoomBrowserScreenBase(this)))
-               .bounds(centerX - 100, topStartY + L_STEP, 200, 20)
+               .bounds(centerX - 100, mainLastRow, 200, 20)
                .build()
          );
       }
 
-      if (this.lyWebsite != Integer.MIN_VALUE) {
+      if (currentRoom == null) {
+         // 无房: 相关链接 | 反馈
          this.addRenderableWidget(
-            Button.builder(Component.translatable("voxlink.website"), button -> Minecraft.getInstance().setScreen(new RelatedLinksScreen(this))).bounds(centerX - 100, this.lyWebsite, HALF_BTN_W, 20).build()
+            Button.builder(Component.translatable("voxlink.website"), button -> Minecraft.getInstance().setScreen(new RelatedLinksScreen(this))).bounds(centerX - 102, this.lyWebsite, HALF_BTN_W, 20).build()
          );
          this.addRenderableWidget(
-            Button.builder(Component.translatable("voxlink.feedback"), button -> Minecraft.getInstance().setScreen(new FeedbackScreen(this))).bounds(centerX + L_GAP, this.lyWebsite, HALF_BTN_W, 20).build()
+            Button.builder(Component.translatable("voxlink.feedback"), button -> Minecraft.getInstance().setScreen(new FeedbackScreen(this))).bounds(centerX + 4, this.lyWebsite, HALF_BTN_W, 20).build()
          );
       }
-      if (showDownload && this.lyDownloadRow != Integer.MIN_VALUE) {
+      // 设置 | 返回 —— 半宽对称行(有房时是仅有的两个次级入口)
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("voxlink.terracotta.config"), button -> Minecraft.getInstance().setScreen(new TerracottaConfigScreen(this))).bounds(centerX - 102, this.lyBack, HALF_BTN_W, 20).build()
+      );
+      this.addRenderableWidget(
+         Button.builder(Component.translatable("voxlink.back"), button -> this.onClose()).bounds(centerX + 4, this.lyBack, HALF_BTN_W, 20).build()
+      );
+      if (currentRoom == null && showDownload && this.lyDownloadRow != Integer.MIN_VALUE) {
          if (isDownloading) {
             this.terracottaDownloadBtn = null;
             boolean paused = TerracottaManager.isDownloadPaused();
@@ -251,20 +246,17 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                }
 
                this.needsRebuild = true;
-            }).bounds(centerX - 100, this.lyDownloadRow, HALF_BTN_W, 20).build();
+            }).bounds(centerX - 102, this.lyDownloadRow, HALF_BTN_W, 20).build();
             this.addRenderableWidget(this.pauseResumeBtn);
             this.cancelDownloadBtn = Button.builder(Component.translatable("voxlink.terracotta.cancel"), button -> {
                TerracottaManager.cancelDownload();
                this.needsRebuild = true;
-            }).bounds(centerX + L_GAP, this.lyDownloadRow, HALF_BTN_W, 20).build();
+            }).bounds(centerX + 4, this.lyDownloadRow, HALF_BTN_W, 20).build();
             this.addRenderableWidget(this.cancelDownloadBtn);
          } else {
-            Component label;
-            if (TerracottaManager.isDownloadFailed()) {
-               label = Component.translatable("voxlink.terracotta.download_failed");
-            } else {
-               label = Component.translatable("voxlink.terracotta.download");
-            }
+            Component label = Component.translatable(TerracottaManager.isDownloadFailed()
+               ? "voxlink.terracotta.download_failed"
+               : "voxlink.terracotta.download");
 
             this.terracottaDownloadBtn = Button.builder(label, button -> this.startTerracottaDownload()).bounds(centerX - 100, this.lyDownloadRow, 200, 20).build();
             this.addRenderableWidget(this.terracottaDownloadBtn);
@@ -277,51 +269,6 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
          this.cancelDownloadBtn = null;
       }
 
-      if (this.lyConfig != Integer.MIN_VALUE) {
-         this.addRenderableWidget(
-            Button.builder(Component.translatable("voxlink.terracotta.config"), button -> Minecraft.getInstance().setScreen(new TerracottaConfigScreen(this)))
-               .bounds(centerX - 100, this.lyConfig, 200, 20)
-               .build()
-         );
-      }
-      boolean uploadLogOn = VoxLinkMod.getConfig().isLogUploadEnabled();
-      Button uploadLogBtn = Button.builder(
-            Component.translatable("voxlink.log_upload.toggle", new Object[]{Component.translatable(uploadLogOn ? "voxlink.log_upload.on" : "voxlink.log_upload.off")}),
-            button -> {
-               // 开关持久化到配置文件，不再用内存静态变量
-               boolean newVal = !VoxLinkMod.getConfig().isLogUploadEnabled();
-               VoxLinkMod.getConfig().setLogUploadEnabled(newVal);
-               LogUploadState.setLogUploadEnabled(newVal);
-               VoxLinkMod.getConfig().save();
-               this.needsRebuild = true;
-            }
-         )
-         .bounds(centerX - 100, this.lyUploadLog, 200, 20)
-         .build();
-      this.addRenderableWidget(uploadLogBtn);
-      boolean relayOn = VoxLinkMod.getConfig().isRelayEnabled();
-      boolean usingRelay = currentRoom != null && currentRoom.isUsingRelay();
-      Button relayBtn = Button.builder(
-            Component.translatable("voxlink.relay.toggle", new Object[]{Component.translatable(relayOn ? "voxlink.relay.on" : "voxlink.relay.off")}),
-            button -> {
-               boolean newVal = !VoxLinkMod.getConfig().isRelayEnabled();
-               VoxLinkMod.getConfig().setRelayEnabled(newVal);
-               VoxLinkMod.getConfig().save();
-               if (!newVal) {
-                  VoxLinkMod.getRoomManager().getConnectionManager().stopRelay();
-               }
-
-               this.needsRebuild = true;
-            }
-         )
-         .bounds(centerX - 100, this.lyRelay, 200, 20)
-         .build();
-      if (usingRelay) {
-         relayBtn.active = false;
-      }
-
-      this.addRenderableWidget(relayBtn);
-      this.addRenderableWidget(Button.builder(Component.translatable("voxlink.back"), button -> this.onClose()).bounds(centerX - 100, this.lyBack, 200, 20).build());
       this.needsRebuild = false;
    }
 
@@ -368,6 +315,12 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
    private static final int CODE_CLICK_H = 9;
    private static final int COLOR_ORANGE = -22016;
 
+   /** 行悬停判定: mouseX/Y 落在 [x0,x1)x[y-3,y+12) 行条内。 */
+   private boolean isRowHovered(double mx, double my, int x0, int x1, int textY) {
+      return mx >= x0 && mx < x1 && my >= textY - 3 && my < textY + 12;
+   }
+
+   @Override
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       if (!this.layoutValid) {
          this.computeLayout();
@@ -381,19 +334,37 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
       this.codeClickAreas.clear();
       this.codeClickTexts.clear();
       if (currentRoom != null) {
+         String tcCode = currentRoom.getTerracottaCode();
+         boolean hasTc = tcCode != null && !tcCode.isEmpty();
+         // 信息面板: 包住房码/陶瓦码/连接状态行, 半透明暗底+1px 描边(不遮信息, 只做分组)
+         int panelX0 = centerX - 125;
+         int panelX1 = centerX + 125;
+         int modeY = hasTc ? 64 : 50;
+         boolean isGuest = !currentRoom.isHost();
+         int detailY = modeY + 11;
+         int infoBottom = isGuest ? detailY + 14 : (hasTc ? 59 : 45);
+         int panelY1 = Math.min(infoBottom + 4, this.lyTopStart - 2);
+         graphics.fill(panelX0, 30, panelX1, panelY1, PANEL_FILL);
+         this.outlineBorder(graphics, panelX0, 30, panelX1 - panelX0, panelY1 - 30, PANEL_BORDER);
+         int innerL = panelX0 + 4;
+         int innerR = panelX1 - 4;
+         int panelInnerW = innerR - innerL;
+
+         // 房码行: 整行可点击(hover 底条), 点击区=面板内整行
          String codeText = Component.translatable("voxlink.chat.room_code_label").getString()
             + ChatFormatting.GREEN.toString()
             + ChatFormatting.BOLD.toString()
             + "["
             + Component.translatable("voxlink.chat.click_to_copy").getString()
             + "]";
-         this.drawCenteredClipped(graphics, codeText, centerX, 36, VoxLinkColors.WARNING, maxWidth);
+         boolean codeHover = this.isRowHovered(mouseX, mouseY, innerL, innerR, 36);
+         if (codeHover) {
+            graphics.fill(innerL, 33, innerR, 47, ROW_HOVER_FILL);
+         }
+         this.drawCenteredClipped(graphics, codeText, centerX, 36, VoxLinkColors.WARNING, panelInnerW);
          int codeW = this.font.width(codeText);
-         this.codeClickAreas.add(new int[]{centerX - codeW / 2, 36, codeW, CODE_CLICK_H});
+         this.codeClickAreas.add(new int[]{innerL, 33, innerR - innerL, 14});
          this.codeClickTexts.add(currentRoom.getCode());
-         String tcCode = currentRoom.getTerracottaCode();
-         boolean hasTc = tcCode != null && !tcCode.isEmpty();
-         int modeY = hasTc ? 64 : 50;
          if (hasTc) {
             String tcText = Component.translatable("voxlink.chat.terracotta_code_label", new Object[]{""}).getString().trim()
                + " "
@@ -402,13 +373,17 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                + "["
                + Component.translatable("voxlink.chat.click_to_copy").getString()
                + "]";
-            this.drawCenteredClipped(graphics, tcText, centerX, 50, VoxLinkColors.INFO, maxWidth);
+            boolean tcHover = this.isRowHovered(mouseX, mouseY, innerL, innerR, 50);
+            if (tcHover) {
+               graphics.fill(innerL, 47, innerR, 61, ROW_HOVER_FILL);
+            }
+            this.drawCenteredClipped(graphics, tcText, centerX, 50, VoxLinkColors.INFO, panelInnerW);
             int tcW = this.font.width(tcText);
-            this.codeClickAreas.add(new int[]{centerX - tcW / 2, 50, tcW, CODE_CLICK_H});
+            this.codeClickAreas.add(new int[]{innerL, 47, innerR - innerL, 14});
             this.codeClickTexts.add(tcCode);
          }
 
-         if (!currentRoom.isHost()) {
+         if (isGuest) {
             Text connMode;
             if (Minecraft.getInstance().player != null) {
                connMode = Text.translatable("voxlink.connection.connected");
@@ -417,7 +392,7 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
             }
 
             if (connMode != null && !connMode.toPlainString().isEmpty()) {
-               this.drawCenteredClipped(graphics, connMode.toPlainString(), centerX, modeY, VoxLinkColors.GRAY, maxWidth);
+               this.drawCenteredClipped(graphics, connMode.toPlainString(), centerX, modeY, VoxLinkColors.GRAY, panelInnerW);
                ConnectionState cs = ConnectionState.getCurrent();
                if (cs != ConnectionState.CONNECTED && cs != ConnectionState.IDLE && cs != ConnectionState.FAILED) {
                   StringBuilder detail = new StringBuilder();
@@ -431,9 +406,20 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
                      detail.append(" | ").append(NatLabels.nameOfRaw(natType));
                   }
 
-                  this.drawCenteredClipped(graphics, detail.toString(), centerX, modeY + 11, VoxLinkColors.MUTED, maxWidth);
+                  this.drawCenteredClipped(graphics, detail.toString(), centerX, modeY + 11, VoxLinkColors.MUTED, panelInnerW);
                }
             }
+         }
+      } else if (currentRoom != null && this.lyHintText != Integer.MIN_VALUE) {
+         // 有房: 装饰带画在房码面板之下(位置由 computeLayout 的 headerFloor 段给出)
+         if (this.lyHintText != Integer.MIN_VALUE) {
+            this.drawCenteredClipped(graphics, Component.translatable("voxlink.relay.hint").getString(), centerX, this.lyHintText, VoxLinkColors.GRAY, maxWidth);
+         }
+
+         if (this.lySloganText != Integer.MIN_VALUE) {
+            this.drawCenteredClipped(
+               graphics, Component.translatable("voxlink.relay.slogan").getString(), centerX, this.lySloganText, VoxLinkColors.MUTED, maxWidth
+            );
          }
       } else if (this.decorVisible) {
          if (this.lyHintText != Integer.MIN_VALUE) {
@@ -481,7 +467,6 @@ public class VoxLinkScreen extends VoxLinkScreenBase {
 
       return super.mouseClicked(event, processed);
    }
-
    public void onClose() {
       Minecraft.getInstance().setScreen(this.parent);
    }

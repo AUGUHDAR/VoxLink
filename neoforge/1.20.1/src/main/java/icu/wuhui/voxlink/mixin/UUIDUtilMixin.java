@@ -14,7 +14,7 @@ import java.util.UUID;
 public class UUIDUtilMixin {
     @Inject(method = "createOfflinePlayerUUID", at = @At("HEAD"), cancellable = true, require = 0)
     private static void voxlink$onCreateOfflinePlayerUUID(String playerName, CallbackInfoReturnable<UUID> cir) {
-        if (ModList.get().isLoaded("mcwifipnp")) return;
+        if (ModList.get() == null || ModList.get().isLoaded("mcwifipnp")) return;
         //debounce 删isInRoom检查 让策略全局生效(后续接入UI让玩家管理)
         UUID fixedUuid = UUIDPolicyManager.hookEntry(playerName);
         if (fixedUuid != null) {

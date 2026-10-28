@@ -4,13 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.client.gui.GuiGraphics;
 
 public abstract class VoxLinkScreenBase extends Screen {
    private final List<GuiEventListener> myWidgets = new ArrayList<>();
@@ -18,6 +18,15 @@ public abstract class VoxLinkScreenBase extends Screen {
 
    protected VoxLinkScreenBase(Component title) {
       super(title);
+   }
+
+   @Override
+   public void renderBackground(GuiGraphics graphics) {
+      if (Minecraft.getInstance().level != null) {
+         graphics.fillGradient(0, 0, this.width, this.height, 0x900A0E14, 0xC00A0E14);
+      } else {
+         super.renderBackground(graphics);
+      }
    }
 
    protected void init() {
@@ -99,11 +108,22 @@ public abstract class VoxLinkScreenBase extends Screen {
    }
 
    protected void drawCenteredClipped(GuiGraphics graphics, String text, int centerX, int y, int color) {
-      this.drawCenteredClipped(graphics, text, centerX, y, color, this.width - MARGIN_X);
+      this.drawCenteredClipped(graphics, text, centerX, y, color, this.width - 20);
+   }
+
+   public boolean showFormGroups() {
+      return true;
+   }
+
+   protected void outlineBorder(GuiGraphics graphics, int x, int y, int w, int h, int color) {
+      graphics.fill(x, y, x + w, y + 1, color);
+      graphics.fill(x, y + h - 1, x + w, y + h, color);
+      graphics.fill(x, y, x + 1, y + h, color);
+      graphics.fill(x + w - 1, y, x + w, y + h, color);
    }
 
    protected void drawTitle(GuiGraphics graphics, int y) {
-      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, VoxLinkColors.TITLE, this.width - MARGIN_X);
+      this.drawCenteredClipped(graphics, this.title.getString(), this.width / 2, y, VoxLinkColors.TITLE, this.width - 20);
    }
 
    protected void drawCenteredComponent(GuiGraphics graphics, Component component, int centerX, int y, int color) {

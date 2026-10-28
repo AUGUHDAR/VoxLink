@@ -57,6 +57,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    /** 表单顶部 Y（init 计算一次，render/分类重建共用，避免多处算式漂移）。 */
 
    private int formTopY = 4;
+   private int gTitle1Y, gTitle2Y, gTitle3Y;
 
    private Button parallelP2PButton;
 
@@ -132,7 +133,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          );
       } else {
          int centerX = this.width / 2;
-         int formHeight = 264;
+         int formHeight = 318;
 
          // 表单顶：小屏夹到 4；标题仅在上方留有 16px 空隙时才绘制（render 同步判断）
 
@@ -170,7 +171,17 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.customCategoryField.setVisible(this.showCustomInput);
          this.customCategoryField.setEditable(this.showCustomInput);
          this.addRenderableWidget(this.customCategoryField);
-         int advY = catY + 42;
+         // 分组: [房间] 大厅显示|离线模式 / [权限] 模式|房主OP+访客OP / [模组同步] 上报必装
+         // 组标题占独立 12px 行, 按钮行随之让位(修标题压按钮)
+         int g1 = catY + 42;
+         int g2 = g1 + 12 + 20 + 6;
+         int g3 = g2 + 12 + 20 + 6 + 20 + 6;
+         this.gTitle1Y = g1;
+         this.gTitle2Y = g2;
+         this.gTitle3Y = g3;
+         int advY = g1 + 12;
+         int advY2 = g2 + 12;
+         int advY3 = advY2 + 24;
          this.visibleButton = Button.builder(this.buildVisibleLabel(), button -> {
             this.visible = !this.visible;
             this.visibleButton.setMessage(this.buildVisibleLabel());
@@ -190,7 +201,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                default -> "survival";
             };
             this.gameTypeButton.setMessage(this.buildGameTypeLabel());
-         }).bounds(centerX - 100, advY + 24, 98, 20).build();
+         }).bounds(centerX - 100, advY2, 98, 20).build();
          this.addRenderableWidget(this.gameTypeButton);
          this.hostOpButton = Button.builder(this.buildHostOpLabel(), button -> {
             this.hostOp = !this.hostOp;
@@ -201,12 +212,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             }
 
             this.guestOpButton.active = this.hostOp;
-         }).bounds(centerX + 2, advY + 24, 98, 20).build();
+         }).bounds(centerX + 2, advY2, 98, 20).build();
          this.addRenderableWidget(this.hostOpButton);
          this.guestOpButton = Button.builder(this.buildGuestOpLabel(), button -> {
             this.guestOp = !this.guestOp;
             this.guestOpButton.setMessage(this.buildGuestOpLabel());
-         }).bounds(centerX - 100, advY + 48, 98, 20).build();
+         }).bounds(centerX - 100, advY3, 98, 20).build();
          this.guestOpButton.active = this.hostOp;
          this.addRenderableWidget(this.guestOpButton);
          if (TerracottaManager.isBinaryReady()) {
@@ -226,7 +237,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                         );
                      }
                   )
-                  .bounds(centerX + 2, advY + 48, 98, 20)
+                  .bounds(centerX + 2, advY3, 98, 20)
             .build();
             this.addRenderableWidget(this.parallelP2PButton);
          } else {
@@ -238,9 +249,9 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             VoxLinkMod.getConfig().setHostModSyncPublish(v);
             VoxLinkMod.getConfig().save();
             this.publishModsButton.setMessage(this.buildPublishModsLabel());
-         }).bounds(centerX - 100, advY + 72, 200, 20).build();
+         }).bounds(centerX - 100, g3 + 12, 200, 20).build();
          this.addRenderableWidget(this.publishModsButton);
-         int actionRowY = Math.min(advY + 96, this.height - 26);
+         int actionRowY = Math.min(g3 + 12 + 26, this.height - 26);
          this.createButton = Button.builder(Component.translatable("voxlink.create_room"), button -> this.createRoom())
             .bounds(centerX - 100, actionRowY, 98, 20)
             .build();
@@ -279,6 +290,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             }
          }
       }
+   }
+
+   @Override
+   public boolean showFormGroups() {
+      // 成功页(createdRoom != null)不画组标题
+      return this.createdRoom == null;
    }
 
    private void buildCategoryButtons(int centerX, int startY) {
@@ -856,6 +873,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
       super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+      // 选项分组标题(几何来自 init, 独立行不压按钮)
+      if (this.showFormGroups()) {
+         this.drawString(graphics, Component.translatable("voxlink.config.group.room").getString(), this.width / 2 - 100, this.gTitle1Y, VoxLinkColors.INFO);
+         this.drawString(graphics, Component.translatable("voxlink.config.group.perm").getString(), this.width / 2 - 100, this.gTitle2Y, VoxLinkColors.INFO);
+         this.drawString(graphics, Component.translatable("voxlink.config.group.modsync").getString(), this.width / 2 - 100, this.gTitle3Y, VoxLinkColors.INFO);
+      }
       int centerX = this.width / 2;
       if (this.createdRoom != null) {
          this.successClickAreas.clear();

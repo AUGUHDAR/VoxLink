@@ -1,8 +1,8 @@
 package icu.wuhui.voxlink.room;
 
+import icu.wuhui.voxlink.VoxLinkMod;
 import icu.wuhui.voxlink.network.NatClass;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import icu.wuhui.voxlink.network.StunProbe;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** STUN/NAT 分类: 探测结果持有 + 本地/远端 NAT 判定。(Phase4 从 ConnectionManager 拆出) */
 public final class StunNatClassifier {
-   private static final Logger LOG = LoggerFactory.getLogger("voxlink-stunnat");
+   private static final Logger LOG = VoxLinkMod.LOGGER;
 
    static List<String> stunUrlsProbedFirst(ConnectionManager cm) {
       List<String> urls = new ArrayList<>(StunDetector.getAllStunUrls());

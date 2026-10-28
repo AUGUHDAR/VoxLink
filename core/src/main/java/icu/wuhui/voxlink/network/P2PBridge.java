@@ -127,11 +127,50 @@ public class P2PBridge {
             clientSocket.setSendBufferSize(32768);
             clientSocket.setReceiveBufferSize(32768);
             LOGGER.info("P2P client connected from {}", clientSocket.getRemoteSocketAddress());
-            Socket mcSocket = new Socket();
-            mcSocket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), minecraftPort), 10000);
-            mcSocket.setTcpNoDelay(true);
-            mcSocket.setSendBufferSize(32768);
-            mcSocket.setReceiveBufferSize(32768);
+            // 房客打洞成功可能早于本端 MC 服务器端口就绪(开世界竞态)：本地回环连接
+            // 被拒时按重试窗重连，而不是立即断掉已打洞成功的房客连接
+            Socket mcSocket = null;
+            long mcRetryDeadline = System.currentTimeMillis() + (long)MC_CONNECT_RETRY_WINDOW_MS;
+            int mcAttempt = 0;
+
+            while (mcSocket == null && running.get()) {
+               mcAttempt++;
+               Socket trySocket = new Socket();
+
+               try {
+                  trySocket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), minecraftPort), 2000);
+                  trySocket.setTcpNoDelay(true);
+                  trySocket.setSendBufferSize(32768);
+                  trySocket.setReceiveBufferSize(32768);
+                  mcSocket = trySocket;
+                  if (mcAttempt > 1) {
+                     LOGGER.info("P2P host bridge connected to MC server on port {} after {} attempts", minecraftPort, mcAttempt);
+                  }
+               } catch (IOException ce) {
+                  try {
+                     trySocket.close();
+                  } catch (IOException ignored2) {
+                  }
+
+                  if (System.currentTimeMillis() >= mcRetryDeadline) {
+                     throw ce;
+                  }
+
+                  LOGGER.warn("P2P host bridge MC server port {} not ready (attempt {}): {}, retrying in {}ms",
+                     minecraftPort, mcAttempt, ce.getMessage(), MC_CONNECT_RETRY_INTERVAL_MS);
+
+                  try {
+                     Thread.sleep((long)MC_CONNECT_RETRY_INTERVAL_MS);
+                  } catch (InterruptedException ie) {
+                     Thread.currentThread().interrupt();
+                     throw new IOException("interrupted while waiting for MC server port", ie);
+                  }
+               }
+            }
+
+            if (mcSocket == null) {
+               throw new IOException("host bridge stopped before MC server ready");
+            }
             P2PBridge.BridgePair pair = new P2PBridge.BridgePair(clientSocket, mcSocket);
             activePairs.add(pair);
             ExecutorService exec = getOrCreateExecutor();

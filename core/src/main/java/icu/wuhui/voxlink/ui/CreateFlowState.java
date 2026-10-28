@@ -183,7 +183,11 @@ public final class CreateFlowState {
 
    /** 批3接 ServerHandle 前的降级探针: 宿主未注入(仍为 FALLBACK)时跳过 WORLD_EXITED 判定。 */
    private static boolean serverProbeActive() {
-      return icu.wuhui.voxlink.platform.Platform.host() != icu.wuhui.voxlink.platform.Platform.Host.FALLBACK;
+      // 判 serverHandle 是否真注入了 Provider(批3 接线), 而非 host!=FALLBACK:
+      // 28 模板 PlatformImpl 均已 install 非 FALLBACK host, 但 serverHandle 仍是 EMPTY,
+      // 旧判法恒真 → EMPTY.localServer()==null → 每次建房必误判 WORLD_EXITED(10-25 dev 实锤)
+      return icu.wuhui.voxlink.platform.Platform.host().serverHandle()
+         instanceof icu.wuhui.voxlink.platform.ServerHandle.Provider;
    }
 
    private static final class Watchdog implements Runnable {

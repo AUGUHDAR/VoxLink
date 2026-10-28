@@ -8,6 +8,8 @@ import icu.wuhui.voxlink.network.NatClass;
 
 import icu.wuhui.voxlink.platform.Text;
 
+import net.minecraft.network.chat.Component;
+
 import icu.wuhui.voxlink.platform.ChatSink;
 
 import java.util.List;
@@ -1761,7 +1763,7 @@ public final class PunchCycleDirector {
 
       } else if (!RoomCodeRouter.isVoxLinkCode(roomCode)) {
 
-         return CompletableFuture.failedFuture(new IllegalArgumentException(Text.translatable("voxlink.error.invalid_room_code").toPlainString()));
+         return CompletableFuture.failedFuture(new IllegalArgumentException(Component.translatable("voxlink.error.invalid_room_code").getString()));
 
       } else if (!VoxLinkMod.getConfig().isParallelP2P()) {
 

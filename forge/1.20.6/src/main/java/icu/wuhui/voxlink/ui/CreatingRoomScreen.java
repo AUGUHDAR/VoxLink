@@ -97,4 +97,9 @@ public class CreatingRoomScreen extends VoxLinkScreenBase {
          VoxLinkColors.MUTED
       );
    }
+
+   @Override
+   public boolean showFormGroups() {
+      return false;
+   }
 }

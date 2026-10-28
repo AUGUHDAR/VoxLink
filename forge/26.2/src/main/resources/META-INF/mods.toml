@@ -8,7 +8,7 @@ version="${mod_version}"
 displayName="VoxLink"
 authors="AUGUHDAR"
 description='''轻松地与其他玩家进行联机/Easily connect with other players'''
-logoFile="assets/voxlink/icon.png"
+iconFile="assets/voxlink/icon.png"
 
 [[mixins]]
 config="voxlink.mixins.json"

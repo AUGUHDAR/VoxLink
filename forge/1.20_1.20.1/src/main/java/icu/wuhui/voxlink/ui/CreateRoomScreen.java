@@ -18,6 +18,7 @@ import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -28,7 +29,6 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerConnectionListener;
 import net.minecraft.world.level.GameType;
-import net.minecraft.client.gui.GuiGraphics;
 
 public class CreateRoomScreen extends VoxLinkScreenBase {
    private final Screen parent;
@@ -55,6 +55,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
    /** 表单顶部 Y（init 计算一次，render/分类重建共用，避免多处算式漂移）。 */
 
    private int formTopY = 4;
+   private int gTitle1Y, gTitle2Y, gTitle3Y;
 
    private Button parallelP2PButton;
 
@@ -130,7 +131,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          );
       } else {
          int centerX = this.width / 2;
-         int formHeight = 264;
+         int formHeight = 318;
 
          // 表单顶：小屏夹到 4；标题仅在上方留有 16px 空隙时才绘制（render 同步判断）
 
@@ -168,7 +169,17 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.customCategoryField.setVisible(this.showCustomInput);
          this.customCategoryField.setEditable(this.showCustomInput);
          this.addRenderableWidget(this.customCategoryField);
-         int advY = catY + 42;
+         // 分组: [房间] 大厅显示|离线模式 / [权限] 模式|房主OP+访客OP / [模组同步] 上报必装
+         // 组标题占独立 12px 行, 按钮行随之让位(修标题压按钮)
+         int g1 = catY + 42;
+         int g2 = g1 + 12 + 20 + 6;
+         int g3 = g2 + 12 + 20 + 6 + 20 + 6;
+         this.gTitle1Y = g1;
+         this.gTitle2Y = g2;
+         this.gTitle3Y = g3;
+         int advY = g1 + 12;
+         int advY2 = g2 + 12;
+         int advY3 = advY2 + 24;
          this.visibleButton = Button.builder(this.buildVisibleLabel(), button -> {
             this.visible = !this.visible;
             this.visibleButton.setMessage(this.buildVisibleLabel());
@@ -188,7 +199,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                default -> "survival";
             };
             this.gameTypeButton.setMessage(this.buildGameTypeLabel());
-         }).bounds(centerX - 100, advY + 24, 98, 20).build();
+         }).bounds(centerX - 100, advY2, 98, 20).build();
          this.addRenderableWidget(this.gameTypeButton);
          this.hostOpButton = Button.builder(this.buildHostOpLabel(), button -> {
             this.hostOp = !this.hostOp;
@@ -199,12 +210,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             }
 
             this.guestOpButton.active = this.hostOp;
-         }).bounds(centerX + 2, advY + 24, 98, 20).build();
+         }).bounds(centerX + 2, advY2, 98, 20).build();
          this.addRenderableWidget(this.hostOpButton);
          this.guestOpButton = Button.builder(this.buildGuestOpLabel(), button -> {
             this.guestOp = !this.guestOp;
             this.guestOpButton.setMessage(this.buildGuestOpLabel());
-         }).bounds(centerX - 100, advY + 48, 98, 20).build();
+         }).bounds(centerX - 100, advY3, 98, 20).build();
          this.guestOpButton.active = this.hostOp;
          this.addRenderableWidget(this.guestOpButton);
          if (TerracottaManager.isBinaryReady()) {
@@ -224,7 +235,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                         );
                      }
                   )
-                  .bounds(centerX + 2, advY + 48, 98, 20)
+                  .bounds(centerX + 2, advY3, 98, 20)
             .build();
             this.addRenderableWidget(this.parallelP2PButton);
          } else {
@@ -236,9 +247,9 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             VoxLinkMod.getConfig().setHostModSyncPublish(v);
             VoxLinkMod.getConfig().save();
             this.publishModsButton.setMessage(this.buildPublishModsLabel());
-         }).bounds(centerX - 100, advY + 72, 200, 20).build();
+         }).bounds(centerX - 100, g3 + 12, 200, 20).build();
          this.addRenderableWidget(this.publishModsButton);
-         int actionRowY = Math.min(advY + 96, this.height - 26);
+         int actionRowY = Math.min(g3 + 12 + 26, this.height - 26);
          this.createButton = Button.builder(Component.translatable("voxlink.create_room"), button -> this.createRoom())
             .bounds(centerX - 100, actionRowY, 98, 20)
             .build();
@@ -277,6 +288,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             }
          }
       }
+   }
+
+   @Override
+   public boolean showFormGroups() {
+      // 成功页(createdRoom != null)不画组标题
+      return this.createdRoom == null;
    }
 
    private void buildCategoryButtons(int centerX, int startY) {
@@ -513,7 +530,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
       Minecraft mc = Minecraft.getInstance();
       if (mc.getSingleplayerServer() == null) {
          if (mc.player != null) {
-            mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(VoxLinkColors.ERROR_RGB)));
+            mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.open_world_first").withStyle(style -> style.withColor(16733525)));
          }
       } else {
          String name = this.nameField.getValue().trim();
@@ -675,7 +692,6 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          mc.player.sendSystemMessage(Component.translatable("voxlink.chat.room_created").withStyle(Style.EMPTY.withBold(true)));
          mc.player
             .sendSystemMessage(
-
                Component.translatable("voxlink.chat.room_code_label")
                   .append(
                      Component.literal(
@@ -687,8 +703,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                         )
                         .withStyle(ChatCompat.styleWithCopy(code, Component.translatable("voxlink.chat.click_to_copy")))
                   )
-
-);
+            );
          mc.player.sendSystemMessage(Component.translatable("voxlink.chat.friends_install_hint"));
          mc.player.sendSystemMessage(Component.translatable("voxlink.create_room.recommend_voxlink"));
          String hostIp = roomInfo.getHostIp();
@@ -702,7 +717,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                String addr = (hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort;
                addrLine.append(
                   Component.translatable("voxlink.chat.ipv4_label")
-                     .withStyle(ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB))
+                     .withStyle(ChatCompat.styleWithCopy(addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925))
                );
             }
 
@@ -714,7 +729,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                String ipv6Addr = "[" + hostIpv6 + "]:" + hostPort;
                addrLine.append(
                   Component.translatable("voxlink.chat.ipv6_label")
-                     .withStyle(ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(VoxLinkColors.SUCCESS_RGB))
+                     .withStyle(ChatCompat.styleWithCopy(ipv6Addr, Component.translatable("voxlink.chat.copy_for_non_voxlink")).withColor(5635925))
                );
             }
 
@@ -853,8 +868,15 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
       }
    }
 
+   @Override
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       super.render(graphics, mouseX, mouseY, partialTick);
+      // 选项分组标题(几何来自 init, 独立行不压按钮)
+      if (this.showFormGroups()) {
+         this.drawString(graphics, Component.translatable("voxlink.config.group.room").getString(), this.width / 2 - 100, this.gTitle1Y, VoxLinkColors.INFO);
+         this.drawString(graphics, Component.translatable("voxlink.config.group.perm").getString(), this.width / 2 - 100, this.gTitle2Y, VoxLinkColors.INFO);
+         this.drawString(graphics, Component.translatable("voxlink.config.group.modsync").getString(), this.width / 2 - 100, this.gTitle3Y, VoxLinkColors.INFO);
+      }
       int centerX = this.width / 2;
       if (this.createdRoom != null) {
          this.successClickAreas.clear();
@@ -862,7 +884,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
          this.successClickLabels.clear();
          Font font = Minecraft.getInstance().font;
          int y = Math.max(20, this.height / 2 - 40);
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.success").getString(), centerX, y, VoxLinkColors.SUCCESS);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.success").getString(), centerX, y, -11141291);
          y += 18;
          String code = this.createdRoom.getCode();
          Component codeLine = Component.translatable("voxlink.chat.room_code_label")
@@ -873,13 +895,13 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                   .append("]")
                   .withStyle(new ChatFormatting[]{ChatFormatting.GREEN, ChatFormatting.BOLD})
             );
-         this.drawCenteredComponent(graphics, codeLine, centerX, y, VoxLinkColors.WHITE);
+         this.drawCenteredComponent(graphics, codeLine, centerX, y, -1);
          int codeW = this.fontWidth(codeLine);
          this.successClickAreas.add(new int[]{centerX - codeW / 2, y, codeW, 9});
          this.successClickTexts.add(code);
          this.successClickLabels.add(Component.translatable("voxlink.chat.room_code_label").getString());
          y += 12;
-         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.recommend_voxlink").getString(), centerX, y, VoxLinkColors.INFO);
+         this.drawCenteredClipped(graphics, Component.translatable("voxlink.create_room.recommend_voxlink").getString(), centerX, y, -5592321);
          y += 14;
          String tc = this.createdRoom.getTerracottaCode();
          if (tc != null && !tc.isEmpty()) {
@@ -890,7 +912,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
                      .append("]")
                      .withStyle(new ChatFormatting[]{ChatFormatting.AQUA, ChatFormatting.BOLD})
                );
-            this.drawCenteredComponent(graphics, tcLine, centerX, y, VoxLinkColors.WHITE);
+            this.drawCenteredComponent(graphics, tcLine, centerX, y, -1);
             int tcW = this.fontWidth(tcLine);
             this.successClickAreas.add(new int[]{centerX - tcW / 2, y, tcW, 9});
             this.successClickTexts.add(tc);
@@ -913,10 +935,10 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             int spaceW = hasV4 && hasV6 ? font.width(" ") : 0;
             int totalW = labelW + v4W + spaceW + v6W;
             int startX = centerX - totalW / 2;
-            this.drawString(graphics, addrLabel, startX, y, VoxLinkColors.WHITE);
+            this.drawString(graphics, addrLabel, startX, y, -1);
             int curX = startX + labelW;
             if (hasV4) {
-               this.drawString(graphics, ChatFormatting.GREEN.toString() + v4Label + ChatFormatting.RESET.toString(), curX, y, VoxLinkColors.SUCCESS);
+               this.drawString(graphics, ChatFormatting.GREEN.toString() + v4Label + ChatFormatting.RESET.toString(), curX, y, -11141291);
                this.successClickAreas.add(new int[]{curX, y, v4W, 9});
                this.successClickTexts.add((hostIp.contains(":") ? "[" + hostIp + "]" : hostIp) + ":" + hostPort);
                this.successClickLabels.add(v4Label);
@@ -924,12 +946,12 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
             }
 
             if (hasV4 && hasV6) {
-               this.drawString(graphics, " ", curX, y, VoxLinkColors.WHITE);
+               this.drawString(graphics, " ", curX, y, -1);
                curX += spaceW;
             }
 
             if (hasV6) {
-               this.drawString(graphics, ChatFormatting.GREEN.toString() + v6Label + ChatFormatting.RESET.toString(), curX, y, VoxLinkColors.SUCCESS);
+               this.drawString(graphics, ChatFormatting.GREEN.toString() + v6Label + ChatFormatting.RESET.toString(), curX, y, -11141291);
                this.successClickAreas.add(new int[]{curX, y, v6W, 9});
                this.successClickTexts.add("[" + hostIpv6 + "]:" + hostPort);
                this.successClickLabels.add(v6Label);
@@ -942,7 +964,7 @@ public class CreateRoomScreen extends VoxLinkScreenBase {
 
          if (this.formTopY >= 20) {
 
-            this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, VoxLinkColors.WHITE);
+            this.drawCenteredClipped(graphics, this.title.getString(), centerX, 8, -1);
 
          }
       }
