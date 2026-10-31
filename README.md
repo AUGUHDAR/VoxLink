@@ -28,7 +28,7 @@ Starting from **1.0.4**, VoxLink works with **Terracotta** — an external P2P n
 
 Terracotta is developed by [burningtnt](https://github.com/burningtnt/Terracotta) under AGPL-3.0 — huge thanks! The binary is downloaded from its official releases and SHA-256 verified. Note: due to technical limits (sandboxing), Terracotta can't run on Android devices for now — we may look into ways around it later (and due to the VM limitation, it can't read the launcher's own Terracotta either).
 
-> Out of Beta as of 1.2.1. Sometimes connects in seconds, sometimes just... doesn't. Connection success depends heavily on both sides' network: same ISP home broadband usually works fine, campus WiFi, office network, phone hotspot not so much. Both sides on symmetric NAT? Lower success rate. If it fails, both restart the game to refresh NAT ports. We're improving the punch strategies every update. You can also enable Terracotta in the mod to boost success rate.
+> Usually connects within seconds — connection time and success rate depend on both sides' network: same ISP home broadband almost always works, campus WiFi, office network, phone hotspot may fluctuate. If direct connection struggles, the mod automatically falls back to peer relay or TURN relay. First connection a bit flaky? Both restart the game to refresh NAT ports. We're improving the punch strategies every update, with multiple fallbacks to keep most setups connected.
 
 
 ## Fallback & Relay
@@ -59,7 +59,7 @@ You can set your room to public when creating it, shows up in the lobby. Lobby *
 
 ## Compatibility
 
-Works with Simple Voice Chat (good to go!), ViaFabric (and the whole ViaVersion family), and Floodgate. It also works with the Chinese mod **古人穿越**.
+Works with Simple Voice Chat (good to go!), ViaFabric (and the whole ViaVersion family). It also works with the Chinese mod **古人穿越**.
 
 Now supports **Forge, NeoForge, and Fabric 1.20+** — every version from 1.20 up, with more to come. The mod itself is multilingual — pick yours: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French, German, Spanish, Russian, Portuguese (Brasil), Arabic, and Classical Chinese (Wenyanwen).
 
@@ -122,7 +122,7 @@ Website: `https://link.voxdev.top/`
 
 陶瓦由 [burningtnt](https://github.com/burningtnt/Terracotta) 开发，遵循 AGPL-3.0 协议，特此致谢！其二进制仅从官方 release 下载并做 SHA-256 校验。注意：陶瓦因为技术限制（沙箱），目前暂时无法在安卓设备上运行，后续可能会寻找一些方法（因为虚拟机限制，也无法直接读取启动器的陶瓦）。
 
-> 1.2.1 起已结束 Beta。有时几秒就能连上，有时就是连不上。连接成功率与双方网络环境密切相关：同运营商家用宽带通常没问题，校园网、企业网、手机热点成功率较低。双方都是对称 NAT？成功率会更低。连接失败时建议双方重启游戏刷新 NAT 端口。我们每个版本都在优化打洞策略。你也可以在模组内启用陶瓦来提升成功率。
+> 通常数秒内即可建立直连，连接耗时与成功率受双方网络环境影响：同运营商家用宽带成功率极高，校园网、企业网、手机热点可能存在波动。直连遇到困难时，模组会自动尝试互助中继或 TURN 中继兜底。首次连接若遇波动，建议双方重启游戏刷新 NAT 端口。我们每个版本都在优化打洞策略，配合多重机制保障绝大多数环境下的连通率。
 
 ## 后备与中继
 
@@ -152,7 +152,7 @@ Website: `https://link.voxdev.top/`
 
 ## 兼容性
 
-兼容 Simple Voice Chat（直接可用！）、ViaFabric（及 ViaVersion 全家桶）、Floodgate，也兼容了古人穿越。
+兼容 Simple Voice Chat（直接可用！）、ViaFabric（及 ViaVersion 全家桶），也兼容了古人穿越。
 
 现已支持 **Forge、NeoForge 和 Fabric 1.20+** — 1.20 以上所有版本，后续会兼容更多版本。模组本身是多语言的，选你的语言：English、简体中文、繁體中文、日本語、한국어、Français、Deutsch、Español、Русский、Português (Brasil)、العربية、文言文。
 
