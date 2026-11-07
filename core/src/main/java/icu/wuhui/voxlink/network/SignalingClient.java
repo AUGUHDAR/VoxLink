@@ -405,6 +405,13 @@ public class SignalingClient {
    public CompletableFuture<SignalingClient.ApiResponse> registerRelayPeer(
       String clientId, String roomCode, String natType, String mappedIp, int mappedPort, boolean relayEnabled
    ) {
+      return this.registerRelayPeer(clientId, roomCode, natType, mappedIp, mappedPort, relayEnabled, "");
+   }
+
+   /** v3 全局候选池：caps=能力标记（如 relayMuxV1），服务端按此过滤全局候选；空=不上报。 */
+   public CompletableFuture<SignalingClient.ApiResponse> registerRelayPeer(
+      String clientId, String roomCode, String natType, String mappedIp, int mappedPort, boolean relayEnabled, String caps
+   ) {
       JsonObject body = new JsonObject();
       body.addProperty("clientId", clientId);
       body.addProperty("roomCode", roomCode);
@@ -412,6 +419,9 @@ public class SignalingClient {
       body.addProperty("mappedIp", mappedIp);
       body.addProperty("mappedPort", mappedPort);
       body.addProperty("relayEnabled", relayEnabled);
+      if (caps != null && !caps.isEmpty()) {
+         body.addProperty("caps", caps);
+      }
       body.addProperty("action", "relay_register");
       return this.post(this.buildPath("relay_register"), body);
    }
@@ -430,9 +440,10 @@ public class SignalingClient {
       return this.getOnce(this.buildGetPath("relay_status", null), 3000L);
    }
 
-   /** TURN 总控：可用节点列表（服务端已按在线+余量过滤、负载升序、硬上限截断）。 */
+   /** TURN 总控：可用节点列表（服务端已按在线+余量过滤；full=1 请求全量由客户端自测延迟选优）。 */
    public CompletableFuture<SignalingClient.ApiResponse> getRelayList() {
-      return this.getOnce(this.buildGetPath("relay_list", null), 3000L);
+      // full=1：>relay_list_max 时不截断；旧服务端不识别该参数，行为不变（向后兼容）
+      return this.getOnce(this.buildGetPath("relay_list", "full=1"), 3000L);
    }
 
    /** TURN 总控：申请中继分配（房间 token 鉴权，返回 sessionId+双角色票据）。 */

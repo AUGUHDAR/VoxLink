@@ -168,6 +168,8 @@ tasks.named('jar', Jar).configure {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = Integer.parseInt(project.release_bytecode)
+    //压包体:去LVT,行号保留
+    options.debugOptions.debugLevel = "lines,source"
 }
 
 /*

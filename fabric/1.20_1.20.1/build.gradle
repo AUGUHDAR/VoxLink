@@ -95,6 +95,8 @@ tasks.withType(ProcessResources).configureEach {
 tasks.withType(JavaCompile).configureEach {
     it.options.encoding = "UTF-8"
     it.options.release = Integer.parseInt(project.release_bytecode)
+    //压包体:去LVT,行号保留
+    it.options.debugOptions.debugLevel = "lines,source"
 }
 
 java {

@@ -10,6 +10,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -209,6 +210,8 @@ public class TurnRelayClient {
             info.port = n.has("port") ? n.get("port").getAsInt() : 37000;
             // 标准 TURN（RFC 5766）端口：节点启用双栈时由 WS 上报透出，>0 表示可用
             info.stdTurnPort = n.has("stdTurnPort") ? n.get("stdTurnPort").getAsInt() : 0;
+            info.sessions = n.has("sessions") ? n.get("sessions").getAsInt() : 0;
+            info.maxSessions = n.has("maxSessions") ? n.get("maxSessions").getAsInt() : 0;
             if (!info.id.isEmpty() && !info.host.isEmpty() && info.port > 0) {
                nodes.add(info);
             }
@@ -294,6 +297,9 @@ public class TurnRelayClient {
       public String host;
       public int port;
       public int stdTurnPort;
+      /** 节点当前/上限会话数（服务端负载，选优评分用；旧服务端无此字段为 0）。 */
+      public int sessions;
+      public int maxSessions;
    }
 
    public static class ProbeResult {
@@ -310,15 +316,61 @@ public class TurnRelayClient {
     * 并行探测全部节点：每节点 3 次 PING 取最小 RTT；不通的节点 rtt=-1。
     * 返回按 RTT 升序的可达节点（不可达的排在最后，rtt=-1）。
     */
+   /** 上次选中的节点（粘性优惠用）：换连接不换节点，避免两个近邻节点间反复横跳。 */
+   private static volatile String lastGoodNodeId;
+
+   /** 由调度侧在节点被选中后回写（RelayOrchestrator）。 */
+   public static void rememberGoodNode(String nodeId) {
+      lastGoodNodeId = nodeId;
+   }
+
+   /**
+    * 探测评分 = rtt × (1 + 负载比) × (粘性优惠 0.8)。
+    * 纯 RTT 选优在大 fleet 下会把所有人涌向最近节点（雷群效应），
+    * 负载项让满载节点自然劣后；粘性优惠防近邻节点间抖动。超时(MAX_VALUE)仍垫底可选
+    * （"探测全超时也照常 bind"的弱网容忍语义不变）。
+    */
+   private static double probeScore(ProbeResult p) {
+      if (p.rttMs < 0) {
+         return Double.MAX_VALUE;
+      }
+      double load = p.node.maxSessions > 0 ? (double) p.node.sessions / (double) p.node.maxSessions : 0.0;
+      double score = p.rttMs * (1.0 + load);
+      if (p.node.id != null && p.node.id.equals(lastGoodNodeId)) {
+         score *= 0.8;
+      }
+      return score;
+   }
+
+   /** 探测节点上限：全量列表只探"负载最低的前 K + 粘性节点"，防大 fleet 探测拖慢建链。 */
+   private static final int PROBE_MAX_NODES = 8;
+
+   /** 负载序（选探测候选用；无负载数据的旧节点按 0 处理）。 */
+   private static double loadRank(NodeInfo n) {
+      return n.maxSessions > 0 ? (double) n.sessions / (double) n.maxSessions : 0.0;
+   }
+
    public static CompletableFuture<List<ProbeResult>> probeNodes(List<NodeInfo> nodes) {
-      ExecutorService pool = Executors.newFixedThreadPool(Math.min(10, Math.max(2, nodes.size())), r -> {
+      List<NodeInfo> candidates = nodes;
+      if (nodes.size() > PROBE_MAX_NODES) {
+         List<NodeInfo> sorted = new ArrayList<>(nodes);
+         sorted.sort((a, b) -> Double.compare(loadRank(a), loadRank(b)));
+         LinkedHashSet<NodeInfo> keep = new LinkedHashSet<>(sorted.subList(0, PROBE_MAX_NODES));
+         for (NodeInfo n : nodes) {
+            if (n.id != null && n.id.equals(lastGoodNodeId)) {
+               keep.add(n);
+            }
+         }
+         candidates = new ArrayList<>(keep);
+      }
+      ExecutorService pool = Executors.newFixedThreadPool(Math.min(10, Math.max(2, candidates.size())), r -> {
          Thread t = new Thread(r, "VoxLink-TurnProbe");
          t.setDaemon(true);
          return t;
       });
       List<CompletableFuture<ProbeResult>> futures = new ArrayList<>();
 
-      for (NodeInfo node : nodes) {
+      for (NodeInfo node : candidates) {
          futures.add(CompletableFuture.supplyAsync(() -> probeOne(node), pool));
       }
 
@@ -333,11 +385,7 @@ public class TurnRelayClient {
             }
          }
 
-         results.sort((a, b) -> {
-            int ra = a.rttMs < 0 ? Integer.MAX_VALUE : a.rttMs;
-            int rb = b.rttMs < 0 ? Integer.MAX_VALUE : b.rttMs;
-            return Integer.compare(ra, rb);
-         });
+         results.sort((a, b) -> Double.compare(probeScore(a), probeScore(b)));
          all.complete(results);
          pool.shutdown();
       });

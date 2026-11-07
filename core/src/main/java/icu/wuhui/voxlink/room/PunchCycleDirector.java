@@ -77,6 +77,10 @@ public final class PunchCycleDirector {
 
    ) {
 
+      if (!cm.connectionWon.get()) {
+         cm.connectionCycleActive.set(true);
+      }
+
       cm.savedConnectionState = state;
 
       cm.savedConnectionFrom = from != null ? from : "";
@@ -979,9 +983,10 @@ public final class PunchCycleDirector {
 
             );
 
+         final int punchGen = cm.punchGeneration.get();
          cm.scheduler.schedule(() -> {
 
-            if (cm.roomManager.currentRoom.get() == state && state != RoomManager.PENDING) {
+            if (state != RoomManager.PENDING && cm.isPunchGenerationCurrent(state, punchGen)) {
 
                cm.runConnectionCycle(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle + 1);
 
@@ -2006,6 +2011,9 @@ public final class PunchCycleDirector {
    }
    static CompletableFuture<Void> startVoxLinkP2PAttempt(ConnectionManager cm, String roomCode, String password, int attempt, int gen) {
       long t0 = System.currentTimeMillis();
+      if (attempt == 1) {
+         icu.wuhui.voxlink.ui.UiLogBus.push(0, "voxlink.connection.joining");
+      }
       return cm.roomManager.joinRoom(roomCode, password).handle((r, e) -> {
          if (e == null) {
             VoxLinkMod.LOGGER.info("[joinRoom] attempt {}/{} OK in {}ms", new Object[]{attempt, ConnectionManager.JOIN_TRANSIENT_MAX_ATTEMPTS, System.currentTimeMillis() - t0});

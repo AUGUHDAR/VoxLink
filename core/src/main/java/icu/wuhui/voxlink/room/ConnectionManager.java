@@ -153,6 +153,8 @@ public class ConnectionManager {
    static final int JOIN_TRANSIENT_MAX_ATTEMPTS = 3;
    static final long[] JOIN_RETRY_BACKOFF_MS = new long[]{1500L, 3000L};
    final java.util.concurrent.atomic.AtomicInteger joinAttemptGeneration = new java.util.concurrent.atomic.AtomicInteger();
+   final AtomicInteger punchGeneration = new AtomicInteger();
+   final AtomicInteger relayGlobalEpoch = new AtomicInteger();
 
    final ExecutorService punchExecutor;
 
@@ -578,6 +580,13 @@ PunchProfile punchProfile() {
 
       this.connectionCycleActive.set(value);
 
+   }
+
+   boolean isPunchGenerationCurrent(RoomManager.RoomState state, int generation) {
+      return this.roomManager.currentRoom.get() == state
+         && this.connectionCycleActive.get()
+         && this.punchGeneration.get() == generation
+         && !this.connectionWon.get();
    }
 
 
@@ -1515,6 +1524,12 @@ public void tryUdpPunch(
 
       } else {
 
+         final int punchGen = this.punchGeneration.get();
+         if (!this.isPunchGenerationCurrent(state, punchGen)) {
+            VoxLinkMod.LOGGER.info("[Connection] Skip stale UDP punch (cycle={}, attempt={}, generation={})", cycle + 1, attempt, punchGen);
+            return;
+         }
+
          state.roomInfo.setConnectionMode(Text.translatable("voxlink.connection.connecting"));
 
          VoxLinkMod.LOGGER.info("[Connection] UDP punch cycle{}/{}, attempt{}/{}", new Object[]{displayCycle, maxCycles, attempt, 3});
@@ -1647,6 +1662,14 @@ public void tryUdpPunch(
 
          );
 
+         if (!this.isPunchGenerationCurrent(state, punchGen)) {
+            puncher.close();
+            this.activeHolePunchers.remove("joiner", puncher);
+            this.activeHolePunchers.remove("joiner_reuse", puncher);
+            VoxLinkMod.LOGGER.info("[Connection] Discard stale STUN result (generation={})", punchGen);
+            return;
+         }
+
          StunProbe.PublicMappedAddress myMapped1 = quadResult[0] != null ? quadResult[0] : (quadResult[2] != null ? quadResult[2] : quadResult[3]);
 
          StunProbe.PublicMappedAddress myMapped2 = quadResult[1] != null ? quadResult[1] : (quadResult[3] != null ? quadResult[3] : quadResult[2]);
@@ -1758,7 +1781,8 @@ public void tryUdpPunch(
 
                this.signalingClient
 
-                  .registerRelayPeer(relayPeerId(state), state.roomInfo.getCode(), myNatType, myMappedAddr.ip(), myMappedAddr.port(), relayOk);
+                  .registerRelayPeer(relayPeerId(state), state.roomInfo.getCode(), myNatType, myMappedAddr.ip(), myMappedAddr.port(), relayOk,
+                     ProtocolNegotiator.selfSupports(ProtocolNegotiator.CAP_RELAY_MUX_V1) ? ProtocolNegotiator.CAP_RELAY_MUX_V1 : "");
 
                this.scheduleRelayRegistrationRenewal(state, myNatType, myMappedAddr.ip(), myMappedAddr.port());
 
@@ -2369,9 +2393,7 @@ public void tryUdpPunch(
 
                                                    () -> {
 
-                                                      if (this.roomManager.currentRoom.get() == state
-
-                                                         && this.connectionCycleActive.get()
+                                                      if (this.isPunchGenerationCurrent(state, punchGen)
 
                                                          && this.activeHolePunchers.get("joiner") == finalPuncher) {
 
@@ -2585,9 +2607,7 @@ public void tryUdpPunch(
 
                                                 () -> {
 
-                                                   if (this.roomManager.currentRoom.get() == state
-
-                                                      && this.connectionCycleActive.get()
+                                                   if (this.isPunchGenerationCurrent(state, punchGen)
 
                                                       && this.activeHolePunchers.get("joiner") == finalPuncher) {
 
@@ -2797,7 +2817,7 @@ public void tryUdpPunch(
 
                                                 () -> {
 
-                                                   if (this.roomManager.currentRoom.get() == state && this.connectionCycleActive.get()) {
+                                                   if (this.isPunchGenerationCurrent(state, punchGen)) {
 
                                                       this.tryUdpPunch(
 
@@ -3047,7 +3067,7 @@ public void tryUdpPunch(
 
                                                 () -> {
 
-                                                   if (this.roomManager.currentRoom.get() == state && this.connectionCycleActive.get()) {
+                                                   if (this.isPunchGenerationCurrent(state, punchGen)) {
 
                                                       this.tryUdpPunch(
 
@@ -3168,6 +3188,11 @@ public void tryUdpPunch(
             VoxLinkMod.LOGGER.warn("[Connection] STUN binding failed, no mapped address (attempt{})", attempt);
 
             puncher.close();
+            this.activeHolePunchers.remove("joiner", puncher);
+            this.activeHolePunchers.remove("joiner_reuse", puncher);
+            if (!this.isPunchGenerationCurrent(state, punchGen)) {
+               return;
+            }
 
             if (attempt < this.punchProfile().punchMaxAttempts) {
 
@@ -3177,7 +3202,7 @@ public void tryUdpPunch(
 
                this.scheduler.schedule(() -> {
 
-                  if (this.roomManager.currentRoom.get() == state && this.connectionCycleActive.get()) {
+                  if (this.isPunchGenerationCurrent(state, punchGen)) {
 
                      this.tryUdpPunch(state, from, hostIpv6, hostIp, hostPort, hostMappedIp, hostMappedPort, cycle, displayCycle, maxCycles, attempt + 1);
 
@@ -3526,6 +3551,7 @@ public void startFallbackMonitor(ConnectionFallback fallback, RoomManager.RoomSt
 
 
       int round = this.continuousRetryRound.incrementAndGet();
+      this.connectionCycleActive.set(true);
 
       this.escalateProfileForRound(round);
 
@@ -3592,7 +3618,9 @@ public void startFallbackMonitor(ConnectionFallback fallback, RoomManager.RoomSt
 
          if (!this.connectionWon.get()) {
 
-            if (reasonKey != null && reasonKey.contains("relay")) {
+            boolean relayFail = reasonKey != null && reasonKey.contains("relay");
+
+            if (relayFail) {
 
                if (state != null && state.roomInfo != null) {
 
@@ -3603,17 +3631,23 @@ public void startFallbackMonitor(ConnectionFallback fallback, RoomManager.RoomSt
 
 
                               icu.wuhui.voxlink.ui.UiLogBus.push(3, reasonKey);
-               ClientThread.runOnClientThread(() -> {
-
-                  ChatSink.chat(Text.translatable("voxlink.chat.error_prefix").append(Text.translatable(reasonKey)));
-
-               });
-
             }
 
+            // 双发防护: 回到持续重试才发聊天版失败文案; 落终局时只由终局屏发一次
 
+            if (this.enterContinuousRetryRound(state)) {
 
-            if (!this.enterContinuousRetryRound(state)) {
+               if (relayFail) {
+
+                  ClientThread.runOnClientThread(() -> {
+
+                     ChatSink.chat(Text.translatable("voxlink.chat.error_prefix").append(Text.translatable(reasonKey)));
+
+                  });
+
+               }
+
+            } else {
 
                this.showConnectFailedFinal(state, reasonKey);
 
@@ -3629,6 +3663,10 @@ public void startFallbackMonitor(ConnectionFallback fallback, RoomManager.RoomSt
 
 void tryRelay(RoomManager.RoomState state) {
       RelayOrchestrator.tryRelay(this, state);
+   }
+
+void tryRelay(RoomManager.RoomState state, String requesterClientId) {
+      RelayOrchestrator.tryRelay(this, state, requesterClientId);
    }
 
 
@@ -3926,6 +3964,8 @@ public void cleanupTurnQuietly() {
    static final long RELAY_DOWNLINK_FRESH_MS = 6000L;
    volatile boolean autoRelayTurnAttempted;
    volatile boolean autoRelayTurnUnhealthy;
+   /** TURN 判死时间戳：判死只冷却 60s，到期允许自动中继再试 TURN。 */
+   volatile long autoRelayTurnUnhealthyAtMs;
    volatile boolean autoRelayPlayerAttempted;
    /** 自动尝试进行中：中继失败路径走换道/回打洞而非失败屏。 */
    volatile boolean autoRelayMode;

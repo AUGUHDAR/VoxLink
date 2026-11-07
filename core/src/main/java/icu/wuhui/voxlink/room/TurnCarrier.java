@@ -373,11 +373,13 @@ public final class TurnCarrier {
       if (!noReady || cm.turnSwitchedToP2p || cm.roomManager.currentRoom.get() != state) {
          return;
       }
-      long waited = round == 0 ? 20L : 25L + (round - 1) * 20L;
+      // 基线 30s：host 侧 fetchCred+allocate(8s)+channelBind(8s) 最长 ~24s 再加信令时延，
+      // 20/25s 判死会把仍在建链的 host 误杀（弱网边界竞态）
+      long waited = round == 0 ? 20L : 30L + (round - 1) * 20L;
       if (round == 0) {
-         VoxLinkMod.LOGGER.warn("[Turn] no turn_ready in 20s, force catch-up poll, recheck in 5s");
+         VoxLinkMod.LOGGER.warn("[Turn] no turn_ready in 20s, force catch-up poll, recheck in 10s");
          cm.roomManager.catchUpSignalOnce();
-         cm.scheduler.schedule(() -> turnReadyWatchdog(cm, state, 1), 5L, TimeUnit.SECONDS);
+         cm.scheduler.schedule(() -> turnReadyWatchdog(cm, state, 1), 10L, TimeUnit.SECONDS);
          return;
       }
       boolean signalUnhealthy = !cm.signalingClient.isWsConnected()
@@ -478,6 +480,7 @@ public final class TurnCarrier {
    static void attemptBgPlayerRelay(ConnectionManager cm, RoomManager.RoomState state) {
       JsonObject data = new JsonObject();
       data.addProperty("clientId", state.roomInfo.getClientId());
+      data.addProperty("standby", true);
       cm.signalingClient
          .sendSignal(state.roomInfo.getCode(), state.roomInfo.getToken(), false, "relay_request", data, "host")
          .exceptionally(e -> null);

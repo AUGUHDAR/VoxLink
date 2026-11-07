@@ -2,6 +2,7 @@ package icu.wuhui.voxlink.ui;
 
 import icu.wuhui.voxlink.VoxLinkMod;
 import java.lang.reflect.Constructor;
+import java.net.URI;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -27,6 +28,14 @@ public final class ChatCompat {
       }
    }
 
+   public static ClickEvent click(String action, String value) {
+      try {
+         return ModernApi.click(action, value);
+      } catch (Throwable t) {
+         return LegacyApi.click(action, value);
+      }
+   }
+
    public static Style styleWithCopy(String copyValue, Component hoverText) {
       Style style = Style.EMPTY;
       ClickEvent click = copyToClipboard(copyValue);
@@ -49,6 +58,17 @@ public final class ChatCompat {
 
       static ClickEvent copy(String value) {
          return new ClickEvent.CopyToClipboard(value);
+      }
+
+      static ClickEvent click(String action, String value) {
+         ClickEvent.Action a = ClickEvent.Action.valueOf(action);
+         return switch (a) {
+            case OPEN_URL -> new ClickEvent.OpenUrl(URI.create(value));
+            case RUN_COMMAND -> new ClickEvent.RunCommand(value);
+            case SUGGEST_COMMAND -> new ClickEvent.SuggestCommand(value);
+            case COPY_TO_CLIPBOARD -> new ClickEvent.CopyToClipboard(value);
+            default -> null;
+         };
       }
 
       static HoverEvent showText(Component text) {
@@ -87,6 +107,19 @@ public final class ChatCompat {
             }
          } catch (Throwable t) {
             VoxLinkMod.LOGGER.debug("ChatCompat legacy hover failed", t);
+         }
+
+         return null;
+      }
+
+      static ClickEvent click(String action, String value) {
+         try {
+            init();
+            if (clickCtor != null) {
+               return (ClickEvent)clickCtor.newInstance(ClickEvent.Action.valueOf(action), value);
+            }
+         } catch (Throwable t) {
+            VoxLinkMod.LOGGER.debug("ChatCompat legacy click failed", t);
          }
 
          return null;

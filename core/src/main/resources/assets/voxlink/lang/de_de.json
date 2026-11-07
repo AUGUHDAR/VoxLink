@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "Auto-Spieler-Relay",
     "voxlink.logui.auto_relay_dead": "Relay-Pfad tot, Wechsel läuft",
     "voxlink.logui.auto_relay_swapped": "Relay-Pfad gewechselt",
-    "voxlink.logui.auto_relay_exhausted": "Relays nicht verfügbar, weiter"
+    "voxlink.logui.auto_relay_exhausted": "Relays nicht verfügbar, weiter",
+    "voxlink.ticket.notice_later": "Später",
+    "voxlink.ticket.notice_view": "Ansehen",
+    "voxlink.ticket.notice_title": "Ein Admin hat geantwortet",
+    "voxlink.ticket.notice_count": "%s Ticket(s) haben neue Antworten"
 }

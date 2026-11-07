@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "プレイヤー中継を自動試行",
     "voxlink.logui.auto_relay_dead": "中継経路無応答、自動切替",
     "voxlink.logui.auto_relay_swapped": "中継経路を切替済み",
-    "voxlink.logui.auto_relay_exhausted": "中継利用不可、打ち抜き継続"
+    "voxlink.logui.auto_relay_exhausted": "中継利用不可、打ち抜き継続",
+    "voxlink.ticket.notice_later": "あとで",
+    "voxlink.ticket.notice_view": "確認",
+    "voxlink.ticket.notice_title": "管理者があなたのメッセージに返信しました",
+    "voxlink.ticket.notice_count": "%s 件のチケットに新着返信があります"
 }

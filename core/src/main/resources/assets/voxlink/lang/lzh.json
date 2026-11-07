@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "自動試玩家中繼",
     "voxlink.logui.auto_relay_dead": "中繼無應，自動易道",
     "voxlink.logui.auto_relay_swapped": "已易中繼道",
-    "voxlink.logui.auto_relay_exhausted": "中繼皆不可用，續打洞"
+    "voxlink.logui.auto_relay_exhausted": "中繼皆不可用，續打洞",
+    "voxlink.ticket.notice_later": "稍後",
+    "voxlink.ticket.notice_view": "觀之",
+    "voxlink.ticket.notice_title": "吏復汝書",
+    "voxlink.ticket.notice_count": "%s 單有新復"
 }

@@ -3,8 +3,8 @@ package icu.wuhui.voxlink.compat;
 import icu.wuhui.voxlink.VoxLinkConstants;
 import icu.wuhui.voxlink.platform.Platform;
 import icu.wuhui.voxlink.platform.Text;
+import icu.wuhui.voxlink.ui.ChatCompat;
 import java.io.File;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,7 +15,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 
@@ -300,20 +299,14 @@ public final class PlatformImpl {
             }
         }
         if (s.hoverText() != null) {
-            st = st.withHoverEvent(new HoverEvent.ShowText(toComponent(s.hoverText())));
+            st = st.withHoverEvent(ChatCompat.showText(toComponent(s.hoverText())));
         }
         return c.withStyle(st);
     }
 
+    // 旧版本 NCDFE 风险,统一走 ChatCompat 反射兜底
     private static ClickEvent toClickEvent(String action, String value) {
-        ClickEvent.Action a = ClickEvent.Action.valueOf(action);
-        return switch (a) {
-            case OPEN_URL -> new ClickEvent.OpenUrl(URI.create(value));
-            case RUN_COMMAND -> new ClickEvent.RunCommand(value);
-            case SUGGEST_COMMAND -> new ClickEvent.SuggestCommand(value);
-            case COPY_TO_CLIPBOARD -> new ClickEvent.CopyToClipboard(value);
-            default -> null;
-        };
+        return ChatCompat.click(action, value);
     }
 
     private static ChatFormatting formatOf(Text.ChatFormat cf) {

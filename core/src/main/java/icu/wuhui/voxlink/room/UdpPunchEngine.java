@@ -86,6 +86,7 @@ public final class UdpPunchEngine {
 
    static void clearActiveHolePunchers(ConnectionManager cm) {
 
+      cm.punchGeneration.incrementAndGet();
       for (String key : new ArrayList<>(cm.activeHolePunchers.keySet())) {
 
          UdpHolePuncher p = cm.activeHolePunchers.remove(key);
@@ -133,6 +134,7 @@ public final class UdpPunchEngine {
    }
    static void stopAllPunchingAfterHostBridge(ConnectionManager cm) {
 
+      cm.punchGeneration.incrementAndGet();
       cm.continuousRetryCancelled.set(true);
 
       cm.connectionCycleActive.set(false);
@@ -197,6 +199,7 @@ public final class UdpPunchEngine {
    }
    static void stopAllPunchingForRelay(ConnectionManager cm) {
 
+      cm.punchGeneration.incrementAndGet();
       cm.connectionCycleActive.set(false);
 
       if (cm.connectionTimeoutFuture != null) {
@@ -376,7 +379,8 @@ public final class UdpPunchEngine {
 
                .registerRelayPeer(
 
-                  cm.relayPeerId(state), state.roomInfo.getCode(), cm.stunProbeResult.natType.key, hostMappedIp, hostMappedPort, relayOk
+                  cm.relayPeerId(state), state.roomInfo.getCode(), cm.stunProbeResult.natType.key, hostMappedIp, hostMappedPort, relayOk,
+                  ProtocolNegotiator.selfSupports(ProtocolNegotiator.CAP_RELAY_MUX_V1) ? ProtocolNegotiator.CAP_RELAY_MUX_V1 : ""
 
                );
 

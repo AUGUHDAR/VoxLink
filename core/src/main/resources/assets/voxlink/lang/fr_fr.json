@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "Relais joueur auto",
     "voxlink.logui.auto_relay_dead": "Relais sans réponse, bascule",
     "voxlink.logui.auto_relay_swapped": "Relais basculé",
-    "voxlink.logui.auto_relay_exhausted": "Relais indisponibles, poursuite"
+    "voxlink.logui.auto_relay_exhausted": "Relais indisponibles, poursuite",
+    "voxlink.ticket.notice_later": "Plus tard",
+    "voxlink.ticket.notice_view": "Voir",
+    "voxlink.ticket.notice_title": "Un admin a répondu à votre message",
+    "voxlink.ticket.notice_count": "%s ticket(s) ont de nouvelles réponses"
 }

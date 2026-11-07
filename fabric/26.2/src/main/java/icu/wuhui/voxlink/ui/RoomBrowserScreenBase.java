@@ -47,6 +47,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    private static final int CAT_Y = 32;
    private static final int MIN_CAT_BTN_W = 38;
    private static final int BTN_H = 18;
+   /** 网格与面板边框的左右留白。 */
+   private static final int GRID_INSET = 14;
    private static final int SCROLL_SPEED = 20;
    private static final int LIST_BOTTOM_MARGIN = 52;
    private static final int CARD_TEXT_X = 6;
@@ -88,6 +90,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
    protected EditBox searchField;
    protected Button joinBtn;
    protected int selectedIdx = -1;
+   private long lastCardClickMs;
+   private int lastCardClickIdx = -1;
    protected String statusMsg = "";
    protected int statusColor = VoxLinkColors.MUTED;
    /** 被"有密码"过滤掉的房间数：仅在 >0 时在状态栏显示提示玩家走"输入房间号"加入。 */
@@ -198,36 +202,24 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          this.addRenderableWidget(this.loaderFilterBtn);
       }
       this.rebuildCategoryButtons();
-      // 底栏自适应: 右组四钮 56~96 夹紧均分, 余量给"通过代码加入", 标签全部按容器裁剪
-      int rightW = Math.max(56, Math.min(96, (w - pad * 2 - 70 - 4 * 6) / 4));
-      int rightGroupW = rightW * 4 + 3 * 6;
-      int joinMaxW = w - pad - rightGroupW - 6 - pad;
-      int joinW = Math.max(70, Math.min(Math.max(150, w / 6), joinMaxW));
-      // "通过代码加入"常驻可点(不需要先选中房间), 选中卡片只影响列表高亮
-      this.joinBtn = Button.builder(Component.translatable("voxlink.join_by_code"), b -> Minecraft.getInstance().gui.setScreen(new JoinRoomScreen(this)))
-         .bounds(pad, this.height - 28, joinW, 20)
-         .build();
-      this.clipBtnLabel(this.joinBtn, joinW);
+      // 底栏自适应: 六钮等宽, 左二靠左右四靠右, 中间留双倍间隙, 任意分辨率不重叠
+      int barGap = 6;
+      int barAvail = w - pad * 2;
+      int barW = Math.max(15, Math.min(96, (barAvail - 6 * barGap) / 6));
+      int rightX = w - pad - (barW * 4 + barGap * 3);
+      // 加入房间需先选中, 未选中置灰
+      this.joinBtn = new ScaledButton(pad, this.height - 28, barW, 20, Component.translatable("voxlink.join_room"), b -> this.joinSelected());
+      this.joinBtn.active = this.selectedIdx >= 0;
       this.addRenderableWidget(this.joinBtn);
-      Button linksBtn = Button.builder(Component.translatable("voxlink.website"), b -> Minecraft.getInstance().gui.setScreen(new RelatedLinksScreen(this)))
-         .bounds(w - pad - rightGroupW, this.height - 28, rightW, 20)
-         .build();
-      this.clipBtnLabel(linksBtn, rightW);
+      Button joinCodeBtn = new ScaledButton(pad + barW + barGap, this.height - 28, barW, 20, Component.translatable("voxlink.join_by_code"), b -> Minecraft.getInstance().gui.setScreen(new JoinRoomScreen(this)));
+      this.addRenderableWidget(joinCodeBtn);
+      Button linksBtn = new ScaledButton(rightX, this.height - 28, barW, 20, Component.translatable("voxlink.website"), b -> Minecraft.getInstance().gui.setScreen(new RelatedLinksScreen(this)));
       this.addRenderableWidget(linksBtn);
-      Button feedbackBtn = Button.builder(Component.translatable("voxlink.feedback"), b -> Minecraft.getInstance().gui.setScreen(new FeedbackScreen(this)))
-         .bounds(w - pad - rightGroupW + rightW + 6, this.height - 28, rightW, 20)
-         .build();
-      this.clipBtnLabel(feedbackBtn, rightW);
+      Button feedbackBtn = new ScaledButton(rightX + (barW + barGap), this.height - 28, barW, 20, Component.translatable("voxlink.feedback"), b -> Minecraft.getInstance().gui.setScreen(new FeedbackScreen(this)));
       this.addRenderableWidget(feedbackBtn);
-      Button configBtn = Button.builder(Component.translatable("voxlink.terracotta.config"), b -> Minecraft.getInstance().gui.setScreen(new TerracottaConfigScreen(this)))
-         .bounds(w - pad - rightGroupW + (rightW + 6) * 2, this.height - 28, rightW, 20)
-         .build();
-      this.clipBtnLabel(configBtn, rightW);
+      Button configBtn = new ScaledButton(rightX + (barW + barGap) * 2, this.height - 28, barW, 20, Component.translatable("voxlink.terracotta.config"), b -> Minecraft.getInstance().gui.setScreen(new TerracottaConfigScreen(this)));
       this.addRenderableWidget(configBtn);
-      Button backBtn = Button.builder(Component.translatable("voxlink.back"), b -> this.onClose())
-         .bounds(w - pad - rightW, this.height - 28, rightW, 20)
-         .build();
-      this.clipBtnLabel(backBtn, rightW);
+      Button backBtn = new ScaledButton(rightX + (barW + barGap) * 3, this.height - 28, barW, 20, Component.translatable("voxlink.back"), b -> this.onClose());
       this.addRenderableWidget(backBtn);
       this.pageInput = new EditBox(Minecraft.getInstance().font, -100, -100, 32, 14, Component.literal(""));
       this.pageInput.setMaxLength(4);
@@ -507,7 +499,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                               r.has("natType") ? r.get("natType").getAsString() : "unknown",
                               r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
                               r.has("gameVersion") ? r.get("gameVersion").getAsString() : "",
-                              r.has("source") ? r.get("source").getAsString() : ""));
+                              r.has("source") ? r.get("source").getAsString() : "",
+                              r.has("modVersion") ? r.get("modVersion").getAsString() : ""));
                         }
                      }
                   }
@@ -614,7 +607,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                                                       r.has("natType") ? r.get("natType").getAsString() : "unknown",
                                                       r.has("protocolVersion") ? r.get("protocolVersion").getAsInt() : 0,
                                                       r.has("gameVersion") ? r.get("gameVersion").getAsString() : "",
-                                                      r.has("source") ? r.get("source").getAsString() : ""
+                                                      r.has("source") ? r.get("source").getAsString() : "",
+                                                      r.has("modVersion") ? r.get("modVersion").getAsString() : ""
                                                    )
                                                 );
                                              existingCodes.add(code);
@@ -671,6 +665,9 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
       this.hiddenPasswordCount = hiddenByPassword > 0L ? (int)hiddenByPassword : 0;
       this.scrollOffset = 0;
       this.selectedIdx = -1;
+      if (this.joinBtn != null) {
+         this.joinBtn.active = false;
+      }
    }
 
    protected Comparator<RoomBrowserScreenBase.RoomEntry> getComparator(int myProtocol) {
@@ -730,9 +727,17 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          int row = i / cols;
          int x = gridX + col * (cardW + gap);
          int y = gridY + row * (cardH + gap) - this.scrollOffset;
-         if (y >= gridY - cardH && y + cardH <= this.height - 52 && mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH) {
+         int hitBottom = this.height - (this.statusMsg.isEmpty() ? 52 : 68);
+         if (y + cardH > gridY - 4 && y < hitBottom && mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH) {
             this.selectedIdx = i;
             this.joinBtn.active = true;
+            long clickMs = System.currentTimeMillis();
+            if (this.lastCardClickIdx == i && clickMs - this.lastCardClickMs < 250L) {
+               this.joinSelected();
+               return true;
+            }
+            this.lastCardClickIdx = i;
+            this.lastCardClickMs = clickMs;
             return true;
          }
       }
@@ -758,7 +763,10 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
       int totalRows = (this.displayedRooms.size() + cols - 1) / cols;
       int cardH = this.getCardHeight();
       int gap = this.getGap();
-      int maxScroll = Math.max(0, totalRows * (cardH + gap) - (this.height - 36 - this.getGridY()));
+      int viewBottom = this.height - (this.statusMsg.isEmpty() ? 52 : 68);
+      int viewH = viewBottom - this.getGridY();
+      int contentH = totalRows * cardH + Math.max(0, totalRows - 1) * gap;
+      int maxScroll = Math.max(0, contentH - viewH);
       int newOffset = Math.max(0, Math.min(maxScroll, this.scrollOffset - (int)scrollY * 20));
       this.scrollOffset = newOffset;
       if (newOffset >= maxScroll - 50 && this.allRooms.size() < this.totalRooms) {
@@ -778,7 +786,10 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
       int gap = this.getGap();
       int gridX = this.getGridStartX(cols, cardW, gap);
       int gridY = this.getGridY();
-      int bottom = this.height - 52;
+      // 底部让出状态条+分页条, 二者都不与卡片相交
+      int bottom = this.height - (this.statusMsg.isEmpty() ? 52 : 68);
+      // 网格区裁剪: 滚动时卡片平滑滑入滑出, 且内缩边框留白
+      graphics.enableScissor(10, gridY - 4, this.width - 10, bottom + 4);
       // 第二层: 主体面板(半透明暗底+描边), 网格卡片浮于其上
       graphics.fill(10, gridY - 4, this.width - 10, bottom + 4, PANEL_FILL);
       graphics.outline(10, gridY - 4, this.width - 20, bottom - gridY + 8, PANEL_BORDER);
@@ -790,7 +801,7 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
          int y = gridY + row * (cardH + gap) - this.scrollOffset;
          // 卡片必须整体落在网格与分页条/按钮区（height-52）之间，任何滚动位置都不越界压控件
 
-         if (y >= gridY - cardH && y + cardH <= bottom) {
+         if (y + cardH > gridY - 4 && y < bottom + 4) {
             RoomBrowserScreenBase.RoomEntry r = this.displayedRooms.get(i);
             boolean sel = i == this.selectedIdx;
             boolean hover = mouseX >= x && mouseX < x + cardW && mouseY >= y && mouseY < y + cardH;
@@ -803,9 +814,33 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
 
             int textX = x + 6;
             int textY = y + 5;
-            this.drawString(graphics, this.truncate(roomName, cardW / 6), textX, textY, VoxLinkColors.WHITE);
+            // 分类徽章先算宽, 房名可用宽到徽章左侧
+            String catLabel = this.getCategoryLabel(r.category);
+            int catW = this.fontWidth(catLabel) + 4;
+            int nameMax = cardW - catW - 14;
+            this.drawRoomName(graphics, roomName, textX, textY, nameMax, VoxLinkColors.WHITE);
             this.drawString(graphics, ChatFormatting.GRAY.toString() + r.code, textX, textY + 11, VoxLinkColors.MUTED);
             this.drawString(graphics, ChatFormatting.WHITE.toString() + r.players + "/" + r.maxPlayers, textX, textY + 22, VoxLinkColors.TEXT_LIGHT);
+            String loaderKey = r.loader != null && !r.loader.isEmpty() ? r.loader : "unknown";
+            String loaderLabel = Component.translatable("voxlink.loader." + loaderKey).getString();
+            int loaderW = this.fontWidth(loaderLabel) + 4;
+            // 版本行: V:VoxLink短版本 G:MC版本
+            if (cardH >= 48) {
+               String shortMod = r.modVersion == null ? "" : r.modVersion;
+               int dash = shortMod.indexOf('-');
+               if (dash > 0) {
+                  shortMod = shortMod.substring(0, dash);
+               }
+
+               String verLine = shortMod.isEmpty() ? "" : "V:" + shortMod;
+               if (r.gameVersion != null && !r.gameVersion.isEmpty()) {
+                  verLine = verLine.isEmpty() ? "G:" + r.gameVersion : verLine + " G:" + r.gameVersion;
+               }
+
+               if (!verLine.isEmpty()) {
+                  this.drawVersionLine(graphics, verLine, textX, textY + 33, cardW - loaderW - 14, VoxLinkColors.MUTED);
+               }
+            }
             // 互通：Happy Link 来源房标签（玩家行右侧徽章）
             if ("happylink".equals(r.source)) {
                String fedTag = Component.translatable("voxlink.browser.source_happylink").getString();
@@ -813,13 +848,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
                graphics.fill(x + cardW - fedW - 3, y + 24, x + cardW - 3, y + 34, COLOR_CAT_BADGE_BG);
                this.drawString(graphics, ChatFormatting.GOLD.toString() + fedTag, x + cardW - fedW - 1, y + 25, VoxLinkColors.CAT_BADGE_TEXT);
             }
-            String catLabel = this.getCategoryLabel(r.category);
-            int catW = this.fontWidth(catLabel) + 4;
             graphics.fill(x + cardW - catW - 3, y + 3, x + cardW - 3, y + 13, COLOR_CAT_BADGE_BG);
             this.drawString(graphics, ChatFormatting.GRAY.toString() + catLabel, x + cardW - catW - 1, y + 4, VoxLinkColors.CAT_BADGE_TEXT);
-            String loaderKey = r.loader != null && !r.loader.isEmpty() ? r.loader : "unknown";
-            String loaderLabel = Component.translatable("voxlink.loader." + loaderKey).getString();
-            int loaderW = this.fontWidth(loaderLabel) + 4;
             // 小卡片（cardH<48）跳过 loader 角标以免溢出
             if (cardH >= 48) {
                graphics.fill(x + cardW - loaderW - 3, y + 35, x + cardW - 3, y + 45, COLOR_CAT_BADGE_BG);
@@ -827,6 +857,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             }
          }
       }
+
+      graphics.disableScissor();
 
       if (this.displayedRooms.isEmpty() && !this.catPopupOpen) {
          this.drawCenteredString(graphics, Component.translatable("voxlink.browser.no_rooms").getString(), this.width / 2, gridY + 30, VoxLinkColors.GRAY);
@@ -844,7 +876,9 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
             clippedStatus = clippedStatus + "...";
          }
 
-         this.drawCenteredString(graphics, clippedStatus, this.width / 2, this.getGridY() + 60, this.statusColor);
+         // 有房时状态条画在网格下沿细带(分页条上方), 无房时居中于空白区, 两种都不压卡片
+         int statusY = this.displayedRooms.isEmpty() ? this.getGridY() + 60 : this.height - 60;
+         this.drawCenteredString(graphics, clippedStatus, this.width / 2, statusY, this.statusColor);
       }
 
       // 当过滤后排除了密码房（且显示列表为空或只显示非密码房时），给玩家一条提示：可通过"输入房间号"加入
@@ -862,7 +896,6 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
 
          this.drawCenteredString(graphics, hiddenHint, this.width / 2, this.getGridY() + 74, VoxLinkColors.INFO);
       }
-
 
       this.renderPagination(graphics, mouseX, mouseY);
 
@@ -987,10 +1020,10 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
       return Math.max(2, Math.min(5, this.width / 160));
    }
 
-   protected int getCardWidth(int cols) {
+   protected int getCardWidth(int cols) {{
       int gap = this.getGap();
-      return (this.width - gap * (cols + 1)) / cols;
-   }
+      return (this.width - GRID_INSET * 2 - gap * (cols - 1)) / cols;
+   }}
 
    protected int getCardHeight() {
       // 小高度屏幕：卡片缩为 36 以让出底部空间给分页/状态/提示/按钮
@@ -1026,6 +1059,65 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
       }
 
       return "..";
+   }
+
+   protected void drawRoomName(GuiGraphicsExtractor graphics, String name, int x, int y, int maxW, int color) {
+      if (name == null || name.isEmpty() || maxW <= 0) {
+         return;
+      }
+
+      int w = this.fontWidth(name);
+      if (w <= maxW) {
+         this.drawString(graphics, name, x, y, color);
+         return;
+      }
+
+      if (w * 3 <= maxW * 4) {
+         graphics.pose().pushMatrix();
+         graphics.pose().translate((float) x, (float) y);
+         graphics.pose().scale(0.75f, 0.75f);
+         this.drawString(graphics, name, 0, 0, color);
+         graphics.pose().popMatrix();
+         return;
+      }
+
+      this.drawScrollingText(graphics, name, x, y, maxW, color);
+   }
+
+   protected void drawVersionLine(GuiGraphicsExtractor graphics, String text, int x, int y, int maxW, int color) {
+      if (text == null || text.isEmpty() || maxW <= 0) {
+         return;
+      }
+
+      int w = this.fontWidth(text);
+      if (w <= maxW) {
+         this.drawString(graphics, text, x, y, color);
+         return;
+      }
+
+      if (w * 3 <= maxW * 4) {
+         graphics.pose().pushMatrix();
+         graphics.pose().translate((float) x, (float) y);
+         graphics.pose().scale(0.75f, 0.75f);
+         this.drawString(graphics, text, 0, 0, color);
+         graphics.pose().popMatrix();
+         return;
+      }
+
+      this.drawScrollingText(graphics, text, x, y, maxW, color);
+   }
+
+   protected void drawScrollingText(GuiGraphicsExtractor graphics, String text, int x, int y, int maxW, int color) {
+      float totalF = this.fontWidth(text) + 24.0f;
+      long periodMs = (long) (totalF / 0.04f);
+      float offF = (System.currentTimeMillis() % periodMs) * 0.04f;
+      graphics.enableScissor(x - 1, y - 2, x + maxW + 1, y + 11);
+      graphics.pose().pushMatrix();
+      graphics.pose().translate(-offF, 0.0f);
+      this.drawString(graphics, text, x, y, color);
+      this.drawString(graphics, text, x + (int) totalF, y, color);
+      graphics.pose().popMatrix();
+      graphics.disableScissor();
    }
 
    public boolean mouseClicked(MouseButtonEvent event, boolean processed) {
@@ -1098,7 +1190,8 @@ public class RoomBrowserScreenBase extends VoxLinkScreenBase {
       String natType,
       int protocolVersion,
       String gameVersion,
-      String source
+      String source,
+      String modVersion
    ) {
    }
 

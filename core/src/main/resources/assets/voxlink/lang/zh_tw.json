@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "自動嘗試玩家中繼",
     "voxlink.logui.auto_relay_dead": "中繼通道無回應，自動換道",
     "voxlink.logui.auto_relay_swapped": "已自動切換中繼通道",
-    "voxlink.logui.auto_relay_exhausted": "中繼均不可用，繼續打洞"
+    "voxlink.logui.auto_relay_exhausted": "中繼均不可用，繼續打洞",
+    "voxlink.ticket.notice_later": "稍後",
+    "voxlink.ticket.notice_view": "查看",
+    "voxlink.ticket.notice_title": "管理員回覆了你的訊息，是否查看",
+    "voxlink.ticket.notice_count": "有 %s 個工單收到新回覆"
 }

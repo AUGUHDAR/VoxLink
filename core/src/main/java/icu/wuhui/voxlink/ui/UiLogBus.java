@@ -30,10 +30,13 @@ public final class UiLogBus {
    public static void push(int level, String key, Object... args) {
       String msg;
       try {
-         // 经 TextRenderer 渲染; 未注入时回退裸 key, 与旧 mc==null 分支等价
+         // 必须取纯文本: 宿主 Component 的 toString() 会吐 translationKey=... 调试串
          Object rendered = icu.wuhui.voxlink.platform.TextBridge.renderOrNull(
             icu.wuhui.voxlink.platform.Text.translatable(key, args));
-         msg = rendered != null ? rendered.toString() : key;
+         msg = plainOf(rendered);
+         if (msg == null || msg.isEmpty()) {
+            msg = key;
+         }
       } catch (Throwable t) {
          msg = key;
       }
@@ -51,6 +54,27 @@ public final class UiLogBus {
          }
          version++;
       }
+   }
+
+   /** 取宿主 Component 的纯文本; 反射调用兼容各版本(getString/getContents/toPlainString)。 */
+   private static String plainOf(Object component) {
+      if (component == null) {
+         return null;
+      }
+      if (component instanceof CharSequence) {
+         return component.toString();
+      }
+      for (String m : new String[]{"getString", "getContents", "toPlainString"}) {
+         try {
+            Object v = component.getClass().getMethod(m).invoke(component);
+            if (v instanceof String) {
+               return (String)v;
+            }
+         } catch (Throwable ignored) {
+            // 继续尝试下一个方法名
+         }
+      }
+      return null;
    }
 
    /** 进入界面时调用：不清空内容——界面重建(按钮显隐/分辨率变化)会反复走这里,

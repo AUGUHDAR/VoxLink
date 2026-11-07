@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "ترحيل تلقائي عبر اللاعبين",
     "voxlink.logui.auto_relay_dead": "مسار الترحيل بلا استجابة، جارٍ التبديل",
     "voxlink.logui.auto_relay_swapped": "تم تبديل مسار الترحيل",
-    "voxlink.logui.auto_relay_exhausted": "لا توجد ترحيلات، جارٍ المتابعة"
+    "voxlink.logui.auto_relay_exhausted": "لا توجد ترحيلات، جارٍ المتابعة",
+    "voxlink.ticket.notice_later": "لاحقًا",
+    "voxlink.ticket.notice_view": "عرض",
+    "voxlink.ticket.notice_title": "رد المشرف على رسالتك",
+    "voxlink.ticket.notice_count": "%s تذكرة لديها ردود جديدة"
 }

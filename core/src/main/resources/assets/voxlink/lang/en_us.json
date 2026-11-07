@@ -478,5 +478,9 @@
     "voxlink.logui.auto_player_relay": "Auto player relay",
     "voxlink.logui.auto_relay_dead": "Relay path dead, switching",
     "voxlink.logui.auto_relay_swapped": "Relay path switched",
-    "voxlink.logui.auto_relay_exhausted": "Relays unavailable, keep punching"
+    "voxlink.logui.auto_relay_exhausted": "Relays unavailable, keep punching",
+    "voxlink.ticket.notice_later": "Later",
+    "voxlink.ticket.notice_view": "View",
+    "voxlink.ticket.notice_title": "An admin replied to your message",
+    "voxlink.ticket.notice_count": "%s ticket(s) have new replies"
 }

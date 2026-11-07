@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "Relay de jogador automático",
     "voxlink.logui.auto_relay_dead": "Relé sem resposta, trocando",
     "voxlink.logui.auto_relay_swapped": "Relé trocado",
-    "voxlink.logui.auto_relay_exhausted": "Reles indisponíveis, continuando"
+    "voxlink.logui.auto_relay_exhausted": "Reles indisponíveis, continuando",
+    "voxlink.ticket.notice_later": "Depois",
+    "voxlink.ticket.notice_view": "Ver",
+    "voxlink.ticket.notice_title": "Um administrador respondeu à sua mensagem",
+    "voxlink.ticket.notice_count": "%s ticket(s) têm novas respostas"
 }

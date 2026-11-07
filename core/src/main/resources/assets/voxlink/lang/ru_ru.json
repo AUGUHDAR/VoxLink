@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "Авто-ретрансляция через игрока",
     "voxlink.logui.auto_relay_dead": "Ретрансляция не отвечает, переключение",
     "voxlink.logui.auto_relay_swapped": "Ретрансляция переключена",
-    "voxlink.logui.auto_relay_exhausted": "Ретрансляции недоступны, продолжаем"
+    "voxlink.logui.auto_relay_exhausted": "Ретрансляции недоступны, продолжаем",
+    "voxlink.ticket.notice_later": "Позже",
+    "voxlink.ticket.notice_view": "Открыть",
+    "voxlink.ticket.notice_title": "Администратор ответил на ваше сообщение",
+    "voxlink.ticket.notice_count": "%s тикет(ов) с новыми ответами"
 }

@@ -470,5 +470,9 @@
     "voxlink.logui.auto_player_relay": "플레이어 릴레이 자동 시도",
     "voxlink.logui.auto_relay_dead": "릴레이 경로 응답 없음, 자동 전환",
     "voxlink.logui.auto_relay_swapped": "릴레이 경로 전환됨",
-    "voxlink.logui.auto_relay_exhausted": "릴레이 사용 불가, 펀칭 계속"
+    "voxlink.logui.auto_relay_exhausted": "릴레이 사용 불가, 펀칭 계속",
+    "voxlink.ticket.notice_later": "나중에",
+    "voxlink.ticket.notice_view": "확인",
+    "voxlink.ticket.notice_title": "관리자가 메시지에 답장했습니다",
+    "voxlink.ticket.notice_count": "%s개 티켓에 새 답장이 있습니다"
 }
